@@ -5339,8 +5339,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
 		const tabRefs = useRef({});
-		const wheelTargetRef = useRef(null);
-		const wheelRafRef = useRef(null);
 		const [gridMaskClass, setGridMaskClass] = useState("");
 		const [sortSnapshotState, setSortSnapshotState] = useState(() => ({
 			sourceId: activeSourceId,
@@ -5520,49 +5518,37 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, []);
 
-		const onTabsWheel = useCallback((e) => {
+		// Native wheel listener for smooth horizontal tab scrolling with passive: false
+		useEffect(() => {
 			const el = tabsRef.current;
 			if (!el) return;
-			const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-			if (Math.abs(delta) < 0.5) return;
-			e.preventDefault();
 
-			if (hoveredPreview) setHoveredPreview(null);
-			if (currentTabAnim) {
-				cancelAnimationFrame(currentTabAnim);
-				currentTabAnim = null;
-			}
+			const handleWheel = (e) => {
+				const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+				if (Math.abs(delta) < 0.1) return;
 
-			const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
-			if (wheelTargetRef.current === null) {
-				wheelTargetRef.current = el.scrollLeft;
-			}
-			wheelTargetRef.current = Math.max(0, Math.min(maxLeft, wheelTargetRef.current + delta * 0.9));
+				const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+				if (maxLeft <= 0) return;
 
-			if (!wheelRafRef.current) {
-				const step = () => {
-					const target = wheelTargetRef.current;
-					if (target === null || !el) {
-						wheelRafRef.current = null;
-						wheelTargetRef.current = null;
-						return;
-					}
-					const current = el.scrollLeft;
-					const diff = target - current;
-					if (Math.abs(diff) < 0.5) {
-						el.scrollLeft = target;
-						wheelRafRef.current = null;
-						wheelTargetRef.current = null;
-						updateTabsMask();
-						return;
-					}
-					el.scrollLeft = current + diff * 0.32;
-					updateTabsMask();
-					wheelRafRef.current = requestAnimationFrame(step);
-				};
-				wheelRafRef.current = requestAnimationFrame(step);
-			}
-		}, [hoveredPreview, updateTabsMask]);
+				e.preventDefault();
+				e.stopPropagation();
+
+				if (hoveredPreview) setHoveredPreview(null);
+				if (currentTabAnim) {
+					cancelAnimationFrame(currentTabAnim);
+					currentTabAnim = null;
+					currentTabTarget = null;
+				}
+
+				el.scrollLeft = Math.max(0, Math.min(maxLeft, el.scrollLeft + delta));
+				updateTabsMask();
+			};
+
+			el.addEventListener("wheel", handleWheel, { passive: false });
+			return () => {
+				el.removeEventListener("wheel", handleWheel);
+			};
+		}, [hoveredPreview, updateTabsMask, state.sources]);
 
 		useEffect(() => {
 			setHoveredPreview(null);
@@ -5573,7 +5559,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 				if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
 				if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
-				if (wheelRafRef.current) cancelAnimationFrame(wheelRafRef.current);
 			};
 		}, []);
 
@@ -5582,7 +5567,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			window.addEventListener("resize", updateTabsMask);
 			return () => {
 				window.removeEventListener("resize", updateTabsMask);
-				if (wheelRafRef.current) cancelAnimationFrame(wheelRafRef.current);
 			};
 		}, [updateTabsMask, state.sources, view?.type]);
 
@@ -5604,13 +5588,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (tabRight > currentScroll + containerWidth - 28) {
 				targetScroll = tabRight - containerWidth + 26;
 			}
-			// 2. Leftward overflow: if tab is covered by left feathering mask (28px)
-			else if (tabLeft < currentScroll + 28) {
-				if (tabLeft <= 85) {
-					targetScroll = 0;
-				} else {
-					targetScroll = Math.max(0, tabLeft - 26);
-				}
+			// 2. Leftward overflow: if tab is covered by left feathering mask (26px safe distance)
+			else if (tabLeft < currentScroll + 26) {
+				targetScroll = Math.max(0, tabLeft - 26);
 			}
 
 			if (Math.abs(targetScroll - container.scrollLeft) > 1) {
@@ -6388,7 +6368,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						ref: tabsRef,
 						className: "cpm-topbar-left" + (dragState?.active ? " is-dragging-mode" : ""),
 						onScroll: updateTabsMask,
-						onWheel: onTabsWheel,
 					},
 						state.sources.map((s, idx) => {
 							const isAnthropic = idx === 0 || s.builtin || (s.id && s.id.toLowerCase() === "anthropic");

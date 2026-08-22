@@ -12,3 +12,12 @@ Thumbs.db
 # 日志文件
 *.log
 npm-debug.log*
+
+# 开发测试与调试脚本
+scratch/
+
+# CodeGraph 索引（本地开发工具）
+.codegraph/
+
+# 锁文件（让用户自行生成）
+package-lock.json
