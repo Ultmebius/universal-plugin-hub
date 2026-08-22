@@ -1,0 +1,50 @@
+{
+  "name": "universal-plugin-hub",
+  "title": "Universal Plugin Hub",
+  "displayName": "Universal Plugin Hub",
+  "description": "Universal Plugin Hub (Agent 插件市场) — 跨生态 AI 智能体与 MCP 插件市场，支持一键安装、技能扫描与子代理委派。",
+  "version": "1.0.0-preview",
+  "type": "module",
+  "main": "src/index.js",
+  "license": "MIT",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "marketplace",
+    "claude",
+    "plugins"
+  ],
+  "dependencies": {
+    "js-yaml": "^5.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "platform": "web"
+    }
+  },
+  "exports": {
+    ".": {
+      "default": "./src/index.js"
+    },
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client",
+    "cordis.patch.yml"
+  ]
+}
