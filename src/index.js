@@ -1,5 +1,5 @@
 /**
- * claude-plugin-market host entry: mounts the HTTP routes once the profile
+ * Plugin entry point: mounts the HTTP routes once the profile
  * composes the webServer service.
  */
 import { mountRoutes } from './routes.js'

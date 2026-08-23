@@ -30,9 +30,8 @@ dsh plugin add universal-plugin-hub
 ### 方式三：手动安装
 
 ```bash
-# 克隆到 DSH 插件目录
 cd ~/.dsh/plugins
-git clone https://github.com/<your-username>/universal-plugin-hub.git
+git clone https://github.com/CaesarEmperor/universal-plugin-hub.git
 cd universal-plugin-hub
 npm install
 ```
@@ -69,10 +68,6 @@ npm install
 # 语法检查
 node --check client/client.js
 node --check src/index.js
-
-# 运行测试
-node scratch/test_subagent_refactor.js
-node scratch/test_e2e_install_subagents.js
 ```
 
 ## 📄 协议

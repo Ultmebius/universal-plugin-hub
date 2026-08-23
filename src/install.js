@@ -1,11 +1,11 @@
 /**
- * Install / uninstall / toggle / update lifecycle for Claude plugins.
+ * Install / uninstall / toggle / update lifecycle for plugins.
  *
- * On install the plugin directory is copied into the market's own
+ * On install the plugin directory is copied into the hub's own
  * `installed/` tree and its `skills/` directory is registered in the
  * dsh-agent-skills scan state (`$DSH_HOME/agent-skills/state.json`), so the
  * next DSH restart (or registry re-scan) exposes the plugin's skills to
- * agents. Agents are optionally converted into DSH presets.
+ * agents.
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'

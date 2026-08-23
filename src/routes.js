@@ -99,7 +99,7 @@ async function getOrFetchIcon(url) {
     try {
       writeFileSync(filepath, buffer)
     } catch (e) {
-      console.warn('[claude-plugin-market] Failed to save icon cache to disk:', e.message)
+      console.warn('[universal-plugin-hub] Failed to save icon cache to disk:', e.message)
     }
 
     const item = { buffer, contentType }

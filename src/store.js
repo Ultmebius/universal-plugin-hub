@@ -1,10 +1,10 @@
 /**
- * Shared paths + state persistence for the Claude plugin market.
+ * Shared paths + state persistence for the plugin hub.
  *
- * Layout (all under DSH_HOME):
- *   agent-skills/claude-plugin-market/state.json          sources + install records
- *   agent-skills/claude-plugin-market/market/<sourceId>/  per-source git clone cache
- *   agent-skills/claude-plugin-market/installed/<name>/   installed plugin copies
+ * Layout (all under DSH_HOME / agent-skills):
+ *   state.json          — sources + install records
+ *   market/<sourceId>/  — per-source git clone cache
+ *   installed/<name>/   — installed plugin copies
  */
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'

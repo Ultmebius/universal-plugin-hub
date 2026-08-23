@@ -417,7 +417,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow: 0 2px 6px rgba(239, 68, 68, 0.35) !important;
 }
 
-/* High-End Floating Preview Popover (Glassmorphism & Spring Motion) */
+/* Floating Preview Popover */
 .cpm-preview-popover {
 	position: fixed;
 	z-index: 99999;
@@ -2176,7 +2176,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: #52525b;
 }
 
-/* MCP Tool Detail Popover (Unified Glassmorphism matching Preview Popover) */
+/* MCP Tool Detail Popover */
 .cpm-mcp-tool-popover {
 	position: fixed;
 	z-index: 100030;
@@ -4443,7 +4443,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, text);
 	}
 
-	// Non-linear fluid easing (Apple Quartic/Quintic soft deceleration curve)
 	let currentTabAnim = null;
 	let currentTabTarget = null;
 	function smoothScrollTabsTo(container, targetLeft, duration = 280, onUpdate) {
@@ -4477,8 +4476,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		currentTabTarget = clampTarget;
 		const startTime = performance.now();
 		const distance = clampTarget - startLeft;
-		// Apple Fluid Motion: rapid responsive launch with feather-soft deceleration curve
-		const easeOutApple = (t) => 1 - Math.pow(1 - t, 3);
+		const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
 		function step(currentTime) {
 			if (!container || (!container.parentElement && typeof document !== "undefined" && !document.body.contains(container))) {
@@ -4488,7 +4486,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 			const elapsed = currentTime - startTime;
 			const progress = Math.min(1, elapsed / duration);
-			const ease = easeOutApple(progress);
+			const ease = easeOut(progress);
 			container.scrollLeft = startLeft + distance * ease;
 			if (typeof onUpdate === "function") onUpdate();
 			if (progress < 1) {
