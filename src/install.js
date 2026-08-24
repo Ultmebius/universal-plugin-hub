@@ -7,8 +7,8 @@
  * next DSH restart (or registry re-scan) exposes the plugin's skills to
  * agents.
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync } from 'node:fs'
-import { dirname, join, basename } from 'node:path'
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
+import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
 import { spawn, execFile } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { homedir } from 'node:os'
@@ -257,6 +257,53 @@ export function unregisterConnector(pluginName, connectorName) {
 // Claude plugin marketplaces declare these in the `lspServers` field, whose
 // shape (command/args/extensionToLanguage/env) matches dsh-lsp-stdio's
 // `servers` table directly, so registration is a straight pass-through.
+
+/**
+ * Replicate @deepseek-ai/dsh-subprocess-local's `resolveExecutable` check to
+ * test whether a bare command name would be resolvable at DSH load time.
+ *
+ * Returns the resolved absolute path, or null when no PATH entry satisfies
+ * `stat.isFile()` + `X_OK` — the same probe DSH runs when wiring up a
+ * stdio LSP provider. Without this pre-flight, registering a server whose
+ * binary is missing poisons `cordis.patch.yml`: the loader resolves the
+ * package fine, then `lsp-stdio.apply()` rejects the command at load time
+ * and the entire DSH plugin tree fails to come up.
+ */
+export function resolveCommandPath(command, env = process.env) {
+  if (typeof command !== 'string') return null
+  const trimmed = command.trim()
+  if (!trimmed) return null
+  if (isAbsolute(trimmed)) {
+    try {
+      if (!statSync(trimmed).isFile()) return null
+      accessSync(trimmed, fsConstants.X_OK)
+      return trimmed
+    } catch {
+      return null
+    }
+  }
+  if (trimmed.includes('/') || (process.platform === 'win32' && trimmed.includes('\\'))) {
+    return null
+  }
+  const pathEnv = (env && (env.PATH || env.Path)) || ''
+  if (!pathEnv) return null
+  const exts = process.platform === 'win32' && !extname(trimmed)
+    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : ['']
+  for (const dir of pathEnv.split(delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const candidate = resolve(dir, trimmed + ext)
+      try {
+        if (!statSync(candidate).isFile()) continue
+        accessSync(candidate, fsConstants.X_OK)
+        return candidate
+      } catch {
+        // not a match, try next candidate
+      }
+    }
+  }
+  return null
+}
 
 export const LSP_CORE_ID = 'lsp-core'
 export const LSP_TOOL_ID = 'lsp-tool'
@@ -511,6 +558,21 @@ export function registerLspServer(pluginName, serverName, serverConfig) {
   }
   if (!resolved.extensionToLanguage || typeof resolved.extensionToLanguage !== 'object' || Object.keys(resolved.extensionToLanguage).length === 0) {
     return { ok: false, active: false, error: `LSP server ${serverName} 缺少 extensionToLanguage 映射` }
+  }
+
+  // Pre-flight: refuse to write the patch entry when the binary cannot be
+  // resolved. DSH's lsp-stdio provider calls `resolveExecutable` at load
+  // time and throws if the command is missing — that exception aborts the
+  // entire plugin tree. Returning here keeps DSH bootable and surfaces a
+  // concrete remediation hint to the caller (UI / install result).
+  if (!resolveCommandPath(resolved.command)) {
+    return {
+      ok: false,
+      active: false,
+      error: `LSP server ${serverName} 注册失败：未找到可执行文件 "${resolved.command}"。` +
+        `请先安装并确保其在 PATH 中（常见做法：npm install -g ${resolved.command}），` +
+        `然后在管理页点击「更新」重新注册。`,
+    }
   }
 
   ensureLspInfra(patch)
@@ -1235,8 +1297,13 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
   // The cordis loader resolves bare package names from the profile, so the LSP
   // trio must first be provisioned there (pnpm add @latest); only register when
   // provisioning succeeded — a patch entry for a missing package would crash DSH.
+  // A missing LSP server binary also crashes DSH; registerLspServer gates on
+  // PATH resolvability and returns an error for any that fail. We collect those
+  // errors into `lspErrors` and surface them to the UI so the user can install
+  // the binary and click "Update" to retry, instead of getting a hard crash.
   const lspServers = listLspServers(target)
   let lspPackages = { ok: true, installed: [] }
+  const lspErrors = []
   if (lspServers.length > 0) {
     if (installPackages) {
       lspPackages = await installProfilePackages(LSP_HOST_PACKAGES)
@@ -1244,7 +1311,9 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
       lspPackages = { ok: true, installed: LSP_HOST_PACKAGES, skipped: true }
     }
     if (lspPackages.ok) {
-      registerPluginLsp(pluginName)
+      for (const r of registerPluginLsp(pluginName)) {
+        if (!r.ok && r.error) lspErrors.push(r.error)
+      }
     }
   }
 
@@ -1292,6 +1361,7 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     connectors: connectors.map((c) => c.name),
     lspServers: lspServers.map((s) => s.name),
     lspPackages,
+    lspErrors: lspErrors.length > 0 ? lspErrors : undefined,
     convertErrors,
     droppedFields: [],
     restartRequired: false,
@@ -1366,6 +1436,7 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
   const skills = listSkills(target)
   const skillNames = skills.map((s) => s.command || s.name || pluginName)
   const pluginConnectors = getPluginConnectors(target)
+  const lspErrors = []
 
   if (enabled) {
     if (existsSync(skillsDir)) registerScanDir(skillsDir, skillNames)
@@ -1375,7 +1446,11 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
     const lspServers = listLspServers(target)
     if (lspServers.length > 0) {
       const pkg = installPackages ? await installProfilePackages(LSP_HOST_PACKAGES) : { ok: true }
-      if (pkg.ok) registerPluginLsp(pluginName)
+      if (pkg.ok) {
+        for (const r of registerPluginLsp(pluginName)) {
+          if (!r.ok && r.error) lspErrors.push(r.error)
+        }
+      }
     }
   } else {
     if (existsSync(skillsDir)) disableScanDir(skillsDir)
@@ -1386,7 +1461,7 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
   }
   rec.enabled = enabled
   writeState(state)
-  return { ok: true, enabled }
+  return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined }
 }
 
 /**
@@ -1479,10 +1554,15 @@ export function installedDetails() {
         connected,
       }
     }) : []
-    const lspServers = existsSync(target) ? listLspServers(target).map((s) => ({
-      ...s,
-      active: isLspActive(rec.name, s.name),
-    })) : []
+    const lspServers = existsSync(target) ? listLspServers(target).map((s) => {
+      const active = isLspActive(rec.name, s.name)
+      // For inactive servers, surface *why*: a missing command is the only
+      // reason registration fails that the UI can help the user resolve
+      // (install the binary, then hit Update). Other reasons (missing
+      // extensionToLanguage) are manifest bugs and don't need this hint.
+      const missingCommand = !active && !!s.command && !resolveCommandPath(s.command)
+      return { ...s, active, missingCommand }
+    }) : []
     const detail = existsSync(target) ? {
       skills: listSkills(target),
       agents: listAgents(target),
