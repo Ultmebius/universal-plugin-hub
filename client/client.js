@@ -2754,7 +2754,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	// ────────────────────────────── API ──────────────────────────────
 	async function api(path, options) {
-		const res = await fetch("/claude-plugin-market/api" + path, {
+		const res = await fetch("/universal-plugin-hub/api" + path, {
 			headers: { "Content-Type": "application/json" },
 			...options,
 		});
@@ -3020,7 +3020,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}
 
 		if (rawUrl) {
-			return `/claude-plugin-market/api/icon?u=${encodeURIComponent(rawUrl)}`;
+			return `/universal-plugin-hub/api/icon?u=${encodeURIComponent(rawUrl)}`;
 		}
 
 		return null;
@@ -4798,11 +4798,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			refreshState();
 		}, [refreshState]);
 
-		// Auto-refresh marketplace sources (pull latest catalog) in background on launch
-		const autoRefreshedRef = useRef(false);
+		// Auto-refresh marketplace sources (pull latest catalog) in background on launch.
+		// Keyed by the actual source-id set so a stale cached state (localStorage)
+		// cannot lock the refresh out once the real sources load from the server.
+		const autoRefreshedRef = useRef(null);
 		useEffect(() => {
-			if (!state.sources || state.sources.length === 0 || autoRefreshedRef.current) return;
-			autoRefreshedRef.current = true;
+			if (!state.sources || state.sources.length === 0) return;
+			const sourceKey = state.sources.map((s) => s.id).join(",");
+			if (autoRefreshedRef.current === sourceKey) return;
+			autoRefreshedRef.current = sourceKey;
 			let isMounted = true;
 			(async () => {
 				for (const s of state.sources) {
@@ -7161,6 +7165,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			: (Array.isArray(plugin.hooks) && plugin.hooks.length > 0
 				? plugin.hooks
 				: (pluginRecord && Array.isArray(pluginRecord.hooks) ? pluginRecord.hooks : []));
+		const lspServers = (plugin.detail && Array.isArray(plugin.detail.lspServers) && plugin.detail.lspServers.length > 0)
+			? plugin.detail.lspServers
+			: (Array.isArray(plugin.lspServers) && plugin.lspServers.length > 0
+				? plugin.lspServers
+				: (pluginRecord && Array.isArray(pluginRecord.lspServers) ? pluginRecord.lspServers : []));
 
 		const handleToggle = async () => {
 			if (toggling) return;
@@ -7272,6 +7281,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					items: connectors,
 					renderPill: (c) => {
 						const name = typeof c === "string" ? c : (c.name || "");
+						return h("span", { key: name, className: "cpm-pill" }, name);
+					},
+				}),
+
+				// LSP Servers section
+				h(ExpandableSection, {
+					title: "LSP Servers",
+					count: lspServers.length,
+					subtitle: "Language servers providing code intelligence (go-to-definition, references, hover).",
+					items: lspServers,
+					renderPill: (ls) => {
+						const name = typeof ls === "string" ? ls : (ls.name || "");
 						return h("span", { key: name, className: "cpm-pill" }, name);
 					},
 				}),

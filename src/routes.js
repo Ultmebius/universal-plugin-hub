@@ -15,10 +15,10 @@ import { readMarketplace, pluginDetail, invalidateMarketplaceCache } from './par
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
-  fetchConnectorTools, setToolDisabled,
+  fetchConnectorTools, setToolDisabled, isLspActive,
 } from './install.js'
 
-const API_PREFIX = '/claude-plugin-market/api'
+const API_PREFIX = '/universal-plugin-hub/api'
 
 function iconCacheDir() {
   const dir = join(marketRoot(), 'icons')
@@ -115,22 +115,14 @@ async function getOrFetchIcon(url) {
   }
 }
 
-const NEW_API_PREFIX = '/agent-plugin-market/api'
-
 export function mountRoutes(webServer) {
-  const r1 = webServer.register({
+  const r = webServer.register({
     kind: 'prefix',
     path: API_PREFIX,
     handler: (req, res) => handle(req, res, API_PREFIX),
   })
-  const r2 = webServer.register({
-    kind: 'prefix',
-    path: NEW_API_PREFIX,
-    handler: (req, res) => handle(req, res, NEW_API_PREFIX),
-  })
   return () => {
-    try { if (typeof r1 === 'function') r1() } catch {}
-    try { if (typeof r2 === 'function') r2() } catch {}
+    try { if (typeof r === 'function') r() } catch {}
   }
 }
 
@@ -182,6 +174,9 @@ async function handle(req, res, prefix = API_PREFIX) {
       requireSameOrigin(req)
       const body = await readJsonBody(req)
       const sourceId = safeSegment(body.sourceId || 'anthropic', 'source id')
+      // Clone first if the source has never been fetched (fresh install), so a
+      // first-launch refresh does not fail with "尚未克隆".
+      await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
       await pullSource(sourceId)
       invalidateMarketplaceCache(sourceId)
       return sendJson(res, 200, { ok: true, plugins: readMarketplace(sourceId) })
@@ -361,7 +356,7 @@ async function handle(req, res, prefix = API_PREFIX) {
       const pluginName = safeSegment(rawPlugin, 'plugin name')
       const rows = readMarketplace(sourceId)
       let row = rows.find((r) => r.name === pluginName)
-      let detail = pluginDetail(sourceId, pluginName, row ? row.source : undefined)
+      let detail = pluginDetail(sourceId, pluginName, row ? row.source : undefined, row)
       if (!detail) {
         const inst = installedDetails().find((p) => p.name === pluginName)
         if (inst) {
@@ -373,6 +368,12 @@ async function handle(req, res, prefix = API_PREFIX) {
         detail.connectors = detail.connectors.map((c) => ({
           ...c,
           connected: isConnectorActive(pluginName, c.name),
+        }))
+      }
+      if (detail && Array.isArray(detail.lspServers)) {
+        detail.lspServers = detail.lspServers.map((s) => ({
+          ...s,
+          active: isLspActive(pluginName, s.name),
         }))
       }
       return sendJson(res, 200, {
@@ -402,7 +403,7 @@ async function handle(req, res, prefix = API_PREFIX) {
       requireSameOrigin(req)
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/toggle'.length), 'plugin name')
       const body = await readJsonBody(req)
-      return sendJson(res, 200, togglePlugin(pluginName, body.enabled === true))
+      return sendJson(res, 200, await togglePlugin(pluginName, body.enabled === true))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/update')) {

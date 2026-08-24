@@ -12,6 +12,20 @@ import { sourceCacheDir } from './store.js'
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i
 
+/** In-flight git operations per cache key, so concurrent requests share one clone. */
+const GIT_LOCKS = new Map()
+
+async function withGitLock(key, fn) {
+  const prev = GIT_LOCKS.get(key) || Promise.resolve()
+  const next = prev.catch(() => {}).then(fn)
+  GIT_LOCKS.set(key, next)
+  try {
+    return await next
+  } finally {
+    if (GIT_LOCKS.get(key) === next) GIT_LOCKS.delete(key)
+  }
+}
+
 export function safeSegment(value, label) {
   if (typeof value !== 'string' || !SEGMENT_RE.test(value)) {
     throw new Error(`invalid ${label}: ${JSON.stringify(value)}`)
@@ -48,40 +62,49 @@ function runGit(args, cwd) {
   })
 }
 
-/** Clone a source repository into its cache dir (idempotent). */
+/** Clone a source repository into its cache dir (idempotent, concurrency-safe). */
 export async function ensureSourceCloned(sourceId, url) {
   safeSegment(sourceId, 'source id')
   const dir = sourceCacheDir(sourceId)
   if (existsSync(join(dir, '.git'))) return dir
 
-  // Clean incomplete cache if previous clone failed
-  if (existsSync(dir)) {
-    try {
-      rmSync(dir, { recursive: true, force: true })
-    } catch {
-      // ignore rm error
-    }
-  }
+  return withGitLock(`src:${sourceId}`, async () => {
+    // Another request may have completed the clone while we waited on the lock.
+    if (existsSync(join(dir, '.git'))) return dir
 
-  try {
-    await runGit(['clone', '--depth', '1', url, dir])
-  } catch (err) {
-    if (existsSync(dir) && !existsSync(join(dir, '.git'))) {
+    // Clean incomplete cache if previous clone failed
+    if (existsSync(dir)) {
       try {
         rmSync(dir, { recursive: true, force: true })
       } catch {
         // ignore rm error
       }
     }
-    throw err
-  }
-  return dir
+
+    try {
+      await runGit(['clone', '--depth', '1', url, dir])
+    } catch (err) {
+      if (existsSync(dir) && !existsSync(join(dir, '.git'))) {
+        try {
+          rmSync(dir, { recursive: true, force: true })
+        } catch {
+          // ignore rm error
+        }
+      }
+      throw err
+    }
+    return dir
+  })
 }
 
-/** git pull in a source cache dir. */
+/** git pull in a source cache dir (waits for any in-flight clone of the same source). */
 export async function pullSource(sourceId) {
   safeSegment(sourceId, 'source id')
   const dir = sourceCacheDir(sourceId)
+  const inFlight = GIT_LOCKS.get(`src:${sourceId}`)
+  if (inFlight) {
+    try { await inFlight } catch { /* clone failure surfaces on the pull's own git call */ }
+  }
   if (!existsSync(join(dir, '.git'))) throw new Error('插件源尚未克隆')
   await runGit(['pull', '--ff-only'], dir)
 }
@@ -117,15 +140,17 @@ export async function materializePlugin(sourceId, pluginName, source) {
       }
       const remoteKey = slugFromUrl(source.url)
       const checkout = join(sourceCacheDir('remote'), remoteKey)
-      if (!existsSync(join(checkout, '.git'))) {
-        // --depth 1 keeps clones small; `ref` (branch/tag) is honored when
-        // the marketplace pins one. Exact sha checkout needs a full clone;
-        // first version installs the pinned ref's head.
-        const args = ['clone', '--depth', '1']
-        if (source.ref) args.push('--branch', String(source.ref))
-        args.push(source.url, checkout)
-        await runGit(args)
-      }
+      await withGitLock(`remote:${remoteKey}`, async () => {
+        if (!existsSync(join(checkout, '.git'))) {
+          // --depth 1 keeps clones small; `ref` (branch/tag) is honored when
+          // the marketplace pins one. Exact sha checkout needs a full clone;
+          // first version installs the pinned ref's head.
+          const args = ['clone', '--depth', '1']
+          if (source.ref) args.push('--branch', String(source.ref))
+          args.push(source.url, checkout)
+          await runGit(args)
+        }
+      })
       const dir = source.path ? join(checkout, String(source.path)) : checkout
       if (!existsSync(dir)) throw new Error(`plugin ${pluginName}: path ${source.path} not found in remote repo`)
       return { dir }

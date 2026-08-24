@@ -8,12 +8,14 @@
  * agents.
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { spawn } from 'node:child_process'
+import { dirname, join, basename } from 'node:path'
+import { spawn, execFile } from 'node:child_process'
+import { gunzipSync } from 'node:zlib'
+import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
 import { installedDir, readState, writeState, slugify, dshHome } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, readPluginManifest, invalidateParserCaches } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, invalidateParserCaches } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 
 /** cordis.patch.yml path (prefers profiles/web/cordis.patch.yml). */
@@ -244,6 +246,339 @@ export function unregisterConnector(pluginName, connectorName) {
   const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
   writeCordisPatch(cleaned)
   return { ok: true, connected: false }
+}
+
+// ── LSP server registration (cordis.patch.yml → @deepseek-ai/dsh-lsp-stdio) ──
+//
+// DSH exposes LSP as a capability seam with three packages:
+//   @deepseek-ai/dsh-lsp         (service definition, mounted once)
+//   @deepseek-ai/dsh-lsp-stdio   (stdio provider, one instance per server)
+//   @deepseek-ai/dsh-tool-lsp    (model-facing tool, mounted once)
+// Claude plugin marketplaces declare these in the `lspServers` field, whose
+// shape (command/args/extensionToLanguage/env) matches dsh-lsp-stdio's
+// `servers` table directly, so registration is a straight pass-through.
+
+export const LSP_CORE_ID = 'lsp-core'
+export const LSP_TOOL_ID = 'lsp-tool'
+const LSP_DEF_PKG = '@deepseek-ai/dsh-lsp'
+const LSP_STDIO_PKG = '@deepseek-ai/dsh-lsp-stdio'
+const LSP_TOOL_PKG = '@deepseek-ai/dsh-tool-lsp'
+
+/** Host-side packages that LSP registration depends on (installed into the DSH installation). */
+export const LSP_HOST_PACKAGES = [LSP_DEF_PKG, LSP_STDIO_PKG, LSP_TOOL_PKG]
+
+const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
+/**
+ * Locate the running DSH installation's node_modules.
+ *
+ * A user-started `dsh web` (npx) boots the cordis loader without a
+ * `bareModuleBaseUrl`, so bare package names in cordis.patch.yml resolve from
+ * the loader's own location — the DSH installation's node_modules, which npm
+ * puts under the npx cache (`~/.npm/_npx/<hash>/node_modules` on POSIX,
+ * `%LocalAppData%\npm-cache\_npx\<hash>\node_modules` on Windows).
+ */
+export function findDshMainNodeModules() {
+  // 1) NODE_PATH (npx exec sets it to the cached install for bin scripts)
+  const np = process.env.NODE_PATH
+  if (np) {
+    for (const p of np.split(/[;:]/).filter(Boolean)) {
+      if (existsSync(join(p, '@deepseek-ai', 'dsh-app-boot'))) return p
+    }
+  }
+  // 2) npm npx cache scan (Windows then POSIX)
+  const candidates = []
+  if (process.platform === 'win32') {
+    candidates.push(join(homedir(), 'AppData', 'Local', 'npm-cache', '_npx'))
+  } else {
+    candidates.push(join(homedir(), '.npm', '_npx'))
+  }
+  for (const cacheRoot of candidates) {
+    try {
+      if (!existsSync(cacheRoot)) continue
+      for (const hash of readdirSync(cacheRoot)) {
+        const nm = join(cacheRoot, hash, 'node_modules')
+        if (existsSync(join(nm, '@deepseek-ai', 'dsh-app-boot'))) return nm
+      }
+    } catch {
+      // keep scanning
+    }
+  }
+  return null
+}
+
+function execFileP(bin, args, cwd) {
+  // Windows: npm ships as a .cmd shim, which execFile cannot spawn directly
+  // (EINVAL) — route through `cmd /c`. POSIX spawns the binary as-is.
+  const useCmd = process.platform === 'win32'
+  const realBin = useCmd ? 'cmd' : bin
+  const realArgs = useCmd ? ['/c', bin, ...args] : args
+  return new Promise((resolve, reject) => {
+    execFile(realBin, realArgs, { cwd, windowsHide: true, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        const tail = String(stderr || err.message || '').trim().split('\n').filter(Boolean).slice(-3).join(' | ')
+        reject(Object.assign(new Error(tail || `${bin} ${args[0]} 失败 (${err.message})`), { code: err.code }))
+        return
+      }
+      resolve(String(stdout))
+    })
+  })
+}
+
+function runNpm(args, cwd) {
+  // npm may exist as `npm.cmd` (native Windows install) or as a bare script
+  // (nvm / managed shims); probe the candidates when the first is missing.
+  const bins = [NPM_BIN, ...(NPM_BIN === 'npm' ? [] : ['npm'])]
+  const attempt = (i) => {
+    if (i >= bins.length) return Promise.reject(new Error(`npm 命令不可用（尝试了 ${bins.join(', ')}）`))
+    return execFileP(bins[i], args, cwd).catch((e) => {
+      if (e.code === 'ENOENT') return attempt(i + 1)
+      throw e
+    })
+  }
+  return attempt(0)
+}
+
+/** Highest published version of a package (prerelease-aware), or '' when unknown. */
+export async function latestPublishedVersion(packageName) {
+  try {
+    const out = await runNpm(['view', packageName, 'versions', '--json'], dirname(cordisPatchPath()))
+    const versions = JSON.parse(out)
+    if (!Array.isArray(versions)) return ''
+    let best = ''
+    for (const v of versions) {
+      if (typeof v !== 'string') continue
+      if (semverGt(v, best)) best = v
+    }
+    return best
+  } catch {
+    return ''
+  }
+}
+
+/** Compare two semver strings (prerelease-aware). */
+function semverGt(a, b) {
+  if (!b) return true
+  const parse = (v) => {
+    const [core, pre] = String(v).split('-')
+    const [maj, min, pat] = core.split('.').map((n) => parseInt(n, 10) || 0)
+    return { maj, min, pat, pre: pre || '' }
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  for (const k of ['maj', 'min', 'pat']) {
+    if (pa[k] !== pb[k]) return pa[k] > pb[k]
+  }
+  if (!pa.pre && !pb.pre) return false
+  if (!pa.pre) return true
+  if (!pb.pre) return false
+  return pa.pre > pb.pre
+}
+
+/**
+ * Provision host-side packages into the DSH installation's node_modules,
+ * pinned to the newest published version. Packages already present are left
+ * untouched. This mirrors what installing a forum plugin does — the plugin
+ * brings its host dependencies with it, and DSH picks them up on restart.
+ */
+export async function installProfilePackages(packageNames) {
+  const names = Array.from(new Set((packageNames || []).filter((n) => typeof n === 'string' && n.trim())))
+  if (names.length === 0) return { ok: true, installed: [] }
+
+  const main = findDshMainNodeModules()
+  if (!main) {
+    return { ok: false, error: '未找到 DSH 主包 node_modules（无法定位 npx 缓存），请确认通过 npx @deepseek-ai/dsh 启动', installed: [] }
+  }
+
+  const need = []
+  for (const name of names) {
+    if (!existsSync(join(main, name, 'package.json'))) need.push(name)
+  }
+  if (need.length === 0) return { ok: true, installed: [] }
+
+  // Install each package by downloading its tarball and extracting it into the
+  // installation's node_modules. Do NOT run `npm install` against the DSH
+  // installation root: npm's reify re-resolves the whole tree and prunes
+  // packages that are not in the manifest, which has deleted DSH runtime
+  // packages in the wild. A raw tarball extract has zero side effects.
+  const installed = []
+  for (const name of need) {
+    try {
+      const ver = await latestPublishedVersion(name)
+      if (!ver) return { ok: false, error: `无法确定 ${name} 的最新版本`, installed }
+      const tarballOut = await runNpm(['view', name, 'dist.tarball'], dirname(main))
+      const url = tarballOut.trim().split('\n').pop()?.trim()
+      if (!url) return { ok: false, error: `无法获取 ${name} 的 tarball 地址`, installed }
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`tarball 下载失败 (HTTP ${res.status})`)
+      const buffer = Buffer.from(await res.arrayBuffer())
+      const dest = join(main, name)
+      mkdirSync(dirname(dest), { recursive: true })
+      rmSync(dest, { recursive: true, force: true })
+      untarStripFirst(buffer, dest)
+      installed.push(name)
+    } catch (error) {
+      return { ok: false, error: `${name} 安装失败: ${error.message}`, installed }
+    }
+  }
+  return { ok: true, installed }
+}
+
+/** Minimal UStar tar extractor that strips the leading `package/` component. */
+function untarStripFirst(tgz, dest) {
+  const data = gunzipSync(tgz)
+  let offset = 0
+  while (offset + 512 <= data.length) {
+    const header = data.subarray(offset, offset + 512)
+    if (header.every((b) => b === 0)) break
+    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '')
+    const size = parseInt(header.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim(), 8) || 0
+    const type = header[156] || 0x30
+    const body = data.subarray(offset + 512, offset + 512 + size)
+    if ((type === 0x30 || type === 0) && name) { // regular file
+      const rel = name.split('/').slice(1).join('/')
+      if (rel) {
+        const file = join(dest, rel)
+        mkdirSync(dirname(file), { recursive: true })
+        writeFileSync(file, body)
+      }
+    }
+    offset += 512 + Math.ceil(size / 512) * 512
+  }
+}
+
+export function getLspServerId(pluginName, serverName) {
+  return `lsp-${slugify(pluginName)}-${slugify(serverName)}`
+}
+
+function getLspEntry(pluginName, serverName) {
+  const patch = readCordisPatch()
+  const id = getLspServerId(pluginName, serverName)
+  for (const block of patch) {
+    if (block && Array.isArray(block.insert)) {
+      const found = block.insert.find((item) => item && item.id === id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function hasLspEntryWithName(patch, pkgName) {
+  for (const block of patch) {
+    if (block && Array.isArray(block.insert)) {
+      if (block.insert.some((item) => item && item.name === pkgName)) return true
+    }
+  }
+  return false
+}
+
+function ensureInsertBlock(patch) {
+  let block = patch.find((item) => item && Array.isArray(item.insert))
+  if (!block) {
+    block = { insert: [] }
+    patch.push(block)
+  }
+  return block
+}
+
+/** Mount the shared LSP service definition + model tool once (idempotent). */
+function ensureLspInfra(patch) {
+  const block = ensureInsertBlock(patch)
+  if (!hasLspEntryWithName(patch, LSP_DEF_PKG)) {
+    block.insert.push({ id: LSP_CORE_ID, name: LSP_DEF_PKG })
+  }
+  if (!hasLspEntryWithName(patch, LSP_TOOL_PKG)) {
+    block.insert.push({ id: LSP_TOOL_ID, name: LSP_TOOL_PKG })
+  }
+}
+
+/** Read LSP servers declared by an installed plugin (from its manifest copy). */
+export function getPluginLspServers(pluginName) {
+  const target = installedDir(pluginName)
+  if (!existsSync(target)) return []
+  return listLspServers(target)
+}
+
+/** Register one LSP server into cordis.patch.yml (idempotent). */
+export function registerLspServer(pluginName, serverName, serverConfig) {
+  const patch = readCordisPatch()
+  const id = getLspServerId(pluginName, serverName)
+  const pluginRoot = installedDir(pluginName)
+  const resolved = substitutePluginRoot(serverConfig || {}, pluginRoot)
+
+  if (!resolved.command || typeof resolved.command !== 'string' || !resolved.command.trim()) {
+    return { ok: false, active: false, error: `LSP server ${serverName} 缺少有效的 command` }
+  }
+  if (!resolved.extensionToLanguage || typeof resolved.extensionToLanguage !== 'object' || Object.keys(resolved.extensionToLanguage).length === 0) {
+    return { ok: false, active: false, error: `LSP server ${serverName} 缺少 extensionToLanguage 映射` }
+  }
+
+  ensureLspInfra(patch)
+
+  const block = ensureInsertBlock(patch)
+  block.insert = block.insert.filter((item) => item && item.id !== id)
+
+  const serverEntry = {
+    command: resolved.command,
+    extensionToLanguage: resolved.extensionToLanguage,
+  }
+  if (Array.isArray(resolved.args) && resolved.args.length > 0) serverEntry.args = resolved.args
+  if (resolved.env && typeof resolved.env === 'object' && Object.keys(resolved.env).length > 0) serverEntry.env = resolved.env
+  if (resolved.initializationOptions != null) serverEntry.initializationOptions = resolved.initializationOptions
+  if (resolved.configuration != null) serverEntry.configuration = resolved.configuration
+
+  block.insert.push({
+    id,
+    name: LSP_STDIO_PKG,
+    config: { servers: { [serverName]: serverEntry } },
+  })
+
+  writeCordisPatch(patch)
+  return { ok: true, active: true }
+}
+
+/** Remove a plugin's LSP server entries; reclaim shared infra when unused. */
+export function unregisterPluginLsp(pluginName) {
+  const patch = readCordisPatch()
+  const prefix = `lsp-${slugify(pluginName)}-`
+  let changed = false
+  for (const block of patch) {
+    if (block && Array.isArray(block.insert)) {
+      const before = block.insert.length
+      block.insert = block.insert.filter((item) => !(item && item.id && item.id.startsWith(prefix)))
+      if (block.insert.length !== before) changed = true
+    }
+  }
+
+  if (changed) {
+    const hasAnyServer = patch.some((block) => block && Array.isArray(block.insert) && block.insert.some((item) => item && item.name === LSP_STDIO_PKG))
+    if (!hasAnyServer) {
+      for (const block of patch) {
+        if (block && Array.isArray(block.insert)) {
+          block.insert = block.insert.filter((item) => !(item && (item.id === LSP_CORE_ID || item.id === LSP_TOOL_ID)))
+        }
+      }
+    }
+  }
+
+  const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
+  writeCordisPatch(cleaned)
+  return { ok: true, active: false }
+}
+
+/** Register every LSP server of an installed plugin. */
+export function registerPluginLsp(pluginName) {
+  const servers = getPluginLspServers(pluginName)
+  const results = []
+  for (const s of servers) {
+    results.push(registerLspServer(pluginName, s.name, s))
+  }
+  return results
+}
+
+/** Active state for one LSP server of an installed plugin. */
+export function isLspActive(pluginName, serverName) {
+  return !!getLspEntry(pluginName, serverName)
 }
 
 export function toggleConnector(pluginName, connectorName, enabled) {
@@ -746,7 +1081,7 @@ function ensureSkillFrontmatter(content, skillName) {
  * Install a plugin from the marketplace into the installed tree.
  * Returns a result summary for the UI.
  */
-export async function installPlugin({ sourceId, pluginName, convertAgents = true }) {
+export async function installPlugin({ sourceId, pluginName, convertAgents = true, installPackages = true }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
@@ -761,6 +1096,24 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
   if (existsSync(target)) rmSync(target, { recursive: true, force: true })
   mkdirSync(dirname(target), { recursive: true })
   copyDir(dir, target)
+
+  // Persist marketplace-declared LSP servers into the installed copy's
+  // manifest, so installedDetails / detail views can read them back even when
+  // the plugin directory itself is only a README placeholder (official LSP
+  // plugins declare `lspServers` in marketplace.json, not in the plugin tree).
+  if (row.lspServers && typeof row.lspServers === 'object' && !Array.isArray(row.lspServers)) {
+    const manifestDir = join(target, '.claude-plugin')
+    mkdirSync(manifestDir, { recursive: true })
+    const manifestPath = join(manifestDir, 'plugin.json')
+    let installedManifest = {}
+    try {
+      if (existsSync(manifestPath)) installedManifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    } catch {
+      // ignore malformed existing manifest
+    }
+    installedManifest.lspServers = row.lspServers
+    writeFileSync(manifestPath, JSON.stringify(installedManifest, null, 2), 'utf8')
+  }
 
   // Ensure skills/ directory exists
   const skillsDir = join(target, 'skills')
@@ -878,6 +1231,23 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     }
   }
 
+  // Auto-register LSP servers declared by the plugin (local stdio servers need no auth).
+  // The cordis loader resolves bare package names from the profile, so the LSP
+  // trio must first be provisioned there (pnpm add @latest); only register when
+  // provisioning succeeded — a patch entry for a missing package would crash DSH.
+  const lspServers = listLspServers(target)
+  let lspPackages = { ok: true, installed: [] }
+  if (lspServers.length > 0) {
+    if (installPackages) {
+      lspPackages = await installProfilePackages(LSP_HOST_PACKAGES)
+    } else {
+      lspPackages = { ok: true, installed: LSP_HOST_PACKAGES, skipped: true }
+    }
+    if (lspPackages.ok) {
+      registerPluginLsp(pluginName)
+    }
+  }
+
   const record = {
     id: `${sourceId}/${pluginName}`,
     sourceId,
@@ -893,10 +1263,12 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     promptCount: prompts.length,
     connectorCount: connectors.length,
     hookCount: hooks.length,
+    lspServerCount: lspServers.length,
     version: readInstalledVersion(target) ?? row.version ?? null,
   }
-  const existing = state.plugins.findIndex((p) => p.name === pluginName && p.sourceId === sourceId)
-  if (existing >= 0) state.plugins.splice(existing, 1)
+  // Same-name replace: installed files live under a name-only directory, so a
+  // plugin with the same name from any source supersedes the previous record.
+  state.plugins = state.plugins.filter((p) => p.name !== pluginName)
   state.plugins.push(record)
   writeState(state)
   invalidateParserCaches()
@@ -918,6 +1290,8 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     converted: validAgents,
     subagentsHub,
     connectors: connectors.map((c) => c.name),
+    lspServers: lspServers.map((s) => s.name),
+    lspPackages,
     convertErrors,
     droppedFields: [],
     restartRequired: false,
@@ -954,6 +1328,7 @@ export function uninstallPlugin(pluginName) {
     for (const c of pluginConnectors) {
       unregisterConnector(pluginName, c.name)
     }
+    unregisterPluginLsp(pluginName)
   }
   if (existsSync(join(target, 'skills'))) unregisterScanDir(join(target, 'skills'))
   if (existsSync(target)) rmSync(target, { recursive: true, force: true })
@@ -982,7 +1357,7 @@ export function uninstallPlugin(pluginName) {
 }
 
 /** Toggle a plugin's skills scanning and connectors on/off. */
-export function togglePlugin(pluginName, enabled) {
+export async function togglePlugin(pluginName, enabled, installPackages = true) {
   const state = readState()
   const rec = state.plugins.find((p) => p.name === pluginName)
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
@@ -997,11 +1372,17 @@ export function togglePlugin(pluginName, enabled) {
     for (const c of pluginConnectors) {
       registerConnector(pluginName, c.name, c)
     }
+    const lspServers = listLspServers(target)
+    if (lspServers.length > 0) {
+      const pkg = installPackages ? await installProfilePackages(LSP_HOST_PACKAGES) : { ok: true }
+      if (pkg.ok) registerPluginLsp(pluginName)
+    }
   } else {
     if (existsSync(skillsDir)) disableScanDir(skillsDir)
     for (const c of pluginConnectors) {
       unregisterConnector(pluginName, c.name)
     }
+    unregisterPluginLsp(pluginName)
   }
   rec.enabled = enabled
   writeState(state)
@@ -1098,14 +1479,19 @@ export function installedDetails() {
         connected,
       }
     }) : []
+    const lspServers = existsSync(target) ? listLspServers(target).map((s) => ({
+      ...s,
+      active: isLspActive(rec.name, s.name),
+    })) : []
     const detail = existsSync(target) ? {
       skills: listSkills(target),
       agents: listAgents(target),
       prompts: listPrompts(target),
       connectors,
       hooks: listHooks(target),
+      lspServers,
       version: readInstalledVersion(target) ?? null,
-    } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], version: null }
+    } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: null }
     return {
       ...rec,
       ...detail,
@@ -1114,6 +1500,7 @@ export function installedDetails() {
       promptCount: detail.prompts.length,
       connectorCount: connectors.length,
       hookCount: detail.hooks.length,
+      lspServerCount: lspServers.length,
       dir: target,
     }
   })

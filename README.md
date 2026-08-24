@@ -1,75 +1,103 @@
+<p align="center">
+  <img src="assets/logo.svg" width="96" alt="Universal Plugin Hub logo">
+</p>
+
 # Universal Plugin Hub
 
-> 跨生态 AI 智能体与 MCP 插件市场 — 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的可视化插件管理中心。
+English | [中文](README.zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
 
-## ✨ 功能特性
+> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Browse plugins from multiple Git sources, install with one click, and let their skills, subagents, MCP connectors, and LSP servers light up in DSH.
 
-- **可视化插件市场** — 浏览、搜索、一键安装与卸载来自多个 Git 源的插件
-- **多源管理** — 支持同时接入多个插件仓库源，自由添加与移除
-- **技能 & 子代理扫描** — 自动识别插件中的 Skills（命令）和 Subagents（子代理），编译为 Hub Skill 实现智能委派
-- **MCP 连接器** — 自动解析插件内的 MCP Server 配置，注册为 DSH 可用工具
-- **标签长按拖拽排序** — 3D 浮空提拉视觉反馈，支持连续无限次重排
-- **流畅的滚轮 & 点击滚动** — 标签栏支持鼠标滚轮横向滚动，左右羽化遮罩自动显隐
-- **浅色 / 深色主题** — 自动跟随 DSH 主题，全界面适配
+![Universal Plugin Hub overview](assets/hero.png)
+<!-- SCREENSHOT #1 (hero): replace with a full-screen shot of the browse page — search bar on top, category tabs, plugin card grid. Save as assets/hero.png -->
 
-## 📦 安装
+## What it does
 
-### 方式一：通过 DSH 插件市场安装（推荐）
+Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin sources (the Anthropic official catalog, community repos, or any Git repository), lists what each plugin actually provides, and wires those pieces into DSH:
 
-在 DSH 内置插件市场中搜索 **Universal Plugin Hub**，点击「安装」即可。
+- skills and slash commands become agent skills
+- subagents are compiled into hub skills DSH can delegate to
+- MCP connectors register into `cordis.patch.yml` as `@deepseek-ai/dsh-mcp-client` entries
+- LSP servers register as `@deepseek-ai/dsh-lsp-stdio` entries — install `typescript-lsp`, restart DSH, and the `lsp` tool works
 
-### 方式二：命令行安装
+## Features
 
-```bash
+- **Multiple sources** — add or remove Git repositories as plugin sources; the built-in Anthropic catalog is always there
+- **Skill & subagent scanning** — detects skills, slash commands, and subagent definitions in a plugin, and compiles subagents into hub skills
+- **MCP connectors** — connectors that need no auth register automatically on install; the rest you verify and enable from the manage page
+- **LSP servers** — plugins declaring `lspServers` (clangd, pyright, typescript-lsp, and more) are registered into DSH on install; the detail page shows them with an active dot
+- **Drag-to-reorder tags** — hold and drag tags to reorder, with a lifted-card visual; the order persists
+- **Light / dark theme** — follows the DSH UI theme
+
+## Requirements
+
+- Node.js 18+
+- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). LSP plugins provision their host packages (`dsh-lsp`, `dsh-lsp-stdio`, `dsh-tool-lsp`) into the DSH installation automatically on install; a DSH restart is required for them to load.
+
+## Install
+
+### From the DSH marketplace
+
+Search **Universal Plugin Hub** in the DSH plugin market and click install.
+
+### From the CLI
+
+```sh
 dsh plugin add universal-plugin-hub
 ```
 
-### 方式三：手动安装
+### Manually
 
-```bash
+```sh
 cd ~/.dsh/plugins
 git clone https://github.com/CaesarEmperor/universal-plugin-hub.git
 cd universal-plugin-hub
 npm install
 ```
 
-安装完成后重启 DSH，即可在界面中看到 Universal Plugin Hub 面板。
+Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 
-## 🏗️ 项目结构
+## Quick start
+
+1. Open the panel. The built-in **Anthropic** source is loaded by default.
+2. Optional: add another source, e.g. `anthropics/claude-plugins-community`.
+3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
+4. Click **Install**. The hub copies the plugin, registers skills and subagents, and auto-connects what needs no setup.
+5. Manage installed plugins from the manage page — enable/disable, toggle connectors, verify auth tokens, update, or remove.
+
+![install dialog](assets/install-flow.png)
+<!-- SCREENSHOT #2 (install): replace with the install dialog or the manage page for an installed plugin. Save as assets/install-flow.png -->
+
+## Project structure
 
 ```
-universal-plugin-hub/
-├── src/                    # 服务端源码
-│   ├── index.js            # 插件入口，挂载 HTTP 路由
-│   ├── routes.js           # RESTful API 路由（源管理、插件安装等）
-│   ├── store.js            # 本地状态与缓存管理
-│   ├── market.js           # Git 操作（clone、pull、diff）
-│   ├── install.js          # 插件安装/卸载/启用生命周期
-│   ├── parser.js           # 插件元数据解析（marketplace.json、plugin.json）
-│   ├── agents-map.js       # 子代理定义解析与 Hub Skill 编译
-│   └── http.js             # HTTP 工具函数
-├── client/
-│   └── client.js           # 前端 UI（Preact + HTM，单文件）
-├── cordis.patch.yml        # DSH bundle 层级声明
-├── package.json
-├── LICENSE
-└── README.md
+src/       server: routes, install lifecycle, marketplace parser, git ops
+client/    UI (single React file, loaded by the DSH client runtime)
+scratch/   dev scripts and tests (not shipped)
 ```
 
-## 🔧 开发
+## Development
 
-```bash
-# 安装依赖
+```sh
 npm install
-
-# 语法检查
-node --check client/client.js
 node --check src/index.js
+node --check client/client.js
+node scratch/verify-lsp-support.mjs   # end-to-end check against a throwaway DSH_HOME
 ```
 
-## 📄 协议
+The UI is a single React file loaded through the DSH client runtime (`dsh-client-runtime` and `dsh-client-ui-theme` are injected by the host). There is no build step — edit `client/client.js` and reload.
 
-[MIT License](./LICENSE) © CaesarEmperor
+## Support
+
+Report bugs or request features via [GitHub Issues](https://github.com/CaesarEmperor/universal-plugin-hub/issues).
+
+## Contributing
+
+PRs are welcome. Keep changes surgical and run `node --check` on touched files; for server behavior changes, extend `scratch/verify-lsp-support.mjs` with end-to-end coverage.
+
+## License
+
+[MIT](./LICENSE) © CaesarEmperor

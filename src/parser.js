@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
-import { sourceCacheDir } from './store.js'
+import { sourceCacheDir, installedDir } from './store.js'
 import { safeSegment } from './market.js'
 import { parseAgentDefinition } from './agents-map.js'
 
@@ -95,6 +95,7 @@ function normalizeRow(row, sourceId) {
     homepage: typeof row.homepage === 'string' ? row.homepage : (meta.homepage || undefined),
     source,
     local: typeof source === 'string' && (source === './' || source.startsWith('./')),
+    lspServers: row.lspServers || undefined,
   }
 }
 
@@ -307,8 +308,8 @@ function pluginContentDir(sourceId, pluginName, source) {
   safeSegment(sourceId, 'source id')
   safeSegment(pluginName, 'plugin name')
 
-  // Check if already installed
-  const installed = join(sourceCacheDir('installed'), pluginName)
+  // Check if already installed (installed/ tree, not the market/ cache)
+  const installed = installedDir(pluginName)
   if (existsSync(installed)) return installed
 
   // Check if in local source cache (root or subdir)
@@ -366,6 +367,7 @@ export function readPluginManifest(dir) {
             version: raw.version,
             author: raw.author,
             mcpServers: raw.mcpServers,
+            lspServers: raw.lspServers,
           }
         }
         if (raw && Array.isArray(raw.plugins) && raw.plugins.length > 0) {
@@ -380,6 +382,7 @@ export function readPluginManifest(dir) {
             commands: matched.commands,
             agents: matched.agents,
             mcpServers: matched.mcpServers,
+            lspServers: matched.lspServers,
           }
         }
         return raw
@@ -831,11 +834,53 @@ export function listConnectors(dir) {
   return connectors
 }
 
+/**
+ * List LSP server definitions from a plugin's manifest (`lspServers` record).
+ *
+ * Accepts either a directory path (reads the on-disk manifest via
+ * `readPluginManifest`) or a pre-resolved marketplace row object (uses
+ * `row.lspServers` directly). The fallback path lets the plugin detail
+ * surface LSP servers in browse mode, where the plugin directory itself
+ * is only a README placeholder and the lspServers live in marketplace.json.
+ */
+export function listLspServers(input) {
+  let raw
+  if (typeof input === 'string') {
+    raw = readPluginManifest(input)?.lspServers
+  } else if (input && typeof input === 'object' && !Array.isArray(input)) {
+    raw = input.lspServers
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  const out = []
+  for (const [name, cfg] of Object.entries(raw)) {
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue
+    out.push({
+      name,
+      command: cfg.command || null,
+      args: Array.isArray(cfg.args) ? cfg.args : [],
+      env: (cfg.env && typeof cfg.env === 'object') ? cfg.env : {},
+      extensionToLanguage: (cfg.extensionToLanguage && typeof cfg.extensionToLanguage === 'object') ? cfg.extensionToLanguage : {},
+      initializationOptions: cfg.initializationOptions ?? null,
+      configuration: cfg.configuration ?? null,
+      startupTimeout: cfg.startupTimeout ?? null,
+    })
+  }
+  return out
+}
+
 /** Full detail view for one plugin (installed copy or cache). */
-export function pluginDetail(sourceId, pluginName, source) {
+export function pluginDetail(sourceId, pluginName, source, rowFallback) {
   const dir = pluginContentDir(sourceId, pluginName, source)
   if (!dir) return null
   const manifest = readPluginManifest(dir)
+  // LSP servers: prefer the on-disk manifest (post-install writes `lspServers`
+  // into `installed/<name>/.claude-plugin/plugin.json`); if absent — e.g. when
+  // browsing an uninstalled plugin whose directory is only a README placeholder
+  // — fall back to the `lspServers` field carried by the marketplace row.
+  let lspServers = listLspServers(dir)
+  if (lspServers.length === 0 && rowFallback) {
+    lspServers = listLspServers(rowFallback)
+  }
   return {
     name: pluginName,
     displayName: manifest?.displayName || manifest?.name || formatDisplayName(pluginName),
@@ -854,6 +899,7 @@ export function pluginDetail(sourceId, pluginName, source) {
     prompts: listPrompts(dir),
     connectors: listConnectors(dir),
     hooks: listHooks(dir),
+    lspServers,
   }
 }
 
