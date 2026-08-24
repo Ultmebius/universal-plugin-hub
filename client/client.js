@@ -7894,6 +7894,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				: (marketPlugin?.hooks && Array.isArray(marketPlugin.hooks) && marketPlugin.hooks.length > 0)
 					? marketPlugin.hooks
 					: (record.hooks || []);
+		const lspServers = (Array.isArray(record.lspServers) && record.lspServers.length > 0)
+			? record.lspServers
+			: (marketPlugin?.detail?.lspServers && Array.isArray(marketPlugin.detail.lspServers) && marketPlugin.detail.lspServers.length > 0)
+				? marketPlugin.detail.lspServers
+				: (marketPlugin?.lspServers && Array.isArray(marketPlugin.lspServers) && marketPlugin.lspServers.length > 0)
+					? marketPlugin.lspServers
+					: (record.lspServers || []);
 
 		const toggle = async () => {
 			setToggling(true);
@@ -7980,6 +7987,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			connectors.length > 0 && "connectors",
 			hooks.length > 0 && "hooks",
 			prompts.length > 0 && "prompts",
+			lspServers.length > 0 && "lsp",
 		].filter(Boolean);
 
 		const activeTab = availableTabs.includes(tab) ? tab : (availableTabs[0] || "skills");
@@ -7997,6 +8005,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const visibleAgents = filterItems(agents, (a) => typeof a === "string" ? a : `${a.name || a.file || ""} ${a.description || ""}`);
 		const visiblePrompts = filterItems(prompts, (p) => typeof p === "string" ? p : p.name || "");
 		const visibleHooks = filterItems(hooks, (h) => typeof h === "string" ? h : `${h.name || h.event || ""} ${h.command || ""}`);
+		const visibleLspServers = filterItems(lspServers, (ls) => typeof ls === "string" ? ls : `${ls.name || ""} ${ls.command || ""}`);
 		const visibleConnectors = filterItems(connectors, (c) => {
 			if (typeof c === "string") return c;
 			return `${c.name || ""} ${c.type || ""} ${c.url || ""} ${c.command || ""} ${(c.args || []).join(" ")}`;
@@ -8146,6 +8155,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					className: "cpm-tab2" + (activeTab === "prompts" ? " active" : ""),
 					onClick: () => setTab("prompts"),
 				}, "Prompts"),
+				lspServers.length > 0 && h("button", {
+					className: "cpm-tab2" + (activeTab === "lsp" ? " active" : ""),
+					onClick: () => setTab("lsp"),
+				}, "LSP Servers"),
 				h("div", { className: "cpm-tabbar-search" },
 					!searchOpen && h("button", {
 						className: "cpm-tab-search-btn",
@@ -8170,7 +8183,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							ref: searchInputRef,
 							className: "cpm-tab-search-input",
 							value: tabQuery,
-							placeholder: activeTab === "skills" ? "Search skills" : (activeTab === "agents" ? "Search agents" : (activeTab === "connectors" ? "Search connectors" : (activeTab === "hooks" ? "Search hooks" : "Search..."))),
+							placeholder: activeTab === "skills" ? "Search skills" : (activeTab === "agents" ? "Search agents" : (activeTab === "connectors" ? "Search connectors" : (activeTab === "hooks" ? "Search hooks" : (activeTab === "lsp" ? "Search LSP servers" : "Search...")))),
 							onChange: (e) => setTabQuery(e.target.value),
 							onKeyDown: (e) => {
 								if (e.key === "Escape") {
@@ -8199,7 +8212,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				(activeTab === "agents" ? "任务级专业子代理（Subagents），在对话中主模型通过 subagent 工具按需自律委派调用，不污染全局斜杠命令与会话预设。" :
 				(activeTab === "connectors" ? "Model Context Protocol (MCP) 上下文连接器，提供外部工具与数据接入。" :
 				(activeTab === "hooks" ? "生命周期钩子，在会话事件与工具执行期间自动触发。" :
-				"自定义提示词模板，可在对话中引用。")))
+				(activeTab === "lsp" ? "语言服务器（LSP），为代码编辑提供跳转定义、查找引用、悬停等智能能力。" :
+				"自定义提示词模板，可在对话中引用。"))))
 			),
 
 			availableTabs.length === 0 && h("div", { className: "cpm-empty", style: { padding: "40px 20px", textAlign: "center" } }, "该插件未提供任何技能、MCP 连接器或预设组件。"),
@@ -8304,6 +8318,47 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					return h("div", { key: pName, className: "cpm-skill-item" },
 						h("div", { className: "cpm-skill-name" }, pName),
 						h("div", { className: "cpm-skill-desc" }, "Custom prompt template"),
+					);
+				}),
+			),
+
+			activeTab === "lsp" && h("div", { className: "cpm-skill-list" },
+				visibleLspServers.length === 0 && h("div", { className: "cpm-empty" }, tabQuery ? "未找到匹配的 LSP servers" : "没有 LSP servers"),
+				visibleLspServers.map((ls) => {
+					const lsName = typeof ls === "string" ? ls : (ls.name || "");
+					const cmd = typeof ls === "object" ? (ls.command || "") : "";
+					const extToLang = typeof ls === "object" && ls.extensionToLanguage && typeof ls.extensionToLanguage === "object"
+						? Object.keys(ls.extensionToLanguage)
+						: [];
+					const isActive = typeof ls === "object" ? (ls.active === true) : false;
+					const missingCommand = typeof ls === "object" ? (ls.missingCommand === true) : false;
+					return h("div", {
+						key: lsName,
+						className: "cpm-skill-item",
+						style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%" },
+					},
+						h("div", { style: { minWidth: 0, flex: 1 } },
+							h("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+								h("div", { className: "cpm-skill-name" }, lsName),
+								h("span", {
+									style: {
+										fontSize: 11,
+										fontWeight: 600,
+										padding: "2px 7px",
+										borderRadius: 4,
+										background: missingCommand ? "rgba(239, 68, 68, 0.12)" : (isActive ? "rgba(34, 197, 94, 0.12)" : "rgba(161, 161, 170, 0.12)"),
+										color: missingCommand ? "#ef4444" : (isActive ? "#22c55e" : "var(--cpm-muted)"),
+										whiteSpace: "nowrap",
+									},
+								}, missingCommand ? "● 未安装二进制文件" : (isActive ? "● 已激活" : "○ 未激活")),
+							),
+							missingCommand && h("div", {
+								className: "cpm-skill-desc",
+								style: { marginTop: 3, color: "#ef4444", opacity: 0.9 },
+							}, `未找到命令 "${cmd || lsName}"，请安装该二进制文件后回到此页面，将自动激活。`),
+							cmd && h("div", { className: "cpm-skill-desc" }, cmd),
+							extToLang.length > 0 && h("div", { className: "cpm-skill-desc", style: { marginTop: 2, opacity: 0.7 } }, extToLang.join(", ")),
+						),
 					);
 				}),
 			),

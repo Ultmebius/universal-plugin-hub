@@ -1554,7 +1554,29 @@ export function installedDetails() {
         connected,
       }
     }) : []
-    const lspServers = existsSync(target) ? listLspServers(target).map((s) => {
+    let lspServers = existsSync(target) ? listLspServers(target) : []
+    // Auto-activate: if an LSP server's binary is now on PATH but the entry
+    // hasn't been written to cordis.patch.yml yet (e.g. the user installed the
+    // binary after the plugin — registration was previously skipped because the
+    // command was missing), register it on the spot. Registration is idempotent
+    // and only writes the patch; it does not require a manual "Update" click.
+    // DSH's HMR watches this patch file and re-applies the plugin tree within
+    // ~1s, so the newly registered server becomes truly active immediately —
+    // no DSH restart needed (verified against @deepseek-ai/dsh-app-boot's
+    // `watchUserPatches`, which registers cordis.patch.yml with Cordis HMR).
+    if (existsSync(target) && lspServers.length > 0) {
+      const autoRegistered = lspServers.filter((s) => {
+        if (isLspActive(rec.name, s.name)) return false
+        return !!s.command && resolveCommandPath(s.command) && Object.keys(s.extensionToLanguage || {}).length > 0
+      })
+      if (autoRegistered.length > 0) {
+        for (const s of autoRegistered) {
+          try { registerLspServer(rec.name, s.name, s) } catch {}
+        }
+        lspServers = listLspServers(target)
+      }
+    }
+    lspServers = lspServers.map((s) => {
       const active = isLspActive(rec.name, s.name)
       // For inactive servers, surface *why*: a missing command is the only
       // reason registration fails that the UI can help the user resolve
@@ -1562,7 +1584,7 @@ export function installedDetails() {
       // extensionToLanguage) are manifest bugs and don't need this hint.
       const missingCommand = !active && !!s.command && !resolveCommandPath(s.command)
       return { ...s, active, missingCommand }
-    }) : []
+    })
     const detail = existsSync(target) ? {
       skills: listSkills(target),
       agents: listAgents(target),
