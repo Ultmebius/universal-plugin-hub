@@ -5342,28 +5342,29 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const tabsRef = useRef(null);
 		const tabRefs = useRef({});
 		const [gridMaskClass, setGridMaskClass] = useState("");
-		const [sortSnapshotState, setSortSnapshotState] = useState(() => ({
-			sourceId: activeSourceId,
-			filter: filter,
-			sortBy: sortBy,
-			snapshot: new Set((state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)),
-		}));
-
-		let sortInstalledSnapshot = sortSnapshotState.snapshot;
+		// Per-source snapshot of installed plugin names used by the default
+		// "installed-first" sort. Deliberately a ref, not state: the snapshot
+		// is only refreshed when (a) the active source changes, (b) filter
+		// changes, or (c) sortBy changes — NOT on every re-render. This is
+		// what keeps a freshly installed plugin in its alphabetical slot
+		// after install: the sort must not re-run against the live
+		// `state.plugins` while the user is still looking at the current
+		// source. Refreshing it here on filter/sortBy/source changes keeps
+		// the snapshot in sync with whatever list the user is actually
+		// re-sorting.
+		const installedSnapshotRef = useRef({});
 		if (
-			sortSnapshotState.sourceId !== activeSourceId ||
-			sortSnapshotState.filter !== filter ||
-			sortSnapshotState.sortBy !== sortBy
+			!installedSnapshotRef.current[activeSourceId] ||
+			installedSnapshotRef.current[`__filter_${activeSourceId}`] !== filter ||
+			installedSnapshotRef.current[`__sort_${activeSourceId}`] !== sortBy
 		) {
-			const nextSnapshot = new Set((state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name));
-			setSortSnapshotState({
-				sourceId: activeSourceId,
-				filter: filter,
-				sortBy: sortBy,
-				snapshot: nextSnapshot,
-			});
-			sortInstalledSnapshot = nextSnapshot;
+			installedSnapshotRef.current[activeSourceId] = new Set(
+				(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
+			);
+			installedSnapshotRef.current[`__filter_${activeSourceId}`] = filter;
+			installedSnapshotRef.current[`__sort_${activeSourceId}`] = sortBy;
 		}
+		const sortInstalledSnapshot = installedSnapshotRef.current[activeSourceId] || new Set();
 
 		// Detail View Data Fetching & LRU Cache
 		const [detail, setDetail] = useState(null);
@@ -6104,12 +6105,97 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [isBrowse, activeSourceId, hoveredPreview, updateGridMask, triggerPendingHover]);
 
-		useEffect(() => {
-			if (isBrowse && gridRef.current) {
-				const saved = (SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[activeSourceId]) || 0;
-				gridRef.current.scrollTop = saved;
-				updateGridMask();
+		// Per-source scroll state.
+		//
+		// `pendingScrollTopRef` is the single source of truth for what the
+		// grid should be scrolled to after the next commit:
+		//   - { type: "restore" } — active source changed: back to the saved
+		//     scrollTop for the source the user switched to.
+		//   - { type: "reset" }  — filter/sort explicitly changed
+		//     (全部插件/已安装/排序): back to 0. Deliberately does NOT zero
+		//     the saved `scrollTops[...]` for the source, so a filter/sort
+		//     change doesn't wipe the tab-switch memory.
+		//   - null               — nothing pending: installs, detail view
+		//     open/close, plain re-renders leave scroll alone.
+		//
+		// The change detection uses dedicated last-* refs, NOT the pending
+		// value: after the apply-step clears pending back to null, a fresh
+		// unrelated re-render (e.g. the refreshState that follows an install)
+		// must NOT re-detect "filter changed". Only genuine user-driven
+		// changes set a new pending intent.
+		//
+		// Ref-based, so the apply-step's dependency array stays stable (only
+		// `isBrowse`, which flips once per mount). The restore therefore never
+		// fires spuriously on unrelated re-renders and never gets clobbered by
+		// onGridScroll overwriting the store with a stale value.
+		const pendingScrollTopRef = useRef(null);
+		const lastActiveSourceRef = useRef(activeSourceId);
+		const lastFilterRef = useRef(filter);
+		const lastSortByRef = useRef(sortBy);
+
+		if (lastActiveSourceRef.current !== activeSourceId) {
+			lastActiveSourceRef.current = activeSourceId;
+			pendingScrollTopRef.current = { type: "restore" };
+		}
+		if (filter !== lastFilterRef.current) {
+			lastFilterRef.current = filter;
+			// A tab switch can change the remembered filter for the newly
+			// active source. That must NOT win over the restore intent that
+			// was just set above — switching tabs should put you back where
+			// you left that source, not at the top. So only set reset when
+			// there is no restore already pending for this commit.
+			if (pendingScrollTopRef.current?.type !== "restore") {
+				pendingScrollTopRef.current = { type: "reset", filter, sortBy };
 			}
+		}
+		if (sortBy !== lastSortByRef.current) {
+			lastSortByRef.current = sortBy;
+			if (pendingScrollTopRef.current?.type !== "restore") {
+				pendingScrollTopRef.current = { type: "reset", filter, sortBy };
+			}
+		}
+
+		// `appliedScrollTopRef` records the position the layout effect just
+		// applied (null = nothing pending). The rAF below re-asserts it once
+		// after layout has fully settled, because the layout effect runs
+		// synchronously after commit while the grid's content (installed
+		// groups / market rows / late-loading avatars) may not be laid out
+		// yet, and the browser clamps scrollTop when it exceeds the current
+		// scrollHeight. Re-applying on the next frame makes the restore stick.
+		//
+		// NOTE: the apply layout effect deliberately depends on `isBrowse`
+		// and `activeSourceId` — a tab switch changes activeSourceId, and
+		// that MUST trigger the restore. The change-detection (last-* refs)
+		// above runs during render and only sets pending for genuine changes,
+		// so a spurious re-render (install-triggered refreshState) won't
+		// fire this.
+		const appliedScrollTopRef = useRef(null);
+		useSafeLayoutEffect(() => {
+			if (!isBrowse || !gridRef.current) return;
+			const pending = pendingScrollTopRef.current;
+			if (!pending) return;
+			if (pending.type === "reset" && (pending.filter !== filter || pending.sortBy !== sortBy)) return;
+			const target = pending.type === "restore"
+				? ((SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[activeSourceId]) || 0)
+				: 0;
+			appliedScrollTopRef.current = target;
+			gridRef.current.scrollTop = target;
+			pendingScrollTopRef.current = null;
+			updateGridMask();
+		}, [isBrowse, activeSourceId, updateGridMask]);
+
+		useEffect(() => {
+			if (!isBrowse) return;
+			const target = appliedScrollTopRef.current;
+			if (target === null) return;
+			const raf = requestAnimationFrame(() => {
+				appliedScrollTopRef.current = null;
+				if (gridRef.current && target > 0 && gridRef.current.scrollTop !== target) {
+					gridRef.current.scrollTop = target;
+					updateGridMask();
+				}
+			});
+			return () => cancelAnimationFrame(raf);
 		}, [isBrowse, activeSourceId, updateGridMask]);
 
 		useEffect(() => {
@@ -6320,12 +6406,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					body: JSON.stringify({ sourceId: activeSourceId }),
 				});
 				setRows((prev) => ({ ...(prev || {}), [activeSourceId]: body.plugins || [] }));
-				setSortSnapshotState({
-					sourceId: activeSourceId,
-					filter,
-					sortBy,
-					snapshot: new Set((state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)),
-				});
+				if (installedSnapshotRef.current) {
+					installedSnapshotRef.current[activeSourceId] = new Set(
+						(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
+					);
+				}
 				showToast("已刷新", "市场清单已更新", { restart: false });
 			} catch (e) {
 				showToast("刷新失败", e.message, { restart: false });
