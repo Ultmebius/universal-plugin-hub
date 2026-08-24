@@ -6153,15 +6153,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const currentSourcePlugins = useMemo(() => (rows && rows[activeSourceId]) || [], [rows, activeSourceId]);
 		const totalSourcePluginsCount = currentSourcePlugins.length;
 
-		// Grouped installed plugins across all sources strictly following state.sources order
+		// Grouped installed plugins across all sources. The active source's
+		// installed plugins pin to the top of the manage view (mirroring the
+		// browse view, where the active source is also foregrounded); the
+		// remaining sources keep their stored order in `state.sources`.
 		const installedSourceGroups = useMemo(() => {
 			if (filter !== "installed") return [];
 
 			const orderedSources = state.sources || [];
+			const activeFirstSources = activeSourceId
+				? [
+					...orderedSources.filter((s) => s && s.id === activeSourceId),
+					...orderedSources.filter((s) => s && s.id !== activeSourceId),
+				]
+				: orderedSources;
 
 			const groups = [];
 
-			for (const src of orderedSources) {
+			for (const src of activeFirstSources) {
 				let srcInstalled = state.plugins.filter((p) => p.sourceId === src.id);
 				if (srcInstalled.length === 0) continue; // If 0 installed, do NOT display this section!
 
@@ -6892,8 +6901,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			h("div", { className: "cpm-dialog-box cpm-source-dialog-box", onClick: (e) => e.stopPropagation() },
 				phase === "url" && [
 					h("div", { className: "cpm-dialog-title", key: "title" }, "添加插件源"),
-					h("div", { className: "cpm-field", key: "f" },
-						h("label", { style: { marginBottom: 8, display: "block" } }, "Git 仓库地址（支持 owner/repo 缩写或完整 https:// URL）"),
+					h("div", { className: "cpm-field", key: "f", style: { marginBottom: 0 } },
+						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址"),
 						h("input", {
 							className: "cpm-input",
 							placeholder: "例如 anthropics/claude-plugins-community 或 https://github.com/...",
@@ -6904,8 +6913,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							},
 							autoFocus: true,
 						}),
+						h("div", {
+							style: {
+								color: "var(--cpm-muted)",
+								fontSize: "11.5px",
+								marginTop: 6,
+								textAlign: "left",
+								lineHeight: 1.3,
+							},
+						}, "支持 owner/repo 缩写或完整 https:// URL"),
 					),
-					h("div", { className: "cpm-dialog-actions", key: "a" },
+					h("div", { className: "cpm-dialog-actions", key: "a", style: { marginTop: 0 } },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
 						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? "正在拉取与解析…" : "下一步"),
 					),
