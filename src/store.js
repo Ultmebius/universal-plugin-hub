@@ -8,47 +8,19 @@
  */
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 
 let STATE_CACHE = null
 let STATE_CACHE_MTIME = 0
 
 export const ROOT_DIR_NAME = 'universal-plugin-hub'
 
-// One-time migration: if an existing installation still lives under the
-// previous root name, rename the directory in place so the user's sources
-// and installed plugins come along. Idempotent: when the new root already
-// exists (or neither exists), the rename is a no-op.
-const LEGACY_ROOT_NAME = 'claude-plugin-market'
-let ROOT_MIGRATED = false
-function maybeMigrateRootDir(newRoot) {
-  if (ROOT_MIGRATED) return
-  ROOT_MIGRATED = true
-  if (existsSync(newRoot)) return
-  const legacyRoot = join(dshHome(), 'agent-skills', LEGACY_ROOT_NAME)
-  if (!existsSync(legacyRoot)) return
-  if (newRoot === legacyRoot) return
-  try {
-    mkdirSync(dirname(newRoot), { recursive: true })
-    renameSync(legacyRoot, newRoot)
-  } catch (e) {
-    // Best-effort: if the rename fails (e.g. locked file on Windows),
-    // the next call to marketRoot will still return the new path and
-    // create it from scratch; the legacy dir will be left in place
-    // for the user to clean up. Log so the failure isn't silent.
-    try { console.warn?.(`universal-plugin-hub: root-dir migration failed: ${e.message}`) } catch {}
-    ROOT_MIGRATED = false
-  }
-}
-
 export function dshHome() {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
 }
 
 export function marketRoot() {
-  const root = join(dshHome(), 'agent-skills', ROOT_DIR_NAME)
-  maybeMigrateRootDir(root)
-  return root
+  return join(dshHome(), 'agent-skills', ROOT_DIR_NAME)
 }
 
 export function statePath() {
