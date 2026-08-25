@@ -1604,7 +1604,7 @@ export async function updatePlugin(pluginName) {
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
   const source = state.sources.find((s) => s.id === rec.sourceId)
   if (source && typeof source.url === 'string') {
-    const cacheDir = join(dshHome(), 'agent-skills', 'claude-plugin-market', 'market', rec.sourceId)
+    const cacheDir = join(marketRoot(), 'market', rec.sourceId)
     if (existsSync(join(cacheDir, '.git'))) {
       await pullSource(rec.sourceId)
     }

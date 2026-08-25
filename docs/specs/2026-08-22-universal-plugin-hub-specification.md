@@ -91,10 +91,10 @@ Universal Plugin Hub 是面向下一代 AI 智能体操作系统（DeepSeek Harn
 
 ## 3. 运行时数据与存储布局
 
-所有持久化与缓存数据统一收敛在 `~/.dsh/agent-skills/claude-plugin-market/`，结构规范如下：
+所有持久化与缓存数据统一收敛在 `~/.dsh/agent-skills/universal-plugin-hub/`，结构规范如下：
 
 ```
-~/.dsh/agent-skills/claude-plugin-market/
+~/.dsh/agent-skills/universal-plugin-hub/
 ├── state.json                          # 全局主状态清单（插件源配置、安装记录、开关状态）
 ├── market/                             # 插件源 Git 仓库缓存
 │   ├── anthropic/                      # 官方源 (anthropics/claude-plugins-official)
@@ -388,7 +388,7 @@ import json, os, yaml
 
 app = FastAPI(title="Universal Plugin Hub")
 
-STATE_PATH = os.path.expanduser("~/.dsh/agent-skills/claude-plugin-market/state.json")
+STATE_PATH = os.path.expanduser("~/.dsh/agent-skills/universal-plugin-hub/state.json")
 
 def read_state():
     if not os.path.exists(STATE_PATH):
