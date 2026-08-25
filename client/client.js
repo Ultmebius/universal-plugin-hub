@@ -5723,12 +5723,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [activeSourceId, scrollActiveTabIntoView]);
 
-		// Layout-ready auto-scroll ONCE on initial mount only
-		useEffect(() => {
-			const timer = setTimeout(() => {
-				scrollActiveTabIntoView(activeSourceId, false);
-			}, 50);
-			return () => clearTimeout(timer);
+		// Restore the active tab into view synchronously after mount. A
+		// `useLayoutEffect` runs in the same commit as the tab DOM (refs
+		// are populated and offsetLeft/offsetWidth are accurate) but before
+		// the first paint, so the user never sees the tabs at scrollLeft=0
+		// (the fresh-mount default) before they jump to the active position.
+		// The previous `useEffect` + 50ms setTimeout left a 50ms gap where
+		// the active tab was visible off-screen for a far-right source,
+		// which the user perceived as the tab "shifting" on every Back.
+		useSafeLayoutEffect(() => {
+			scrollActiveTabIntoView(activeSourceId, false);
 		}, []);
 
 		// ────────────────────────────── Tab Long-Press Drag Reorder ──────────────────────────────
