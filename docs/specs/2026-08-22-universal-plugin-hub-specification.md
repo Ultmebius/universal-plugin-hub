@@ -369,7 +369,7 @@ export function writeState(state) {
 | **Skills** | `skills/*/SKILL.md` / `commands/*.md` | 注册进 DSH 技能扫描目录，实时注入系统提示词 | 对话中输入 `/command` 或由模型自动选择执行 |
 | **Subagents** | `agents/*.yaml` / `agents/*.md` | 由 Hub Compiler 编译为 `/${plugin}-agents` 技能 | 主模型通过 `subagent` 工具自律委派调用 |
 | **Connectors** | `.mcp.json` / `server.json` | 挂载到 DSH MCP 客户端，提供工具与资源接入 | 模型根据 Tool Schema 自动按需调用 |
-| **Hooks** | 插件清单 `hooks` 字段（指向 `hooks.json`），或 `hooks/hooks.{json,yaml,yml}`，或 `hooks/*-hooks.{json,yaml}` | 写入 `cordis.patch.yml` 的 `@deepseek-ai/dsh-hooks-claude-code` 桥条目；宿主包按 DSH 发版线（major.minor）自动安装，桥在 DSH 拦截点上运行原生 `hooks.json`（支持 `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`） | 自动化静默执行 |
+| **Hooks** | 插件清单 `hooks` 字段（指向 `hooks.json`），或 `hooks/hooks.{json,yaml,yml}`，或 `hooks/*-hooks.{json,yaml}` | Hub 安装时 `scripts/postinstall.js` 把桥插件 + 其 `dsh-hook-protocol` 协议包按 DSH 发版线（major.minor）预先装进 DSH 运行时；之后单插件安装只需往 `cordis.patch.yml` 写一条 `@deepseek-ai/dsh-hooks-claude-code` 条目，桥在 DSH 拦截点上运行原生 `hooks.json`（支持 `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` / `SubagentStart` / `SubagentStop`） | 自动化静默执行 |
 | **Prompts** | `prompts/*.md` / `prompts/*.yaml` | 结构化提示词模板 | 知识库引用与模板代入 |
 
 ---

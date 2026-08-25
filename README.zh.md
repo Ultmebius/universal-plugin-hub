@@ -37,7 +37,7 @@ Universal Plugin Hub 是 DSH 的可视化插件管理器。它克隆插件源（
 ## 环境要求
 
 - Node.js 18+
-- 带 `web` profile 的 DSH（建议 0.1.0-rc.6 以上）。声明了 LSP 服务器或 Claude/Codex hooks 的插件会在安装时自动把对应的宿主依赖包（`@deepseek-ai/dsh-lsp-stdio`、`@deepseek-ai/dsh-hooks-claude-code`、`@deepseek-ai/dsh-hook-protocol`）安装进 DSH 运行时——版本按当前 DSH 发版线匹配，DSH HMR 在约 1 秒内拾起新写入的 `cordis.patch.yml` 条目。
+- 带 `web` profile 的 DSH（建议 0.1.0-rc.6 以上）。Hub 自身安装（`dsh plugin add universal-plugin-hub`）时跑一段 `postinstall` 脚本，把 5 个 LSP / hooks 宿主包预先装进 DSH 运行时——版本按当前 DSH 发版线匹配，安装失败直接让 hub 安装失败。装好之后，声明了 LSP 服务器或 Claude/Codex hooks 的插件只需单次 `cordis.patch.yml` 写入就能挂上（DSH HMR 约 1 秒内拾起）。
 
 ## 安装
 
@@ -67,7 +67,7 @@ npm install
 1. 打开面板。内置的 **Anthropic** 源默认已加载。
 2. 可选：添加其他源，例如 `anthropics/claude-plugins-community`。
 3. 浏览或搜索。点开插件看它带什么：技能、子代理、连接器、LSP 服务器。
-4. 点 **Install**。Hub 复制插件、注册技能和子代理、自动接上无需配置的连接器。
+4. 点 **Install**。Hub 复制插件、注册技能和子代理、把 LSP 服务器和 Claude/Codex hooks 接入 DSH、自动接上无需配置的连接器。
 5. 在管理页管理已装插件：启用或禁用、开关连接器、验证授权、更新、卸载。
 
 ![安装对话框](assets/install-flow.png)

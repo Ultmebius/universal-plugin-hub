@@ -37,7 +37,7 @@ Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin source
 ## Requirements
 
 - Node.js 18+
-- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). Plugins declaring LSP servers or Claude/Codex hooks auto-provision the matching host packages (`@deepseek-ai/dsh-lsp-stdio`, `@deepseek-ai/dsh-hooks-claude-code`, `@deepseek-ai/dsh-hook-protocol`) into the DSH installation on install — versions are picked to match the running DSH release, and DSH HMR picks up the new `cordis.patch.yml` entries within ~1s.
+- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). The hub's own install (`dsh plugin add universal-plugin-hub`) runs a `postinstall` script that pre-provisions the 5 LSP/hooks host packages into the DSH installation — versions are resolved to match the running DSH release, and a provisioning failure fails the hub install outright. After that, plugins declaring LSP servers or Claude/Codex hooks register as a single `cordis.patch.yml` write each (DSH HMR picks them up within ~1s).
 
 ## Install
 
@@ -67,7 +67,7 @@ Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 1. Open the panel. The built-in **Anthropic** source is loaded by default.
 2. Optional: add another source, e.g. `anthropics/claude-plugins-community`.
 3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
-4. Click **Install**. The hub copies the plugin, registers skills and subagents, and auto-connects what needs no setup.
+4. Click **Install**. The hub copies the plugin, registers skills and subagents, wires any LSP servers and Claude/Codex hooks into DSH, and auto-connects what needs no setup.
 5. Manage installed plugins from the manage page — enable/disable, toggle connectors, verify auth tokens, update, or remove.
 
 ![install dialog](assets/install-flow.png)
