@@ -335,14 +335,31 @@ const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 export function findDshMainNodeModules() {
   const hasLoader = (nm) => existsSync(join(nm, '@deepseek-ai', 'dsh-app-boot'))
 
-  // 1) NODE_PATH (npx exec sets it to the cached install for bin scripts)
+  // 1) $DSH_HOME/profiles/node_modules — the DSH runtime tree the loader
+  //    resolves from when running a profile (e.g. `dsh web`). Survives
+  //    `npx` cache wipes; the npx cache is transient and must not be the
+  //    primary target for host packages we want to persist across starts.
+  const profilesShared = join(dshHome(), 'profiles', 'node_modules')
+  if (hasLoader(profilesShared)) return profilesShared
+
+  // 2) Per-profile node_modules ($DSH_HOME/profiles/<profile>/node_modules)
+  const profilesRoot = join(dshHome(), 'profiles')
+  try {
+    if (existsSync(profilesRoot)) {
+      for (const entry of readdirSync(profilesRoot)) {
+        const nm = join(profilesRoot, entry, 'node_modules')
+        if (hasLoader(nm)) return nm
+      }
+    }
+  } catch {}
+  // 3) NODE_PATH (npx exec sets it to the cached install for bin scripts)
   const np = process.env.NODE_PATH
   if (np) {
     for (const p of np.split(/[;:]/).filter(Boolean)) {
       if (hasLoader(p)) return p
     }
   }
-  // 2) npm npx cache scan (Windows then POSIX)
+  // 4) npm npx cache scan (Windows then POSIX) — transient, last resort.
   const cacheRoots = []
   if (process.platform === 'win32') {
     cacheRoots.push(join(homedir(), 'AppData', 'Local', 'npm-cache', '_npx'))
@@ -360,17 +377,7 @@ export function findDshMainNodeModules() {
       // keep scanning
     }
   }
-  // 3) Profile runtime tree ($DSH_HOME/profiles/<profile>/node_modules)
-  const profilesRoot = join(dshHome(), 'profiles')
-  try {
-    if (existsSync(profilesRoot)) {
-      for (const entry of readdirSync(profilesRoot)) {
-        const nm = join(profilesRoot, entry, 'node_modules')
-        if (hasLoader(nm)) return nm
-      }
-    }
-  } catch {}
-  // 4) Global npm install (`npm i -g @deepseek-ai/dsh`)
+  // 5) Global npm install (`npm i -g @deepseek-ai/dsh`)
   try {
     const g = globalNpmRoot()
     if (g && hasLoader(g)) return g
