@@ -5759,16 +5759,37 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			scrollActiveTabIntoView(activeSourceId, false);
 		}, [activeSourceId, state.sources, state.sources.length, scrollActiveTabIntoView, updateTabsMask]);
 
+		// Mirror the tab container's scrollLeft into a regular ref so the
+		// unmount-cleanup below can read it after `tabsRef.current` is nulled
+		// (React detaches DOM refs before running useEffect cleanups). Without
+		// this, the save on manage→back never lands and the new mount falls
+		// through to the auto-scroll default.
+		const tabsScrollLeftRef = useRef(0);
+		useEffect(() => {
+			const el = tabsRef.current;
+			if (!el) return;
+			tabsScrollLeftRef.current = el.scrollLeft;
+			const handler = () => {
+				tabsScrollLeftRef.current = el.scrollLeft;
+			};
+			el.addEventListener("scroll", handler, { passive: true });
+			return () => el.removeEventListener("scroll", handler);
+		}, [state.sources, state.sources.length]);
+
 		// Persist the user's current scroll for the active source so a later
 		// remount of BrowseView (e.g. after the user opens and closes an
 		// installed plugin's manage page) lands them at the exact same
 		// scroll position rather than at scrollLeft=0.
 		useEffect(() => {
 			return () => {
-				const container = tabsRef.current;
-				if (container && activeSourceId) {
-					savedTabScrolls.set(activeSourceId, container.scrollLeft);
-				}
+				if (!activeSourceId) return;
+				// Prefer the in-flight animation target if the user navigated
+				// away mid-scroll — the mid-animation scrollLeft is a value
+				// they never saw.
+				const final = (currentTabAnim && currentTabTarget !== null)
+					? currentTabTarget
+					: tabsScrollLeftRef.current;
+				savedTabScrolls.set(activeSourceId, final);
 			};
 		}, [activeSourceId]);
 
