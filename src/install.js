@@ -531,6 +531,14 @@ export async function installProfilePackages(packageNames) {
       mkdirSync(dirname(dest), { recursive: true })
       rmSync(dest, { recursive: true, force: true })
       untarStripFirst(buffer, dest)
+      // Verify the tarball actually unpacked a usable package — `untarStripFirst`
+      // walks the UStar header stream and silently exits on any malformed input
+      // (e.g. a 404 HTML page mistakenly returned as a gzipped stream), which
+      // would leave the package directory empty and downstream gates blind.
+      if (!existsSync(join(dest, 'package.json'))) {
+        rmSync(dest, { recursive: true, force: true })
+        return { ok: false, error: `${name} 解包后缺少 package.json（tarball 可能不完整）`, installed }
+      }
       installed.push(name)
     } catch (error) {
       return { ok: false, error: `${name} 安装失败: ${error.message}`, installed }
@@ -564,6 +572,27 @@ function untarStripFirst(tgz, dest) {
 
 export function getLspServerId(pluginName, serverName) {
   return `lsp-${slugify(pluginName)}-${slugify(serverName)}`
+}
+
+/**
+ * True only when every LSP host package that DSH's LSP provider needs is
+ * present in the running DSH installation's node_modules. Acts as a hard
+ * gate before any patch entry is written: a missing host package would
+ * crash the DSH plugin tree on load (the @deepseek-ai/dsh-lsp-stdio
+ * provider resolves bare names from the loader's resolution path, and an
+ * unresolved `name` on a patch entry throws at boot).
+ */
+export function lspHostPackagesInstalled() {
+  const main = findDshMainNodeModules()
+  if (!main) return false
+  return LSP_HOST_PACKAGES.every((p) => existsSync(join(main, p, 'package.json')))
+}
+
+/** Same gate for the hooks bridge + its protocol peer. */
+export function hookHostPackagesInstalled() {
+  const main = findDshMainNodeModules()
+  if (!main) return false
+  return HOOK_HOST_PACKAGES.every((p) => existsSync(join(main, p, 'package.json')))
 }
 
 function getLspEntry(pluginName, serverName) {
@@ -640,6 +669,21 @@ export function registerLspServer(pluginName, serverName, serverConfig) {
       error: `LSP server ${serverName} 注册失败：未找到可执行文件 "${resolved.command}"。` +
         `请先安装并确保其在 PATH 中（常见做法：npm install -g ${resolved.command}），` +
         `然后在管理页点击「更新」重新注册。`,
+    }
+  }
+  // Pre-flight (host packages): the @deepseek-ai/dsh-lsp-stdio provider that
+  // DSH loads by name from this patch entry is a real runtime dependency. If
+  // the user-installed language server resolves but the host packages
+  // haven't been provisioned into DSH (provisioning silently failed, or the
+  // packages were removed out of band), the patch entry would point at a
+  // missing plugin and DSH would crash on load. Gate on presence to keep the
+  // "active" badge honest.
+  if (!lspHostPackagesInstalled()) {
+    return {
+      ok: false,
+      active: false,
+      error: `LSP 宿主包未安装到 DSH 运行时（${LSP_HOST_PACKAGES.join(' / ')}）。` +
+        `请尝试在管理页点击「更新」重新触发安装。`,
     }
   }
 
@@ -731,6 +775,12 @@ export async function registerPluginHooks(pluginName, installPackages = true) {
   if (installPackages) {
     const pkg = await installProfilePackages(HOOK_HOST_PACKAGES)
     if (!pkg.ok) return { ok: false, error: pkg.error, registered: [] }
+  }
+
+  // Same gate as LSP: the patch entry references @deepseek-ai/dsh-hooks-claude-code
+  // by name and DSH would crash on load if that package isn't in its node_modules.
+  if (!hookHostPackagesInstalled()) {
+    return { ok: false, error: `Hooks 宿主包未安装到 DSH 运行时（${HOOK_HOST_PACKAGES.join(' / ')}）`, registered: [] }
   }
 
   const patch = readCordisPatch()
@@ -1717,7 +1767,12 @@ export function installedDetails() {
         // once but it is no longer in the patch, the user (or a manual patch
         // edit) removed it deliberately — do not silently re-add it.
         if (autoActivatedLspServers.has(`${rec.name}::${s.name}`)) return false
-        return !!s.command && resolveCommandPath(s.command) && Object.keys(s.extensionToLanguage || {}).length > 0
+        // Host packages must actually be in DSH's node_modules — otherwise
+        // auto-registering would write a patch entry that DSH can't load.
+        return !!s.command
+          && resolveCommandPath(s.command)
+          && Object.keys(s.extensionToLanguage || {}).length > 0
+          && lspHostPackagesInstalled()
       })
       if (autoRegistered.length > 0) {
         for (const s of autoRegistered) {
