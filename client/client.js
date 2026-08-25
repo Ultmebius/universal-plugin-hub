@@ -5729,6 +5729,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// the first paint, so the user never sees the tabs at scrollLeft=0
 		// (the fresh-mount default) before they jump to the active position.
 		//
+		// Reset the module-level `currentTabTarget` before each scroll: it
+		// is the in-flight target for a smoothScrollTabsTo animation and
+		// `scrollActiveTabIntoView` reads it as the baseline for the next
+		// target. A stale value from an animation that was interrupted by
+		// the BrowseView unmount would otherwise cause the new mount to
+		// compute its target relative to the old (different) scrollLeft.
+		//
 		// The deps include `state.sources` (and its length) because both the
 		// parent's `refreshState` and the manage page's own `refreshState`
 		// (which fires on its own mount) can return a slightly different
@@ -5737,6 +5744,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// paint — re-runs after the state update would land the user on
 		// the wrong scroll position for that second paint.
 		useSafeLayoutEffect(() => {
+			currentTabTarget = null;
 			scrollActiveTabIntoView(activeSourceId, false);
 		}, [activeSourceId, state.sources, state.sources.length, scrollActiveTabIntoView]);
 
