@@ -5728,12 +5728,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// are populated and offsetLeft/offsetWidth are accurate) but before
 		// the first paint, so the user never sees the tabs at scrollLeft=0
 		// (the fresh-mount default) before they jump to the active position.
-		// The previous `useEffect` + 50ms setTimeout left a 50ms gap where
-		// the active tab was visible off-screen for a far-right source,
-		// which the user perceived as the tab "shifting" on every Back.
+		//
+		// The deps include `state.sources` (and its length) because both the
+		// parent's `refreshState` and the manage page's own `refreshState`
+		// (which fires on its own mount) can return a slightly different
+		// sources list after BrowseView mounts, shifting every tab's
+		// offsetLeft. The previous `[]`-deps fix only caught the first
+		// paint — re-runs after the state update would land the user on
+		// the wrong scroll position for that second paint.
 		useSafeLayoutEffect(() => {
 			scrollActiveTabIntoView(activeSourceId, false);
-		}, []);
+		}, [activeSourceId, state.sources, state.sources.length, scrollActiveTabIntoView]);
 
 		// ────────────────────────────── Tab Long-Press Drag Reorder ──────────────────────────────
 		const [dragState, setDragState] = useState(null);
