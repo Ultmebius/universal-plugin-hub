@@ -4831,6 +4831,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			refreshState();
 		}, [refreshState]);
 
+		// The plugin panel itself is being closed (MarketApp unmounts). Reset
+		// the scroll memory so a fresh open of the panel starts at the top —
+		// the user explicitly wants panel close/reopen to reset scroll. This
+		// does NOT run on the manage-page round trip (that only conditionally
+		// swaps BrowseView/ManagePage inside the same MarketApp), so returning
+		// from manage still restores the saved position.
+		useEffect(() => {
+			return () => {
+				if (SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
+			};
+		}, []);
+
 		const openManage = useCallback((record, fromView) => {
 			setManageFor(record ? record.name : null);
 			setPrevView(fromView || view || { type: "browse" });
@@ -5353,16 +5365,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// the snapshot in sync with whatever list the user is actually
 		// re-sorting.
 		const installedSnapshotRef = useRef({});
-		if (
-			!installedSnapshotRef.current[activeSourceId] ||
-			installedSnapshotRef.current[`__filter_${activeSourceId}`] !== filter ||
-			installedSnapshotRef.current[`__sort_${activeSourceId}`] !== sortBy
-		) {
+		// Build a source's snapshot only on first visit. Do NOT re-run on
+		// filter/sortBy changes: the filter/sortBy are global state shared
+		// across sources, and snapshot rebuild based on them caused a plugin
+		// installed in source A to jump to the top when the user switched
+		// away and back (the global filter changed while away, so the snapshot
+		// was rebuilt and promoted A). The snapshot is now sticky per source —
+		// it is only rebuilt by an explicit user action (clicking the current
+		// tab, picking a filter/sort menu item, or market refresh) via
+		// `refreshInstalledSnapshot`.
+		if (!installedSnapshotRef.current[activeSourceId]) {
 			installedSnapshotRef.current[activeSourceId] = new Set(
 				(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
 			);
-			installedSnapshotRef.current[`__filter_${activeSourceId}`] = filter;
-			installedSnapshotRef.current[`__sort_${activeSourceId}`] = sortBy;
 		}
 		const sortInstalledSnapshot = installedSnapshotRef.current[activeSourceId] || new Set();
 
@@ -5373,22 +5388,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// snapshot was last refreshed.
 		const [sortTick, setSortTick] = useState(0);
 
-		// Explicitly refresh the installed-snapshot for the active source.
-		// Called when the user picks a filter/sort menu item, so the "default"
-		// (installed-first) sort re-evaluates against the current plugin list
-		// — a plugin installed a moment ago then moves to the top when the
-		// user re-selects "全部插件" or "已安装" (scroll also resets to top).
-		// Also updates the recorded filter/sort keys so a later automatic
-		// refresh isn't suppressed by a stale cached value.
+		// Explicitly rebuild the installed-snapshot for a source. Called when the
+		// user explicitly re-sorts: clicking the current source's own tab,
+		// picking a filter/sort menu item, or market refresh. This is the ONLY
+		// writer that promotes plugins installed since the last visit into the
+		// "installed-first" group (scroll-to-top and re-sort are bound — a
+		// programmatic scroll-to-top re-sorts; manual wheel scrolling does not).
 		const refreshInstalledSnapshot = useCallback((sourceId) => {
 			const sid = sourceId || activeSourceId;
 			if (!sid) return;
 			installedSnapshotRef.current[sid] = new Set(
 				(state.plugins || []).filter((p) => p.sourceId === sid).map((p) => p.name)
 			);
-			installedSnapshotRef.current[`__filter_${sid}`] = filter;
-			installedSnapshotRef.current[`__sort_${sid}`] = sortBy;
-		}, [activeSourceId, state.plugins, filter, sortBy]);
+		}, [activeSourceId, state.plugins]);
 
 		// Detail View Data Fetching & LRU Cache
 		const [detail, setDetail] = useState(null);
@@ -6230,7 +6242,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const target = pending.type === "restore"
 				? ((SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[activeSourceId]) || 0)
 				: 0;
-			appliedScrollTopRef.current = target;
+			// Capture sourceId so the follow-up rAF can re-validate against
+			// this source's store value instead of a stale closure.
+			appliedScrollTopRef.current = { sourceId: activeSourceId, target };
 			gridRef.current.scrollTop = target;
 			pendingScrollTopRef.current = null;
 			updateGridMask();
@@ -6238,13 +6252,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		useEffect(() => {
 			if (!isBrowse) return;
-			const target = appliedScrollTopRef.current;
-			if (target === null) return;
+			const applied = appliedScrollTopRef.current;
+			if (applied === null) return;
+			const { sourceId, target } = applied;
 			const raf = requestAnimationFrame(() => {
 				appliedScrollTopRef.current = null;
+				// Only re-assert if the store still wants this position. If the
+				// user scrolled elsewhere (wheel) or programmatically moved the
+				// scroll to top (clicked the current tab / picked a filter) this
+				// source's stored value differs, so skip — otherwise this would
+				// undo the user's explicit scroll-to-top with a stale restore.
 				if (gridRef.current && target > 0 && gridRef.current.scrollTop !== target) {
-					gridRef.current.scrollTop = target;
-					updateGridMask();
+					const still = SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[sourceId];
+					if (still === target) {
+						gridRef.current.scrollTop = target;
+						updateGridMask();
+					}
 				}
 			});
 			return () => cancelAnimationFrame(raf);
@@ -6458,11 +6481,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					body: JSON.stringify({ sourceId: activeSourceId }),
 				});
 				setRows((prev) => ({ ...(prev || {}), [activeSourceId]: body.plugins || [] }));
-				if (installedSnapshotRef.current) {
-					installedSnapshotRef.current[activeSourceId] = new Set(
-						(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
-					);
-				}
+				// Market refresh is an explicit re-sort of the current source:
+				// rebuild the snapshot so freshly-installed plugins land in the
+				// "installed-first" group, and bump sortTick to recompute.
+				refreshInstalledSnapshot(activeSourceId);
+				setSortTick((t) => t + 1);
 				showToast("已刷新", "市场清单已更新", { restart: false });
 			} catch (e) {
 				showToast("刷新失败", e.message, { restart: false });

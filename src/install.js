@@ -643,6 +643,14 @@ export function isLspActive(pluginName, serverName) {
   return !!getLspEntry(pluginName, serverName)
 }
 
+/**
+ * LSP servers this process has already auto-activated via `installedDetails`.
+ * Once a server is auto-registered, we never auto-register it again, even if
+ * it later disappears from the patch — the user manually removing the entry
+ * (e.g. to disable the LSP without uninstalling the plugin) must be honored.
+ */
+const autoActivatedLspServers = new Set()
+
 export function toggleConnector(pluginName, connectorName, enabled) {
   const target = installedDir(pluginName)
   const connectors = getPluginConnectors(target)
@@ -1567,11 +1575,18 @@ export function installedDetails() {
     if (existsSync(target) && lspServers.length > 0) {
       const autoRegistered = lspServers.filter((s) => {
         if (isLspActive(rec.name, s.name)) return false
+        // Honor an explicit removal: if we already auto-activated this server
+        // once but it is no longer in the patch, the user (or a manual patch
+        // edit) removed it deliberately — do not silently re-add it.
+        if (autoActivatedLspServers.has(`${rec.name}::${s.name}`)) return false
         return !!s.command && resolveCommandPath(s.command) && Object.keys(s.extensionToLanguage || {}).length > 0
       })
       if (autoRegistered.length > 0) {
         for (const s of autoRegistered) {
-          try { registerLspServer(rec.name, s.name, s) } catch {}
+          try {
+            const r = registerLspServer(rec.name, s.name, s)
+            if (r.ok) autoActivatedLspServers.add(`${rec.name}::${s.name}`)
+          } catch {}
         }
         lspServers = listLspServers(target)
       }
