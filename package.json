@@ -22,6 +22,9 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
   },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -45,6 +48,7 @@
   "files": [
     "src",
     "client",
+    "scripts",
     "cordis.patch.yml"
   ]
 }
