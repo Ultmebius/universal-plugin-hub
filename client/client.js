@@ -4600,6 +4600,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		state: loadCachedState(),
 		scrollTops: {},
 		scrollTop: 0,
+		// Per-source "installed-first" sort snapshots. Kept on SESSION_STORE
+		// (module-level, not a component ref) so they survive the BrowseView
+		// unmount that happens when the manage page opens — returning from
+		// manage must keep both scroll position AND plugin ordering where they
+		// were, including a plugin installed right before opening manage.
+		installedSnapshots: {},
 	};
 
 	// ────────────────────────────── Root App ──────────────────────────────
@@ -4840,6 +4846,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		useEffect(() => {
 			return () => {
 				if (SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
+				// Panel close also resets sort snapshots, so a fresh open
+				// re-evaluates the "installed-first" default sort from the
+				// current plugin list.
+				if (SESSION_STORE.installedSnapshots) SESSION_STORE.installedSnapshots = {};
 			};
 		}, []);
 
@@ -5355,31 +5365,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const tabRefs = useRef({});
 		const [gridMaskClass, setGridMaskClass] = useState("");
 		// Per-source snapshot of installed plugin names used by the default
-		// "installed-first" sort. Deliberately a ref, not state: the snapshot
-		// is only refreshed when (a) the active source changes, (b) filter
-		// changes, or (c) sortBy changes — NOT on every re-render. This is
-		// what keeps a freshly installed plugin in its alphabetical slot
-		// after install: the sort must not re-run against the live
-		// `state.plugins` while the user is still looking at the current
-		// source. Refreshing it here on filter/sortBy/source changes keeps
-		// the snapshot in sync with whatever list the user is actually
-		// re-sorting.
-		const installedSnapshotRef = useRef({});
-		// Build a source's snapshot only on first visit. Do NOT re-run on
-		// filter/sortBy changes: the filter/sortBy are global state shared
-		// across sources, and snapshot rebuild based on them caused a plugin
-		// installed in source A to jump to the top when the user switched
-		// away and back (the global filter changed while away, so the snapshot
-		// was rebuilt and promoted A). The snapshot is now sticky per source —
-		// it is only rebuilt by an explicit user action (clicking the current
-		// tab, picking a filter/sort menu item, or market refresh) via
-		// `refreshInstalledSnapshot`.
-		if (!installedSnapshotRef.current[activeSourceId]) {
-			installedSnapshotRef.current[activeSourceId] = new Set(
+		// "installed-first" sort. Lives on module-level SESSION_STORE, not a
+		// component ref or state: it must survive the BrowseView unmount that
+		// happens when the manage page opens, and it must NOT re-run against
+		// live `state.plugins` on every re-render (which is what kept a
+		// freshly installed plugin in its alphabetical slot after install).
+		// A source's snapshot is built only on its first visit this session;
+		// afterwards it is sticky until an explicit user re-sort (clicking the
+		// current tab, picking a filter/sort menu item, or market refresh)
+		// rebuilds it via `refreshInstalledSnapshot`.
+		const installedSnapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
+		if (!installedSnapshots[activeSourceId]) {
+			installedSnapshots[activeSourceId] = new Set(
 				(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
 			);
 		}
-		const sortInstalledSnapshot = installedSnapshotRef.current[activeSourceId] || new Set();
+		const sortInstalledSnapshot = installedSnapshots[activeSourceId] || new Set();
 
 		// Bumped whenever the user explicitly re-selects a filter/sort menu
 		// item (even when the value didn't change, e.g. picking "全部插件"
@@ -5397,7 +5398,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const refreshInstalledSnapshot = useCallback((sourceId) => {
 			const sid = sourceId || activeSourceId;
 			if (!sid) return;
-			installedSnapshotRef.current[sid] = new Set(
+			const snapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
+			snapshots[sid] = new Set(
 				(state.plugins || []).filter((p) => p.sourceId === sid).map((p) => p.name)
 			);
 		}, [activeSourceId, state.plugins]);
