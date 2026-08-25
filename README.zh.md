@@ -22,6 +22,7 @@ Universal Plugin Hub 是 DSH 的可视化插件管理器。它克隆插件源（
 - 子代理编译成 Hub 技能，交给 DSH 委派
 - MCP 连接器写进 `cordis.patch.yml`，注册为 `@deepseek-ai/dsh-mcp-client`
 - LSP 服务器注册为 `@deepseek-ai/dsh-lsp-stdio`。装完 `typescript-lsp` 重启 DSH，`lsp` 工具即可用
+- hooks 通过为插件注册一条 `@deepseek-ai/dsh-hooks-claude-code` 桥加载，桥在 DSH 自家的拦截点上跑插件自带的 Claude Code `hooks.json`
 
 ## 功能
 
@@ -29,13 +30,14 @@ Universal Plugin Hub 是 DSH 的可视化插件管理器。它克隆插件源（
 - **技能与子代理扫描** — 自动识别插件中的 skills、斜杠命令和子代理定义，把子代理编译成 DSH 可委派的 Hub 技能
 - **MCP 连接器** — 免认证的连接器装完即自动注册，需要认证的在管理页验证后启用
 - **LSP 服务器** — 声明了 `lspServers` 的插件（clangd、pyright、typescript-lsp 等）安装时自动注册进 DSH，详情页带激活状态显示
+- **Hooks** — 解析插件自带的 Claude/Codex `hooks.json`，通过 Claude hooks 桥加载到 DSH；详情页显示真正的事件（如 `SessionStart`、`PreToolUse: Bash`），而不是文件名
 - **标签拖拽排序** — 按住拖拽即可重排，卡片带浮起效果，顺序持久保存
 - **浅色 / 深色主题** — 跟随 DSH 界面主题
 
 ## 环境要求
 
 - Node.js 18+
-- 带 `web` profile 的 DSH（建议 0.1.0-rc.6 以上）。LSP 插件安装时会自动把宿主依赖包（`dsh-lsp`、`dsh-lsp-stdio`、`dsh-tool-lsp`）安装进 DSH 运行时，重启 DSH 后生效
+- 带 `web` profile 的 DSH（建议 0.1.0-rc.6 以上）。声明了 LSP 服务器或 Claude/Codex hooks 的插件会在安装时自动把对应的宿主依赖包（`@deepseek-ai/dsh-lsp-stdio`、`@deepseek-ai/dsh-hooks-claude-code`、`@deepseek-ai/dsh-hook-protocol`）安装进 DSH 运行时——版本按当前 DSH 发版线匹配，DSH HMR 在约 1 秒内拾起新写入的 `cordis.patch.yml` 条目。
 
 ## 安装
 

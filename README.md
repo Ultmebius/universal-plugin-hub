@@ -22,6 +22,7 @@ Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin source
 - subagents are compiled into hub skills DSH can delegate to
 - MCP connectors register into `cordis.patch.yml` as `@deepseek-ai/dsh-mcp-client` entries
 - LSP servers register as `@deepseek-ai/dsh-lsp-stdio` entries — install `typescript-lsp`, restart DSH, and the `lsp` tool works
+- hooks are loaded into DSH by registering a per-plugin `@deepseek-ai/dsh-hooks-claude-code` bridge entry; the bridge runs the plugin's native Claude Code `hooks.json` on DSH's own interception points
 
 ## Features
 
@@ -29,13 +30,14 @@ Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin source
 - **Skill & subagent scanning** — detects skills, slash commands, and subagent definitions in a plugin, and compiles subagents into hub skills
 - **MCP connectors** — connectors that need no auth register automatically on install; the rest you verify and enable from the manage page
 - **LSP servers** — plugins declaring `lspServers` (clangd, pyright, typescript-lsp, and more) are registered into DSH on install; the detail page shows them with an active dot
+- **Hooks** — a plugin's Claude/Codex `hooks.json` is parsed and loaded into DSH via the Claude hooks bridge; the detail page shows the real events (e.g. `SessionStart`, `PreToolUse: Bash`) rather than filenames
 - **Drag-to-reorder tags** — hold and drag tags to reorder, with a lifted-card visual; the order persists
 - **Light / dark theme** — follows the DSH UI theme
 
 ## Requirements
 
 - Node.js 18+
-- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). LSP plugins provision their host packages (`dsh-lsp`, `dsh-lsp-stdio`, `dsh-tool-lsp`) into the DSH installation automatically on install; a DSH restart is required for them to load.
+- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). Plugins declaring LSP servers or Claude/Codex hooks auto-provision the matching host packages (`@deepseek-ai/dsh-lsp-stdio`, `@deepseek-ai/dsh-hooks-claude-code`, `@deepseek-ai/dsh-hook-protocol`) into the DSH installation on install — versions are picked to match the running DSH release, and DSH HMR picks up the new `cordis.patch.yml` entries within ~1s.
 
 ## Install
 
