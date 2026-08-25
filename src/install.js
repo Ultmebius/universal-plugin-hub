@@ -574,27 +574,6 @@ export function getLspServerId(pluginName, serverName) {
   return `lsp-${slugify(pluginName)}-${slugify(serverName)}`
 }
 
-/**
- * True only when every LSP host package that DSH's LSP provider needs is
- * present in the running DSH installation's node_modules. Acts as a hard
- * gate before any patch entry is written: a missing host package would
- * crash the DSH plugin tree on load (the @deepseek-ai/dsh-lsp-stdio
- * provider resolves bare names from the loader's resolution path, and an
- * unresolved `name` on a patch entry throws at boot).
- */
-export function lspHostPackagesInstalled() {
-  const main = findDshMainNodeModules()
-  if (!main) return false
-  return LSP_HOST_PACKAGES.every((p) => existsSync(join(main, p, 'package.json')))
-}
-
-/** Same gate for the hooks bridge + its protocol peer. */
-export function hookHostPackagesInstalled() {
-  const main = findDshMainNodeModules()
-  if (!main) return false
-  return HOOK_HOST_PACKAGES.every((p) => existsSync(join(main, p, 'package.json')))
-}
-
 function getLspEntry(pluginName, serverName) {
   const patch = readCordisPatch()
   const id = getLspServerId(pluginName, serverName)
@@ -669,21 +648,6 @@ export function registerLspServer(pluginName, serverName, serverConfig) {
       error: `LSP server ${serverName} 注册失败：未找到可执行文件 "${resolved.command}"。` +
         `请先安装并确保其在 PATH 中（常见做法：npm install -g ${resolved.command}），` +
         `然后在管理页点击「更新」重新注册。`,
-    }
-  }
-  // Pre-flight (host packages): the @deepseek-ai/dsh-lsp-stdio provider that
-  // DSH loads by name from this patch entry is a real runtime dependency. If
-  // the user-installed language server resolves but the host packages
-  // haven't been provisioned into DSH (provisioning silently failed, or the
-  // packages were removed out of band), the patch entry would point at a
-  // missing plugin and DSH would crash on load. Gate on presence to keep the
-  // "active" badge honest.
-  if (!lspHostPackagesInstalled()) {
-    return {
-      ok: false,
-      active: false,
-      error: `LSP 宿主包未安装到 DSH 运行时（${LSP_HOST_PACKAGES.join(' / ')}）。` +
-        `请尝试在管理页点击「更新」重新触发安装。`,
     }
   }
 
@@ -763,25 +727,13 @@ export function getHookBridgeId(pluginName) {
  * SubagentStart / SubagentStop), with `${CLAUDE_PLUGIN_ROOT}` substituted from
  * `pluginRoot`. DSH's HMR re-applies the tree within ~1s, no restart needed.
  *
- * The bridge package (and its hook-protocol peer) is provisioned into the DSH
- * installation first, mirroring the LSP flow — a patch entry whose package is
- * missing would crash the DSH plugin tree, so we refuse to write it on failure.
+ * The bridge and its hook-protocol peer are pre-provisioned by the hub's
+ * `apply()` on DSH startup, so a per-plugin install is a single patch write.
  */
-export async function registerPluginHooks(pluginName, installPackages = true) {
+export async function registerPluginHooks(pluginName) {
   const target = installedDir(pluginName)
   const configPath = resolveHookConfigPath(target)
   if (!configPath) return { ok: true, registered: [] }
-
-  if (installPackages) {
-    const pkg = await installProfilePackages(HOOK_HOST_PACKAGES)
-    if (!pkg.ok) return { ok: false, error: pkg.error, registered: [] }
-  }
-
-  // Same gate as LSP: the patch entry references @deepseek-ai/dsh-hooks-claude-code
-  // by name and DSH would crash on load if that package isn't in its node_modules.
-  if (!hookHostPackagesInstalled()) {
-    return { ok: false, error: `Hooks 宿主包未安装到 DSH 运行时（${HOOK_HOST_PACKAGES.join(' / ')}）`, registered: [] }
-  }
 
   const patch = readCordisPatch()
   const id = getHookBridgeId(pluginName)
@@ -1326,7 +1278,7 @@ function ensureSkillFrontmatter(content, skillName) {
  * Install a plugin from the marketplace into the installed tree.
  * Returns a result summary for the UI.
  */
-export async function installPlugin({ sourceId, pluginName, convertAgents = true, installPackages = true }) {
+export async function installPlugin({ sourceId, pluginName, convertAgents = true }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
@@ -1476,36 +1428,21 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     }
   }
 
-  // Auto-register LSP servers declared by the plugin (local stdio servers need no auth).
-  // The cordis loader resolves bare package names from the profile, so the LSP
-  // trio must first be provisioned there (pnpm add @latest); only register when
-  // provisioning succeeded — a patch entry for a missing package would crash DSH.
-  // A missing LSP server binary also crashes DSH; registerLspServer gates on
-  // PATH resolvability and returns an error for any that fail. We collect those
-  // errors into `lspErrors` and surface them to the UI so the user can install
-  // the binary and click "Update" to retry, instead of getting a hard crash.
+  // Auto-register LSP servers declared by the plugin. The host packages
+  // (dsh-lsp / dsh-lsp-stdio / dsh-tool-lsp) were pre-provisioned by the
+  // hub's `apply()` at DSH startup — this step is a single, race-free
+  // patch write. `lspErrors` still surface other failures (the user-installed
+  // language server binary not on PATH, missing extensionToLanguage, etc.).
   const lspServers = listLspServers(target)
-  let lspPackages = { ok: true, installed: [] }
   const lspErrors = []
-  if (lspServers.length > 0) {
-    if (installPackages) {
-      lspPackages = await installProfilePackages(LSP_HOST_PACKAGES)
-    } else {
-      lspPackages = { ok: true, installed: LSP_HOST_PACKAGES, skipped: true }
-    }
-    if (lspPackages.ok) {
-      for (const r of registerPluginLsp(pluginName)) {
-        if (!r.ok && r.error) lspErrors.push(r.error)
-      }
-    }
+  for (const r of registerPluginLsp(pluginName)) {
+    if (!r.ok && r.error) lspErrors.push(r.error)
   }
 
   // Register the plugin's Claude/Codex hooks into DSH via the hooks bridge.
-  // The bridge package is provisioned into the DSH installation first; failures
-  // are collected into `hookErrors` and surfaced so the install never hard-crashes.
-  const hookErrors = []
-  const hookBridge = await registerPluginHooks(pluginName, installPackages)
-  if (!hookBridge.ok && hookBridge.error) hookErrors.push(hookBridge.error)
+  // The bridge package was pre-provisioned by the hub's `apply()`; this is a
+  // single patch write.
+  await registerPluginHooks(pluginName)
 
   const record = {
     id: `${sourceId}/${pluginName}`,
@@ -1550,9 +1487,7 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     subagentsHub,
     connectors: connectors.map((c) => c.name),
     lspServers: lspServers.map((s) => s.name),
-    lspPackages,
     lspErrors: lspErrors.length > 0 ? lspErrors : undefined,
-    hookErrors: hookErrors.length > 0 ? hookErrors : undefined,
     convertErrors,
     droppedFields: [],
     restartRequired: false,
@@ -1619,7 +1554,7 @@ export function uninstallPlugin(pluginName) {
 }
 
 /** Toggle a plugin's skills scanning and connectors on/off. */
-export async function togglePlugin(pluginName, enabled, installPackages = true) {
+export async function togglePlugin(pluginName, enabled) {
   const state = readState()
   const rec = state.plugins.find((p) => p.name === pluginName)
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
@@ -1629,24 +1564,16 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
   const skillNames = skills.map((s) => s.command || s.name || pluginName)
   const pluginConnectors = getPluginConnectors(target)
   const lspErrors = []
-  const hookErrors = []
 
   if (enabled) {
     if (existsSync(skillsDir)) registerScanDir(skillsDir, skillNames)
     for (const c of pluginConnectors) {
       registerConnector(pluginName, c.name, c)
     }
-    const lspServers = listLspServers(target)
-    if (lspServers.length > 0) {
-      const pkg = installPackages ? await installProfilePackages(LSP_HOST_PACKAGES) : { ok: true }
-      if (pkg.ok) {
-        for (const r of registerPluginLsp(pluginName)) {
-          if (!r.ok && r.error) lspErrors.push(r.error)
-        }
-      }
+    for (const r of registerPluginLsp(pluginName)) {
+      if (!r.ok && r.error) lspErrors.push(r.error)
     }
-    const hook = await registerPluginHooks(pluginName, installPackages)
-    if (!hook.ok && hook.error) hookErrors.push(hook.error)
+    await registerPluginHooks(pluginName)
   } else {
     if (existsSync(skillsDir)) disableScanDir(skillsDir)
     for (const c of pluginConnectors) {
@@ -1657,7 +1584,7 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
   }
   rec.enabled = enabled
   writeState(state)
-  return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined, hookErrors: hookErrors.length > 0 ? hookErrors : undefined }
+  return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined }
 }
 
 /**
@@ -1772,7 +1699,6 @@ export function installedDetails() {
         return !!s.command
           && resolveCommandPath(s.command)
           && Object.keys(s.extensionToLanguage || {}).length > 0
-          && lspHostPackagesInstalled()
       })
       if (autoRegistered.length > 0) {
         for (const s of autoRegistered) {
