@@ -5366,6 +5366,30 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}
 		const sortInstalledSnapshot = installedSnapshotRef.current[activeSourceId] || new Set();
 
+		// Bumped whenever the user explicitly re-selects a filter/sort menu
+		// item (even when the value didn't change, e.g. picking "全部插件"
+		// while already in "all"). Forces the `visible` memo to recompute so
+		// the "installed-first" sort picks up plugins installed since the
+		// snapshot was last refreshed.
+		const [sortTick, setSortTick] = useState(0);
+
+		// Explicitly refresh the installed-snapshot for the active source.
+		// Called when the user picks a filter/sort menu item, so the "default"
+		// (installed-first) sort re-evaluates against the current plugin list
+		// — a plugin installed a moment ago then moves to the top when the
+		// user re-selects "全部插件" or "已安装" (scroll also resets to top).
+		// Also updates the recorded filter/sort keys so a later automatic
+		// refresh isn't suppressed by a stale cached value.
+		const refreshInstalledSnapshot = useCallback((sourceId) => {
+			const sid = sourceId || activeSourceId;
+			if (!sid) return;
+			installedSnapshotRef.current[sid] = new Set(
+				(state.plugins || []).filter((p) => p.sourceId === sid).map((p) => p.name)
+			);
+			installedSnapshotRef.current[`__filter_${sid}`] = filter;
+			installedSnapshotRef.current[`__sort_${sid}`] = sortBy;
+		}, [activeSourceId, state.plugins, filter, sortBy]);
+
 		// Detail View Data Fetching & LRU Cache
 		const [detail, setDetail] = useState(null);
 		const detailCacheRef = useRef({});
@@ -6014,9 +6038,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 					setActiveSourceId(s.id, targetFilter);
 				} else {
+					// Clicking the current source's own tab: this is the
+					// "scroll back to top" gesture. The scroll resets to top,
+					// and in lockstep the default sort re-runs so a plugin
+					// installed since the last refresh is promoted into the
+					// "installed-first" group at the top. (Only programmatic
+					// scroll-to-top re-sorts; manual wheel-scrolling never does.)
 					scrollActiveTabIntoView(s.id, true);
 					if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 					SESSION_STORE.scrollTops[s.id] = 0;
+					refreshInstalledSnapshot(s.id);
+					setSortTick((t) => t + 1);
 					scrollContentToTop();
 				}
 			}
@@ -6132,6 +6164,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const lastActiveSourceRef = useRef(activeSourceId);
 		const lastFilterRef = useRef(filter);
 		const lastSortByRef = useRef(sortBy);
+		const prevIsBrowseRef = useRef(isBrowse);
+		const firstBrowseRenderRef = useRef(true);
 
 		if (lastActiveSourceRef.current !== activeSourceId) {
 			lastActiveSourceRef.current = activeSourceId;
@@ -6154,6 +6188,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				pendingScrollTopRef.current = { type: "reset", filter, sortBy };
 			}
 		}
+		// Returning from the detail view unmounts the grid (isBrowse flips to
+		// false while the detail overlay shows). When coming back (false→true)
+		// the grid is freshly mounted at scrollTop 0 — restore the position
+		// that was saved right before the detail was opened.
+		if (isBrowse && prevIsBrowseRef.current === false && pendingScrollTopRef.current?.type !== "restore") {
+			pendingScrollTopRef.current = { type: "restore" };
+		}
+		prevIsBrowseRef.current = isBrowse;
+		// BrowseView itself is unmounted while the manage page is open. When
+		// it remounts (manage closed), there is no isBrowse flip — detect the
+		// fresh mount and restore the position saved before manage opened.
+		if (firstBrowseRenderRef.current && isBrowse && pendingScrollTopRef.current === null) {
+			const saved = SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[activeSourceId];
+			if (typeof saved === "number") {
+				pendingScrollTopRef.current = { type: "restore" };
+			}
+		}
+		firstBrowseRenderRef.current = false;
 
 		// `appliedScrollTopRef` records the position the layout effect just
 		// applied (null = nothing pending). The rAF below re-asserts it once
@@ -6395,7 +6447,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 
 			return list;
-		}, [currentSourcePlugins, query, sortBy, sortInstalledSnapshot]);
+		}, [currentSourcePlugins, query, sortBy, sortInstalledSnapshot, sortTick]);
 
 		const refresh = async () => {
 			setIsRefreshing(true);
@@ -6549,6 +6601,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setFilter("all");
 									setShowFilter(false);
+									refreshInstalledSnapshot(activeSourceId);
+									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6556,6 +6610,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setFilter("installed");
 									setShowFilter(false);
+									refreshInstalledSnapshot(activeSourceId);
+									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6571,6 +6627,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setSortBy("default");
 									setShowSort(false);
+									refreshInstalledSnapshot(activeSourceId);
+									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6578,6 +6636,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setSortBy("name-asc");
 									setShowSort(false);
+									refreshInstalledSnapshot(activeSourceId);
+									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6585,6 +6645,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setSortBy("name-desc");
 									setShowSort(false);
+									refreshInstalledSnapshot(activeSourceId);
+									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
