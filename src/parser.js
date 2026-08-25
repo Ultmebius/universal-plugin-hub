@@ -9,7 +9,7 @@
  * 5. Single-plugin Standalone Repositories (root SKILL.md, plugin.json, skills/, commands/, agents/, .cursorrules)
  */
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, isAbsolute } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, installedDir } from './store.js'
 import { safeSegment } from './market.js'
@@ -676,64 +676,95 @@ function formatHookEventName(evt) {
   return map[evt] || evt
 }
 
-/** Hook entries: hooks/ or plugin.json "hooks". */
-export function listHooks(dir) {
-  const hooks = []
+/**
+ * Parse hook event names from a Claude/Codex hook config file's content.
+ * Accepts `{ hooks: {...} }`, a doubly-nested `{ hooks: { hooks: {...} } }`,
+ * or a bare event map. Never treats implementation scripts as hooks.
+ */
+export function parseHookConfig(raw, isJson) {
+  const out = []
+  let parsed
+  try {
+    parsed = isJson ? JSON.parse(raw) : parseYaml(raw)
+  } catch {
+    return out
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out
+  let hookObj = (parsed.hooks && typeof parsed.hooks === 'object' && !Array.isArray(parsed.hooks)) ? parsed.hooks : parsed
+  if (hookObj && typeof hookObj === 'object' && !Array.isArray(hookObj) && typeof hookObj.hooks === 'object' && !Array.isArray(hookObj.hooks)) {
+    hookObj = hookObj.hooks
+  }
+  for (const [eventName, val] of Object.entries(hookObj)) {
+    const formattedEvent = formatHookEventName(eventName)
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        const matcher = item && typeof item === 'object' && item.matcher ? `: ${item.matcher}` : ''
+        out.push(`${formattedEvent}${matcher}`)
+      }
+    } else if (val && typeof val === 'object') {
+      const matcher = val.matcher ? `: ${val.matcher}` : ''
+      out.push(`${formattedEvent}${matcher}`)
+    } else {
+      out.push(formattedEvent)
+    }
+  }
+  return out
+}
+
+/**
+ * Resolve the plugin's Claude/Codex hook config file path: the manifest `hooks`
+ * path first, then `hooks/hooks.json|yaml|yml`, then `*-hooks.{json,yaml}` files.
+ * Returns null when the plugin declares no hook config (e.g. only scripts).
+ */
+export function resolveHookConfigPath(dir) {
+  const manifest = readPluginManifest(dir)
+  if (manifest && typeof manifest.hooks === 'string') {
+    const p = isAbsolute(manifest.hooks) ? manifest.hooks : join(dir, manifest.hooks)
+    if (existsSync(p) && statSync(p).isFile()) return p
+  }
   const hooksRoot = join(dir, 'hooks')
   if (existsSync(hooksRoot)) {
-    const mainHooksJson = join(hooksRoot, 'hooks.json')
-    const mainHooksYaml = join(hooksRoot, 'hooks.yaml')
-    const mainHooksYml = join(hooksRoot, 'hooks.yml')
-    const configFile = existsSync(mainHooksJson) ? mainHooksJson : (existsSync(mainHooksYaml) ? mainHooksYaml : (existsSync(mainHooksYml) ? mainHooksYml : null))
+    const fixed = ['hooks.json', 'hooks.yaml', 'hooks.yml'].map((n) => join(hooksRoot, n)).find((p) => existsSync(p) && statSync(p).isFile())
+    if (fixed) return fixed
+    try {
+      const dialect = readdirSync(hooksRoot)
+        .filter((n) => /-hooks\.(json|ya?ml)$/i.test(n) && statSync(join(hooksRoot, n)).isFile())
+        .sort((a, b) => {
+          const score = (n) => (/claude/i.test(n) ? 0 : (/codex/i.test(n) ? 1 : 2))
+          return score(a) - score(b)
+        })
+      if (dialect.length > 0) return join(hooksRoot, dialect[0])
+    } catch {}
+  }
+  return null
+}
 
-    if (configFile) {
-      try {
-        const raw = readFileSync(configFile, 'utf8')
-        const parsed = configFile.endsWith('.json') ? JSON.parse(raw) : parseYaml(raw)
-        const hookObj = parsed?.hooks || parsed
-        if (hookObj && typeof hookObj === 'object') {
-          for (const [eventName, val] of Object.entries(hookObj)) {
-            const formattedEvent = formatHookEventName(eventName)
-            if (Array.isArray(val)) {
-              for (const item of val) {
-                const matcher = item && typeof item === 'object' && item.matcher ? `: ${item.matcher}` : ''
-                hooks.push(`${formattedEvent}${matcher}`)
-              }
-            } else if (val && typeof val === 'object') {
-              const matcher = val.matcher ? `: ${val.matcher}` : ''
-              hooks.push(`${formattedEvent}${matcher}`)
-            } else {
-              hooks.push(formattedEvent)
-            }
-          }
-        }
-      } catch {}
-    } else {
-      for (const entry of readdirSync(hooksRoot, { withFileTypes: true })) {
-        if (entry.isFile() && !entry.name.startsWith('.') && !entry.name.endsWith('.md')) {
-          hooks.push(entry.name)
-        }
+/** Hook entries: follow the plugin manifest's `hooks` config, then hooks/ config files. */
+export function listHooks(dir) {
+  const hooks = []
+  const seen = new Set()
+  const add = (h) => { if (h && !seen.has(h)) { seen.add(h); hooks.push(h) } }
+
+  const cfg = resolveHookConfigPath(dir)
+  if (cfg) {
+    try {
+      const raw = readFileSync(cfg, 'utf8')
+      for (const h of parseHookConfig(raw, /\.json$/i.test(cfg))) add(h)
+    } catch {}
+  }
+
+  // Manifest `hooks` as inline object/array (no file path to follow).
+  if (hooks.length === 0) {
+    const manifest = readPluginManifest(dir)
+    if (manifest && manifest.hooks) {
+      if (Array.isArray(manifest.hooks)) {
+        for (const h of manifest.hooks) add(typeof h === 'string' ? h : (h && h.name))
+      } else if (typeof manifest.hooks === 'object') {
+        for (const h of parseHookConfig(JSON.stringify({ hooks: manifest.hooks }), true)) add(h)
       }
     }
   }
-  const manifest = readPluginManifest(dir)
-  if (manifest && manifest.hooks && hooks.length === 0) {
-    if (Array.isArray(manifest.hooks)) {
-      hooks.push(...manifest.hooks.map((h) => (typeof h === 'string' ? h : h.name)).filter(Boolean))
-    } else if (typeof manifest.hooks === 'object') {
-      for (const [eventName, val] of Object.entries(manifest.hooks)) {
-        const formattedEvent = formatHookEventName(eventName)
-        if (Array.isArray(val)) {
-          for (const item of val) {
-            const matcher = item && typeof item === 'object' && item.matcher ? `: ${item.matcher}` : ''
-            hooks.push(`${formattedEvent}${matcher}`)
-          }
-        } else {
-          hooks.push(formattedEvent)
-        }
-      }
-    }
-  }
+
   return hooks
 }
 

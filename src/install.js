@@ -9,13 +9,13 @@
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
 import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
-import { spawn, execFile } from 'node:child_process'
+import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
 import { installedDir, readState, writeState, slugify, dshHome } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, invalidateParserCaches } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 
 /** cordis.patch.yml path (prefers profiles/web/cordis.patch.yml). */
@@ -314,6 +314,11 @@ const LSP_TOOL_PKG = '@deepseek-ai/dsh-tool-lsp'
 /** Host-side packages that LSP registration depends on (installed into the DSH installation). */
 export const LSP_HOST_PACKAGES = [LSP_DEF_PKG, LSP_STDIO_PKG, LSP_TOOL_PKG]
 
+/** DSH's Claude Code hook bridge + its wire-protocol peer, provisioned like LSP packages. */
+const HOOK_BRIDGE_PKG = '@deepseek-ai/dsh-hooks-claude-code'
+const HOOK_PROTOCOL_PKG = '@deepseek-ai/dsh-hook-protocol'
+export const HOOK_HOST_PACKAGES = [HOOK_BRIDGE_PKG, HOOK_PROTOCOL_PKG]
+
 const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 /**
@@ -323,35 +328,63 @@ const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'
  * `bareModuleBaseUrl`, so bare package names in cordis.patch.yml resolve from
  * the loader's own location — the DSH installation's node_modules, which npm
  * puts under the npx cache (`~/.npm/_npx/<hash>/node_modules` on POSIX,
- * `%LocalAppData%\npm-cache\_npx\<hash>\node_modules` on Windows).
+ * `%LocalAppData%\npm-cache\_npx\<hash>\node_modules` on Windows). We also
+ * accept profile and global install trees so other install modes provision
+ * host packages (hooks bridge, LSP) into the tree DSH actually loads from.
  */
 export function findDshMainNodeModules() {
+  const hasLoader = (nm) => existsSync(join(nm, '@deepseek-ai', 'dsh-app-boot'))
+
   // 1) NODE_PATH (npx exec sets it to the cached install for bin scripts)
   const np = process.env.NODE_PATH
   if (np) {
     for (const p of np.split(/[;:]/).filter(Boolean)) {
-      if (existsSync(join(p, '@deepseek-ai', 'dsh-app-boot'))) return p
+      if (hasLoader(p)) return p
     }
   }
   // 2) npm npx cache scan (Windows then POSIX)
-  const candidates = []
+  const cacheRoots = []
   if (process.platform === 'win32') {
-    candidates.push(join(homedir(), 'AppData', 'Local', 'npm-cache', '_npx'))
+    cacheRoots.push(join(homedir(), 'AppData', 'Local', 'npm-cache', '_npx'))
   } else {
-    candidates.push(join(homedir(), '.npm', '_npx'))
+    cacheRoots.push(join(homedir(), '.npm', '_npx'))
   }
-  for (const cacheRoot of candidates) {
+  for (const cacheRoot of cacheRoots) {
     try {
       if (!existsSync(cacheRoot)) continue
       for (const hash of readdirSync(cacheRoot)) {
         const nm = join(cacheRoot, hash, 'node_modules')
-        if (existsSync(join(nm, '@deepseek-ai', 'dsh-app-boot'))) return nm
+        if (hasLoader(nm)) return nm
       }
     } catch {
       // keep scanning
     }
   }
+  // 3) Profile runtime tree ($DSH_HOME/profiles/<profile>/node_modules)
+  const profilesRoot = join(dshHome(), 'profiles')
+  try {
+    if (existsSync(profilesRoot)) {
+      for (const entry of readdirSync(profilesRoot)) {
+        const nm = join(profilesRoot, entry, 'node_modules')
+        if (hasLoader(nm)) return nm
+      }
+    }
+  } catch {}
+  // 4) Global npm install (`npm i -g @deepseek-ai/dsh`)
+  try {
+    const g = globalNpmRoot()
+    if (g && hasLoader(g)) return g
+  } catch {}
   return null
+}
+
+/** `npm root -g` (sync; used by the install-tree discovery fallback). */
+function globalNpmRoot() {
+  const args = ['root', '-g']
+  if (process.platform === 'win32') {
+    return String(execFileSync('cmd', ['/c', NPM_BIN, ...args], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })).trim()
+  }
+  return String(execFileSync(NPM_BIN, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).trim()
 }
 
 function execFileP(bin, args, cwd) {
@@ -386,15 +419,46 @@ function runNpm(args, cwd) {
   return attempt(0)
 }
 
-/** Highest published version of a package (prerelease-aware), or '' when unknown. */
-export async function latestPublishedVersion(packageName) {
+/** Major.minor line of a semver string (e.g. "1.2.3-rc.1" -> "1.2"). */
+function versionLine(v) {
+  return String(v).split('-')[0].split('.').slice(0, 2).join('.')
+}
+
+/** Read the running DSH release version from its installation, or '' when unknown. */
+export function findDshVersion() {
+  const main = findDshMainNodeModules()
+  if (!main) return ''
+  for (const anchor of ['dsh-app-boot', 'dsh-session', 'dsh']) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(main, '@deepseek-ai', anchor, 'package.json'), 'utf8'))
+      if (typeof pkg.version === 'string' && pkg.version.trim()) return pkg.version.trim()
+    } catch {}
+  }
+  return ''
+}
+
+/**
+ * Highest published version of a package whose major.minor line matches the
+ * running DSH release — the host bridge packages the hub provisions
+ * (@deepseek-ai/dsh-hooks-claude-code, dsh-lsp-stdio, ...) are published in
+ * lockstep with DSH, so the same line is the compatible one. Falls back to the
+ * highest overall when the running DSH's line has no published match. This is
+ * deliberately neither the `latest` dist-tag (which can lag behind — e.g. the
+ * hooks bridge latest=0.0.1-rc.5 while 0.1.1-rc.2 exists) nor a hard pin (which
+ * would break once the user's DSH moves to a new line).
+ */
+export async function matchingPublishedVersion(packageName) {
   try {
     const out = await runNpm(['view', packageName, 'versions', '--json'], dirname(cordisPatchPath()))
     const versions = JSON.parse(out)
     if (!Array.isArray(versions)) return ''
+    const all = versions.filter((v) => typeof v === 'string')
+    if (all.length === 0) return ''
+    const line = versionLine(findDshVersion())
+    const pool = line ? all.filter((v) => versionLine(v) === line) : []
+    const candidates = pool.length > 0 ? pool : all
     let best = ''
-    for (const v of versions) {
-      if (typeof v !== 'string') continue
+    for (const v of candidates) {
       if (semverGt(v, best)) best = v
     }
     return best
@@ -451,9 +515,13 @@ export async function installProfilePackages(packageNames) {
   const installed = []
   for (const name of need) {
     try {
-      const ver = await latestPublishedVersion(name)
-      if (!ver) return { ok: false, error: `无法确定 ${name} 的最新版本`, installed }
-      const tarballOut = await runNpm(['view', name, 'dist.tarball'], dirname(main))
+      // Resolve a version compatible with the running DSH release (same major.minor
+      // line as the installed DSH), not the `latest` dist-tag which can lag behind.
+      const ver = await matchingPublishedVersion(name)
+      if (!ver) return { ok: false, error: `无法确定 ${name} 的匹配版本`, installed }
+      // Pin the tarball to the resolved version: `npm view <name> dist.tarball`
+      // without a specifier resolves the `latest` dist-tag, which can differ.
+      const tarballOut = await runNpm(['view', `${name}@${ver}`, 'dist.tarball'], dirname(main))
       const url = tarballOut.trim().split('\n').pop()?.trim()
       if (!url) return { ok: false, error: `无法获取 ${name} 的 tarball 地址`, installed }
       const res = await fetch(url)
@@ -636,6 +704,63 @@ export function registerPluginLsp(pluginName) {
     results.push(registerLspServer(pluginName, s.name, s))
   }
   return results
+}
+
+/** Patch id of a plugin's Claude hooks bridge entry. */
+export function getHookBridgeId(pluginName) {
+  return `hooks-${slugify(pluginName)}`
+}
+
+/**
+ * Register an installed plugin's Claude/Codex hooks into DSH by inserting a
+ * `@deepseek-ai/dsh-hooks-claude-code` bridge entry into cordis.patch.yml. The
+ * bridge runs an unmodified Claude Code hooks.json on DSH's interception points
+ * (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop /
+ * SubagentStart / SubagentStop), with `${CLAUDE_PLUGIN_ROOT}` substituted from
+ * `pluginRoot`. DSH's HMR re-applies the tree within ~1s, no restart needed.
+ *
+ * The bridge package (and its hook-protocol peer) is provisioned into the DSH
+ * installation first, mirroring the LSP flow — a patch entry whose package is
+ * missing would crash the DSH plugin tree, so we refuse to write it on failure.
+ */
+export async function registerPluginHooks(pluginName, installPackages = true) {
+  const target = installedDir(pluginName)
+  const configPath = resolveHookConfigPath(target)
+  if (!configPath) return { ok: true, registered: [] }
+
+  if (installPackages) {
+    const pkg = await installProfilePackages(HOOK_HOST_PACKAGES)
+    if (!pkg.ok) return { ok: false, error: pkg.error, registered: [] }
+  }
+
+  const patch = readCordisPatch()
+  const id = getHookBridgeId(pluginName)
+  const block = ensureInsertBlock(patch)
+  block.insert = block.insert.filter((item) => item && item.id !== id)
+  block.insert.push({
+    id,
+    name: HOOK_BRIDGE_PKG,
+    config: {
+      configPath,
+      pluginRoot: target,
+    },
+  })
+  writeCordisPatch(patch)
+  return { ok: true, registered: [configPath] }
+}
+
+/** Remove a plugin's hooks bridge entry from cordis.patch.yml. */
+export function unregisterPluginHooks(pluginName) {
+  const patch = readCordisPatch()
+  const id = getHookBridgeId(pluginName)
+  for (const item of patch) {
+    if (item && Array.isArray(item.insert)) {
+      item.insert = item.insert.filter((entry) => entry && entry.id !== id)
+    }
+  }
+  const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
+  writeCordisPatch(cleaned)
+  return { ok: true }
 }
 
 /** Active state for one LSP server of an installed plugin. */
@@ -1325,6 +1450,13 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     }
   }
 
+  // Register the plugin's Claude/Codex hooks into DSH via the hooks bridge.
+  // The bridge package is provisioned into the DSH installation first; failures
+  // are collected into `hookErrors` and surfaced so the install never hard-crashes.
+  const hookErrors = []
+  const hookBridge = await registerPluginHooks(pluginName, installPackages)
+  if (!hookBridge.ok && hookBridge.error) hookErrors.push(hookBridge.error)
+
   const record = {
     id: `${sourceId}/${pluginName}`,
     sourceId,
@@ -1370,6 +1502,7 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     lspServers: lspServers.map((s) => s.name),
     lspPackages,
     lspErrors: lspErrors.length > 0 ? lspErrors : undefined,
+    hookErrors: hookErrors.length > 0 ? hookErrors : undefined,
     convertErrors,
     droppedFields: [],
     restartRequired: false,
@@ -1407,6 +1540,7 @@ export function uninstallPlugin(pluginName) {
       unregisterConnector(pluginName, c.name)
     }
     unregisterPluginLsp(pluginName)
+    unregisterPluginHooks(pluginName)
   }
   if (existsSync(join(target, 'skills'))) unregisterScanDir(join(target, 'skills'))
   if (existsSync(target)) rmSync(target, { recursive: true, force: true })
@@ -1445,6 +1579,7 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
   const skillNames = skills.map((s) => s.command || s.name || pluginName)
   const pluginConnectors = getPluginConnectors(target)
   const lspErrors = []
+  const hookErrors = []
 
   if (enabled) {
     if (existsSync(skillsDir)) registerScanDir(skillsDir, skillNames)
@@ -1460,16 +1595,19 @@ export async function togglePlugin(pluginName, enabled, installPackages = true) 
         }
       }
     }
+    const hook = await registerPluginHooks(pluginName, installPackages)
+    if (!hook.ok && hook.error) hookErrors.push(hook.error)
   } else {
     if (existsSync(skillsDir)) disableScanDir(skillsDir)
     for (const c of pluginConnectors) {
       unregisterConnector(pluginName, c.name)
     }
     unregisterPluginLsp(pluginName)
+    unregisterPluginHooks(pluginName)
   }
   rec.enabled = enabled
   writeState(state)
-  return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined }
+  return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined, hookErrors: hookErrors.length > 0 ? hookErrors : undefined }
 }
 
 /**
