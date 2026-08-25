@@ -4481,6 +4481,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	let currentTabAnim = null;
 	let currentTabTarget = null;
+	// Per-source tab scroll position the user had when they navigated away
+	// from BrowseView. Restored on remount so the user comes back to the
+	// exact tabs they were looking at, not the auto-scroll's "active tab
+	// near the left edge" default.
+	const savedTabScrolls = new Map();
 	function smoothScrollTabsTo(container, targetLeft, duration = 280, onUpdate) {
 		if (!container) return;
 		const startLeft = container.scrollLeft;
@@ -5723,30 +5728,49 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [activeSourceId, scrollActiveTabIntoView]);
 
-		// Restore the active tab into view synchronously after mount. A
-		// `useLayoutEffect` runs in the same commit as the tab DOM (refs
-		// are populated and offsetLeft/offsetWidth are accurate) but before
-		// the first paint, so the user never sees the tabs at scrollLeft=0
-		// (the fresh-mount default) before they jump to the active position.
+		// Restore the user's previous tab-bar scroll position on remount.
+		// The tab container is a horizontal scroller the user controls with
+		// the wheel, by dragging, or by clicking the feathered edges. Their
+		// chosen position is a real UI state. `scrollActiveTabIntoView` is
+		// designed to drag the active tab to a "near the left edge" default
+		// and would overwrite that position on every Back, so:
+		//   - first mount (no saved value): auto-scroll to bring the active
+		//     tab into view, as a convenience
+		//   - every remount after that: restore the exact saved scroll and
+		//     skip the auto-scroll entirely
 		//
-		// Reset the module-level `currentTabTarget` before each scroll: it
-		// is the in-flight target for a smoothScrollTabsTo animation and
-		// `scrollActiveTabIntoView` reads it as the baseline for the next
-		// target. A stale value from an animation that was interrupted by
-		// the BrowseView unmount would otherwise cause the new mount to
-		// compute its target relative to the old (different) scrollLeft.
+		// `currentTabTarget` is also reset so the auto-scroll's `currentScroll`
+		// baseline is the DOM's real scrollLeft, not an in-flight target from
+		// an animation that the BrowseView unmount interrupted.
 		//
-		// The deps include `state.sources` (and its length) because both the
-		// parent's `refreshState` and the manage page's own `refreshState`
-		// (which fires on its own mount) can return a slightly different
-		// sources list after BrowseView mounts, shifting every tab's
-		// offsetLeft. The previous `[]`-deps fix only caught the first
-		// paint — re-runs after the state update would land the user on
-		// the wrong scroll position for that second paint.
+		// The deps include `state.sources` (and its length) so a state
+		// refresh that changes the source list after mount re-applies the
+		// correct position once the new layout is committed.
 		useSafeLayoutEffect(() => {
 			currentTabTarget = null;
+			const container = tabsRef.current;
+			if (!container) return;
+			const saved = savedTabScrolls.get(activeSourceId);
+			if (typeof saved === "number") {
+				container.scrollLeft = saved;
+				updateTabsMask();
+				return;
+			}
 			scrollActiveTabIntoView(activeSourceId, false);
-		}, [activeSourceId, state.sources, state.sources.length, scrollActiveTabIntoView]);
+		}, [activeSourceId, state.sources, state.sources.length, scrollActiveTabIntoView, updateTabsMask]);
+
+		// Persist the user's current scroll for the active source so a later
+		// remount of BrowseView (e.g. after the user opens and closes an
+		// installed plugin's manage page) lands them at the exact same
+		// scroll position rather than at scrollLeft=0.
+		useEffect(() => {
+			return () => {
+				const container = tabsRef.current;
+				if (container && activeSourceId) {
+					savedTabScrolls.set(activeSourceId, container.scrollLeft);
+				}
+			};
+		}, [activeSourceId]);
 
 		// ────────────────────────────── Tab Long-Press Drag Reorder ──────────────────────────────
 		const [dragState, setDragState] = useState(null);
