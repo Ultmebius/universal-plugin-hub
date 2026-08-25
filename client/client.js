@@ -1162,6 +1162,42 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-tab-search-clear:hover {
 	color: var(--cpm-text);
 }
+.cpm-clear-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: 50%;
+	cursor: pointer;
+	color: var(--cpm-muted);
+	opacity: 0.55;
+	flex-shrink: 0;
+	transition: opacity .15s ease, color .15s ease, background .15s ease;
+}
+.cpm-clear-btn:hover {
+	opacity: 1;
+	color: var(--cpm-text);
+	background: rgba(128, 128, 128, 0.15);
+}
+.cpm-clear-btn:focus-visible {
+	outline: 1px solid var(--cpm-accent);
+	outline-offset: 1px;
+}
+.cpm-input-wrap {
+	position: relative;
+	width: 100%;
+}
+.cpm-input-wrap .cpm-clear-btn {
+	position: absolute;
+	right: 6px;
+	top: 50%;
+	transform: translateY(-50%);
+}
+.cpm-input-wrap .cpm-input { padding-right: 30px; }
 .cpm-hint {
 	color: var(--cpm-muted);
 	font-size: 12px;
@@ -5325,6 +5361,34 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
+	// ────────────────────────────── Clearable Input Helper ──────────────────────────────
+	// Renders a refined × button inside the input's right edge; shown only while
+	// there is content. onMouseDown preventDefault keeps focus in the input after clicking.
+	function ClearBtn({ value, onClear }) {
+		if (!value) return null;
+		return h("button", {
+			type: "button",
+			className: "cpm-clear-btn",
+			"aria-label": "清空",
+			onMouseDown: (e) => e.preventDefault(),
+			onClick: onClear,
+		},
+			h("svg", {
+				width: 10,
+				height: 10,
+				viewBox: "0 0 24 24",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: 2.5,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+			},
+				h("line", { x1: "18", y1: "6", x2: "6", y2: "18" }),
+				h("line", { x1: "6", y1: "6", x2: "18", y2: "18" }),
+			),
+		);
+	}
+
 	// ────────────────────────────── Browse & Detail Container ──────────────────────────────
 	function BrowseView({
 		view,
@@ -6512,7 +6576,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				else if (result.converted && result.converted.length) parts.push(`${result.converted.length} 个子代理`);
 				if (result.connectors && result.connectors.length) parts.push(`${result.connectors.length} 个 MCP 服务`);
 				const summary = parts.length ? `${parts.join("、")}已就绪。` : "插件已安装就绪。";
-				showToast("安装完成", `${summary}技能与配置已实时就绪并生效。`, { restart: false });
+				showToast("安装完成", summary, { restart: false });
 				setInstallFor(null);
 				await refreshState();
 				onInstalled();
@@ -6534,6 +6598,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							value: query,
 							onChange: (e) => setQuery(e.target.value),
 						}),
+						h(ClearBtn, { value: query, onClear: () => setQuery("") }),
 					),
 				),
 				h("div", { className: "cpm-topbar-row2" },
@@ -7075,17 +7140,21 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					h("div", { className: "cpm-dialog-title", key: "title" }, "添加插件源"),
 					h("div", { className: "cpm-field", key: "f", style: { marginBottom: 0 } },
 						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址"),
-						h("input", {
-							className: "cpm-input",
-							placeholder: "例如 anthropics/claude-plugins-community 或 https://github.com/...",
-							value: url,
-							onChange: (e) => setUrl(e.target.value),
-							onKeyDown: (e) => {
-								if (e.key === "Enter" && !busy && url.trim()) ensure();
-							},
-							autoFocus: true,
-						}),
+						h("div", { className: "cpm-input-wrap" },
+							h("input", {
+								className: "cpm-input",
+								placeholder: "Select a repository",
+								value: url,
+								onChange: (e) => setUrl(e.target.value),
+								onKeyDown: (e) => {
+									if (e.key === "Enter" && !busy && url.trim()) ensure();
+								},
+								autoFocus: true,
+							}),
+							h(ClearBtn, { value: url, onClear: () => setUrl("") }),
+						),
 						h("div", {
+							className: "cpm-smart-md",
 							style: {
 								color: "var(--cpm-muted)",
 								fontSize: "11.5px",
@@ -7093,7 +7162,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								textAlign: "left",
 								lineHeight: 1.3,
 							},
-						}, "支持 owner/repo 缩写或完整 https:// URL"),
+						}, renderInlineMarkdownNodes("A GitHub `owner/repo` or a git repository URL")),
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a", style: { marginTop: 0 } },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
@@ -7150,18 +7219,21 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									h("div", { className: "cpm-radio-card-title" }, "我自己命名")
 								),
 								h("div", { className: "cpm-radio-card-desc" }, "自定义简短易记的分类导航标签名："),
-								h("input", {
-									ref: customInputRef,
-									className: "cpm-input cpm-source-custom-input",
-									value: customName,
-									placeholder: "输入自定义标签名",
-									onChange: (e) => { setCustomName(e.target.value); setMode("custom"); },
-									onFocus: () => setMode("custom"),
-									onClick: (e) => e.stopPropagation(),
-									onKeyDown: (e) => {
-										if (e.key === "Enter" && !busy && customName.trim()) confirm();
-									}
-								})
+								h("div", { className: "cpm-input-wrap", },
+									h("input", {
+										ref: customInputRef,
+										className: "cpm-input cpm-source-custom-input",
+										value: customName,
+										placeholder: "输入自定义标签名",
+										onChange: (e) => { setCustomName(e.target.value); setMode("custom"); },
+										onFocus: () => setMode("custom"),
+										onClick: (e) => e.stopPropagation(),
+										onKeyDown: (e) => {
+											if (e.key === "Enter" && !busy && customName.trim()) confirm();
+										}
+									}),
+									h(ClearBtn, { value: customName, onClear: () => setCustomName("") }),
+								)
 							)
 						)
 					),
@@ -8284,12 +8356,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						}),
 						tabQuery && h("button", {
 							className: "cpm-tab-search-clear",
+							"aria-label": "清空",
 							onMouseDown: (e) => e.preventDefault(),
 							onClick: () => {
 								setTabQuery("");
 								if (searchInputRef.current) searchInputRef.current.focus();
 							},
-						}, "×"),
+						},
+							h("svg", {
+								width: 10,
+								height: 10,
+								viewBox: "0 0 24 24",
+								fill: "none",
+								stroke: "currentColor",
+								strokeWidth: 2.5,
+								strokeLinecap: "round",
+								strokeLinejoin: "round",
+							},
+								h("line", { x1: "18", y1: "6", x2: "6", y2: "18" }),
+								h("line", { x1: "6", y1: "6", x2: "18", y2: "18" }),
+							),
+						),
 					),
 				),
 			),
