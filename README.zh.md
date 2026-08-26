@@ -1,8 +1,3 @@
-<p align="center">
-  <img src="assets/logo.svg" width="96" alt="Universal Plugin Hub logo">
-</p>
-<!-- Logo 占位：替换为项目 Logo 图片（建议 svg/png），保存为 assets/logo.svg -->
-
 # Universal Plugin Hub
 
 English | [中文](README.zh.md)
@@ -14,8 +9,7 @@ English | [中文](README.zh.md)
 
 > 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。在一个界面里浏览多个 Git 源的插件，一键安装，插件中的技能、子代理、MCP 连接器和 LSP 服务器自动接入 DSH。
 
-![主界面总览](assets/hero.png)
-<!-- 截图占位 #1（主图）：替换为插件市场浏览页全屏截图——顶部搜索框、源标签栏、分类过滤与插件卡片网格。保存为 assets/hero.png -->
+![Universal Plugin Hub overview](assets\hero.png)
 
 ## 它能做什么
 
