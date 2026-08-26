@@ -1,11 +1,24 @@
+<p align="center">
+  <img src="assets/logo.svg" width="96" alt="Universal Plugin Hub logo">
+</p>
+<!-- Logo 占位：替换为项目 Logo 图片（建议 svg/png），保存为 assets/logo.svg -->
+
 # Universal Plugin Hub
 
 English | [中文](README.zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.0--preview-4D6BFE)](https://github.com/CaesarEmperor/universal-plugin-hub)
 [![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
+[![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
+[![Cordis](https://img.shields.io/badge/Platform-Cordis-2E3A59)](https://github.com/topics/cordis)
+[![Marketplace](https://img.shields.io/badge/Hub-Marketplace-18181b)](https://github.com/topics/marketplace)
 
 > Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Browse plugins from multiple Git sources, install with one click, and let their skills, subagents, MCP connectors, LSP servers, and hooks light up in DSH.
+
+![Universal Plugin Hub overview](assets/hero.png)
+<!-- 截图占位 #1（主图）：替换为插件市场浏览页全屏截图——顶部搜索框、源标签栏、分类过滤与插件卡片网格。保存为 assets/hero.png -->
 
 ## What it does
 
@@ -75,6 +88,9 @@ Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
 4. Click **Install**. The hub copies the plugin, registers skills and subagents, wires any LSP servers and Claude/Codex hooks into DSH, and auto-connects what needs no setup.
 5. Manage installed plugins from the manage page — enable/disable, toggle connectors and individual MCP tools, verify auth tokens, update, or remove.
+
+![Install dialog](assets/install-flow.png)
+<!-- 截图占位 #2（安装）：替换为安装确认对话框，或某个已装插件管理页的截图。保存为 assets/install-flow.png -->
 
 ## Project structure
 

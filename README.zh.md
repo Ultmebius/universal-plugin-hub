@@ -1,11 +1,24 @@
+<p align="center">
+  <img src="assets/logo.svg" width="96" alt="Universal Plugin Hub logo">
+</p>
+<!-- Logo 占位：替换为项目 Logo 图片（建议 svg/png），保存为 assets/logo.svg -->
+
 # Universal Plugin Hub
 
 English | [中文](README.zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.0--preview-4D6BFE)](https://github.com/CaesarEmperor/universal-plugin-hub)
 [![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
+[![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
+[![Cordis](https://img.shields.io/badge/Platform-Cordis-2E3A59)](https://github.com/topics/cordis)
+[![Marketplace](https://img.shields.io/badge/Hub-Marketplace-18181b)](https://github.com/topics/marketplace)
 
 > 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。在一个界面里浏览多个 Git 源的插件，一键安装，插件中的技能、子代理、MCP 连接器和 LSP 服务器自动接入 DSH。
+
+![主界面总览](assets/hero.png)
+<!-- 截图占位 #1（主图）：替换为插件市场浏览页全屏截图——顶部搜索框、源标签栏、分类过滤与插件卡片网格。保存为 assets/hero.png -->
 
 ## 它能做什么
 
@@ -75,6 +88,9 @@ npm install
 3. 浏览或搜索。点开插件看它带什么：技能、子代理、连接器、LSP 服务器。
 4. 点 **Install**。Hub 复制插件、注册技能和子代理、把 LSP 服务器和 Claude/Codex hooks 接入 DSH、自动接上无需配置的连接器。
 5. 在管理页管理已装插件：启用或禁用、开关连接器与单个 MCP 工具、验证授权、更新、卸载。
+
+![安装对话框](assets/install-flow.png)
+<!-- 截图占位 #2（安装）：替换为安装确认对话框，或某个已装插件管理页的截图。保存为 assets/install-flow.png -->
 
 ## 项目结构
 
