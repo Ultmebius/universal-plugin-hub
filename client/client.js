@@ -5634,14 +5634,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, []);
 
-		// Re-assert the mask whenever the drag state re-renders the tab bar.
-		// The mask class now lives in React state, so it survives the className
-		// swap to `is-dragging-mode` — imperative classList edits were being
-		// wiped by React's className diff on every dragState change.
-		useSafeLayoutEffect(() => {
-			updateTabsMask();
-		}, [dragState?.active, updateTabsMask]);
-
 		// Native wheel listener for smooth horizontal tab scrolling with passive: false
 		useEffect(() => {
 			const el = tabsRef.current;
@@ -5809,6 +5801,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		// ────────────────────────────── Tab Long-Press Drag Reorder ──────────────────────────────
 		const [dragState, setDragState] = useState(null);
+
+		// Re-assert the mask whenever the drag state re-renders the tab bar.
+		// The mask class now lives in React state, so it survives the className
+		// swap to `is-dragging-mode` — imperative classList edits were being
+		// wiped by React's className diff on every dragState change.
+		// (`dragState` must be declared above this hook, not before updateTabsMask.)
+		useSafeLayoutEffect(() => {
+			updateTabsMask();
+		}, [dragState?.active, updateTabsMask]);
+
 		const dragLiveRef = useRef({
 			active: false,
 			isSnapping: false,
