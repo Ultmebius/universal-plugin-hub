@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/logo.svg" width="96" alt="Universal Plugin Hub logo">
-</p>
-
 # Universal Plugin Hub
 
 English | [中文](README.zh.md)
@@ -9,17 +5,14 @@ English | [中文](README.zh.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
 
-> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Browse plugins from multiple Git sources, install with one click, and let their skills, subagents, MCP connectors, and LSP servers light up in DSH.
-
-![Universal Plugin Hub overview](assets/hero.png)
-<!-- SCREENSHOT #1 (hero): replace with a full-screen shot of the browse page — search bar on top, category tabs, plugin card grid. Save as assets/hero.png -->
+> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Browse plugins from multiple Git sources, install with one click, and let their skills, subagents, MCP connectors, LSP servers, and hooks light up in DSH.
 
 ## What it does
 
 Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin sources (the Anthropic official catalog, community repos, or any Git repository), lists what each plugin actually provides, and wires those pieces into DSH:
 
-- skills and slash commands become agent skills
-- subagents are compiled into hub skills DSH can delegate to
+- skills and slash commands become agent skills (`commands/` is mirrored into `skills/`, as is a root `SKILL.md`)
+- subagents are compiled into one delegated Hub skill per plugin (`skills/<plugin>-agents/`)
 - MCP connectors register into `cordis.patch.yml` as `@deepseek-ai/dsh-mcp-client` entries
 - LSP servers register as `@deepseek-ai/dsh-lsp-stdio` entries — install `typescript-lsp`, restart DSH, and the `lsp` tool works
 - hooks are loaded into DSH by registering a per-plugin `@deepseek-ai/dsh-hooks-claude-code` bridge entry; the bridge runs the plugin's native Claude Code `hooks.json` on DSH's own interception points
@@ -27,17 +20,30 @@ Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin source
 ## Features
 
 - **Multiple sources** — add or remove Git repositories as plugin sources; the built-in Anthropic catalog is always there
-- **Skill & subagent scanning** — detects skills, slash commands, and subagent definitions in a plugin, and compiles subagents into hub skills
-- **MCP connectors** — connectors that need no auth register automatically on install; the rest you verify and enable from the manage page
+- **Drag-to-reorder source tabs** — hold and drag a source tab to reorder it (the bar auto-scrolls at the edges, so you can reach the last tab); the order persists
+- **Search, filter & sort** — fuzzy search across the current source plus filter and sort controls; hover a card for a quick preview before opening it
+- **Skill & subagent scanning** — detects skills, slash commands, and subagent definitions in a plugin, and compiles subagents into a Hub skill DSH can delegate to
+- **MCP connectors** — connectors that need no auth register automatically on install; the rest you verify and enable from the manage page, and you can toggle individual MCP tools on or off per connector
 - **LSP servers** — plugins declaring `lspServers` (clangd, pyright, typescript-lsp, and more) are registered into DSH on install; the detail page shows them with an active dot
 - **Hooks** — a plugin's Claude/Codex `hooks.json` is parsed and loaded into DSH via the Claude hooks bridge; the detail page shows the real events (e.g. `SessionStart`, `PreToolUse: Bash`) rather than filenames
-- **Drag-to-reorder tags** — hold and drag tags to reorder, with a lifted-card visual; the order persists
 - **Light / dark theme** — follows the DSH UI theme
 
 ## Requirements
 
 - Node.js 18+
-- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). The hub's own install (`dsh plugin add universal-plugin-hub`) runs a `postinstall` script that pre-provisions the 5 LSP/hooks host packages into the DSH installation — versions are resolved to match the running DSH release, and a provisioning failure fails the hub install outright. After that, plugins declaring LSP servers or Claude/Codex hooks register as a single `cordis.patch.yml` write each (DSH HMR picks them up within ~1s).
+- DSH with the `web` profile (0.1.0-rc.6 or newer recommended). The hub's own install (`dsh plugin add universal-plugin-hub`) runs a `postinstall` script that pre-provisions the 5 LSP/hook host packages into the DSH installation — versions are resolved to match the running DSH release, and a provisioning failure fails the hub install outright. After that, plugins declaring LSP servers or Claude/Codex hooks register as a single `cordis.patch.yml` write each (DSH HMR picks them up within ~1s).
+
+## Where data lives
+
+All hub state sits under `~/.dsh/agent-skills/universal-plugin-hub/`:
+
+- `state.json` — sources, installed-plugin records, and their order
+- `market/<sourceId>/` — shallow (`--depth 1`) clones of each plugin source
+- `market/remote/` — clones of plugin repositories installed from remote URLs
+- `installed/<name>/` — the working copy of each installed plugin (skills, agents, connectors)
+- `icons/` — cached plugin icons, served through the hub's `/icon` proxy
+
+Connectors, LSP servers, and hooks register by writing entries into the DSH cordis patch (`$DSH_HOME/profiles/web/cordis.patch.yml`); per-tool MCP switches live in `~/.dsh/.mcp-tools-state.json`.
 
 ## Install
 
@@ -68,17 +74,14 @@ Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 2. Optional: add another source, e.g. `anthropics/claude-plugins-community`.
 3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
 4. Click **Install**. The hub copies the plugin, registers skills and subagents, wires any LSP servers and Claude/Codex hooks into DSH, and auto-connects what needs no setup.
-5. Manage installed plugins from the manage page — enable/disable, toggle connectors, verify auth tokens, update, or remove.
-
-![install dialog](assets/install-flow.png)
-<!-- SCREENSHOT #2 (install): replace with the install dialog or the manage page for an installed plugin. Save as assets/install-flow.png -->
+5. Manage installed plugins from the manage page — enable/disable, toggle connectors and individual MCP tools, verify auth tokens, update, or remove.
 
 ## Project structure
 
 ```
-src/       server: routes, install lifecycle, marketplace parser, git ops
-client/    UI (single React file, loaded by the DSH client runtime)
-scratch/   dev scripts and tests (not shipped)
+src/       server: REST routes, marketplace parser, git ops, agents compiler, install lifecycle
+client/    UI — a single React file loaded through the DSH client runtime (no build step)
+scripts/   postinstall — pre-provisions the 5 LSP/hook host packages into the DSH install
 ```
 
 ## Development
