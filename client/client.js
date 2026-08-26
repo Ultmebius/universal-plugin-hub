@@ -5432,6 +5432,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
 		const tabRefs = useRef({});
+		const [tabsMaskClass, setTabsMaskClass] = useState("");
 		const [gridMaskClass, setGridMaskClass] = useState("");
 		// Per-source snapshot of installed plugin names used by the default
 		// "installed-first" sort. Lives on module-level SESSION_STORE, not a
@@ -5439,16 +5440,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// happens when the manage page opens, and it must NOT re-run against
 		// live `state.plugins` on every re-render (which is what kept a
 		// freshly installed plugin in its alphabetical slot after install).
-		// A source's snapshot is built only on its first visit this session;
-		// afterwards it is sticky until an explicit user re-sort (clicking the
-		// current tab, picking a filter/sort menu item, or market refresh)
-		// rebuilds it via `refreshInstalledSnapshot`.
+		// A source's snapshot is built on its first visit this session, then
+		// stays sticky across the session UNLESS the actual installed set
+		// for the source changes (install / uninstall) — the useEffect below
+		// detects that and refreshes. Explicit re-sort (clicking the current
+		// tab, picking a filter/sort menu item, or market refresh) still goes
+		// through `refreshInstalledSnapshot` to promote plugins installed
+		// since the last visit even before the next state refresh lands.
 		const installedSnapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
-		if (!installedSnapshots[activeSourceId]) {
-			installedSnapshots[activeSourceId] = new Set(
-				(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
-			);
-		}
 		const sortInstalledSnapshot = installedSnapshots[activeSourceId] || new Set();
 
 		// Bumped whenever the user explicitly re-selects a filter/sort menu
@@ -5471,6 +5470,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			snapshots[sid] = new Set(
 				(state.plugins || []).filter((p) => p.sourceId === sid).map((p) => p.name)
 			);
+		}, [activeSourceId, state.plugins]);
+
+		// Sync the installed-snapshot for the active source whenever the actual
+		// installed set for that source changes (install / uninstall). The
+		// `existing.size === current.size` + `every` check avoids touching the
+		// snapshot on renders that don't change the set, so the "installed-first"
+		// order stays stable for the user as they scroll/type/browse.
+		useEffect(() => {
+			if (!activeSourceId) return;
+			const snapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
+			const current = new Set(
+				(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
+			);
+			const existing = snapshots[activeSourceId];
+			const sameMembers = existing && existing.size === current.size && [...existing].every((n) => current.has(n));
+			if (!sameMembers) snapshots[activeSourceId] = current;
 		}, [activeSourceId, state.plugins]);
 
 		// Detail View Data Fetching & LRU Cache
@@ -5602,31 +5617,30 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const { scrollLeft, scrollWidth, clientWidth } = el;
 			const maxScroll = scrollWidth - clientWidth;
 			if (maxScroll <= 2) {
-				el.classList.remove("mask-left", "mask-right", "mask-both");
+				setTabsMaskClass("");
 				return;
 			}
 			const canScrollLeft = scrollLeft > 2;
 			const canScrollRight = scrollLeft < maxScroll - 2;
 
 			if (canScrollLeft && canScrollRight) {
-				if (!el.classList.contains("mask-both")) {
-					el.classList.remove("mask-left", "mask-right");
-					el.classList.add("mask-both");
-				}
+				setTabsMaskClass(" mask-both");
 			} else if (canScrollRight) {
-				if (!el.classList.contains("mask-right")) {
-					el.classList.remove("mask-left", "mask-both");
-					el.classList.add("mask-right");
-				}
+				setTabsMaskClass(" mask-right");
 			} else if (canScrollLeft) {
-				if (!el.classList.contains("mask-left")) {
-					el.classList.remove("mask-right", "mask-both");
-					el.classList.add("mask-left");
-				}
+				setTabsMaskClass(" mask-left");
 			} else {
-				el.classList.remove("mask-left", "mask-right", "mask-both");
+				setTabsMaskClass("");
 			}
 		}, []);
+
+		// Re-assert the mask whenever the drag state re-renders the tab bar.
+		// The mask class now lives in React state, so it survives the className
+		// swap to `is-dragging-mode` — imperative classList edits were being
+		// wiped by React's className diff on every dragState change.
+		useSafeLayoutEffect(() => {
+			updateTabsMask();
+		}, [dragState?.active, updateTabsMask]);
 
 		// Native wheel listener for smooth horizontal tab scrolling with passive: false
 		useEffect(() => {
@@ -5644,14 +5658,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				e.stopPropagation();
 
 				if (hoveredPreview) setHoveredPreview(null);
-				if (currentTabAnim) {
-					cancelAnimationFrame(currentTabAnim);
-					currentTabAnim = null;
-					currentTabTarget = null;
-				}
 
-				el.scrollLeft = Math.max(0, Math.min(maxLeft, el.scrollLeft + delta));
-				updateTabsMask();
+				const targetLeft = Math.max(0, Math.min(maxLeft, el.scrollLeft + delta));
+				smoothScrollTabsTo(el, targetLeft, 180, updateTabsMask);
 			};
 
 			el.addEventListener("wheel", handleWheel, { passive: false });
@@ -5669,6 +5678,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 				if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
 				if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+				if (currentTabAnim) {
+					cancelAnimationFrame(currentTabAnim);
+					currentTabAnim = null;
+					currentTabTarget = null;
+				}
 			};
 		}, []);
 
@@ -6666,7 +6680,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				h("div", { className: "cpm-topbar-row2" },
 					h("div", {
 						ref: tabsRef,
-						className: "cpm-topbar-left" + (dragState?.active ? " is-dragging-mode" : ""),
+						className: "cpm-topbar-left" + (dragState?.active ? " is-dragging-mode" : "") + tabsMaskClass,
 						onScroll: updateTabsMask,
 					},
 						state.sources.map((s, idx) => {
@@ -6994,6 +7008,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									showToast("插件源已删除", `已移除分类「${toRemove.name}」`, { restart: false });
 									if (SESSION_STORE.sourceViews) delete SESSION_STORE.sourceViews[toRemove.id];
 									if (SESSION_STORE.scrollTops) delete SESSION_STORE.scrollTops[toRemove.id];
+									if (SESSION_STORE.installedSnapshots) delete SESSION_STORE.installedSnapshots[toRemove.id];
+									savedTabScrolls.delete(toRemove.id);
 									if (activeSourceId === toRemove.id) {
 										setActiveSourceId("anthropic");
 									}

@@ -971,6 +971,14 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
     headers: { ...baseHeaders, ...customHeaders },
     oauth: isStdio ? 'none' : oauth,
   })
+  // Re-auth (or transport switch) changes which remote the connector talks to.
+  // The cached tool list was captured against the old connection, so drop it
+  // here — fetchConnectorTools will repopulate on the next list call.
+  const toolsKey = `${pluginName}::${connectorName}`
+  if (MEMORY_TOOLS_CACHE.has(toolsKey)) {
+    const mem = MEMORY_TOOLS_CACHE.get(toolsKey)
+    MEMORY_TOOLS_CACHE.set(toolsKey, { ...mem, tools: [], disabledTools: mem.disabledTools || [] })
+  }
   return { ok: true }
 }
 

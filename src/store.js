@@ -8,7 +8,7 @@
  */
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync } from 'node:fs'
 
 let STATE_CACHE = null
 let STATE_CACHE_MTIME = 0
