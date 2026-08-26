@@ -8,12 +8,9 @@
 English | [中文](README.zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0--preview-4D6BFE)](https://github.com/CaesarEmperor/universal-plugin-hub)
 [![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
-[![Cordis](https://img.shields.io/badge/Platform-Cordis-2E3A59)](https://github.com/topics/cordis)
-[![Marketplace](https://img.shields.io/badge/Hub-Marketplace-18181b)](https://github.com/topics/marketplace)
 
 > Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Browse plugins from multiple Git sources, install with one click, and let their skills, subagents, MCP connectors, LSP servers, and hooks light up in DSH.
 

@@ -8,12 +8,9 @@
 English | [中文](README.zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0--preview-4D6BFE)](https://github.com/CaesarEmperor/universal-plugin-hub)
 [![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
-[![Cordis](https://img.shields.io/badge/Platform-Cordis-2E3A59)](https://github.com/topics/cordis)
-[![Marketplace](https://img.shields.io/badge/Hub-Marketplace-18181b)](https://github.com/topics/marketplace)
 
 > 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。在一个界面里浏览多个 Git 源的插件，一键安装，插件中的技能、子代理、MCP 连接器和 LSP 服务器自动接入 DSH。
 
