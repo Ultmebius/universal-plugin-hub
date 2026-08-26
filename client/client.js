@@ -4851,7 +4851,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const autoRefreshedRef = useRef(null);
 		useEffect(() => {
 			if (!state.sources || state.sources.length === 0) return;
-			const sourceKey = state.sources.map((s) => s.id).join(",");
+			// Sort the ids: a tab-bar reorder changes the ORDER but not the SET of
+			// sources. Keying by the unordered join means reorders don't re-run the
+			// whole market refresh (which was also spamming /market/refresh failures).
+			const sourceKey = state.sources.map((s) => s.id).sort().join(",");
 			if (autoRefreshedRef.current === sourceKey) return;
 			autoRefreshedRef.current = sourceKey;
 			let isMounted = true;
@@ -4869,8 +4872,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 			})();
 			return () => {
+				// Deliberately do NOT touch toastTimerRef here. Clearing the toast
+				// timer on every state.sources change cancelled the `setToast(null)`
+				// timeout that showToast had just armed, so the reorder toast stayed
+				// visible forever.
 				isMounted = false;
-				if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
 			};
 		}, [state.sources]);
 
@@ -5870,7 +5876,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const lastMoveable = numSlots - 1;
 
 				const firstCenter = baseSlots[firstMoveable].offsetLeft + (baseSlots[firstMoveable].width / 2);
-				const lastCenter = baseSlots[lastMoveable].offsetLeft + (baseSlots[lastMoveable].width / 2);
+				// The last slot's center may be scrolled past the container's
+				// right edge, where the cursor can never reach it. Clamp the
+				// drop boundary to the right edge (in content coordinates) so
+				// dragging the tab to the visible end of the bar actually
+				// lands in the last slot instead of silently stopping at the
+				// second-to-last one.
+				const lastCenter = Math.min(
+					baseSlots[lastMoveable].offsetLeft + (baseSlots[lastMoveable].width / 2),
+					curScroll + cRect.width
+				);
 
 				if (contentCenter <= firstCenter) {
 					newIdx = firstMoveable;
@@ -5942,6 +5957,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 
 				if (toIndex !== fromIndex && fromIndex >= 1 && toIndex >= 1) {
+					const scrollEl = tabsRef.current;
+					if (scrollEl) savedTabScrolls.set(activeSourceId, scrollEl.scrollLeft);
 					const newSources = [...state.sources];
 					const [moved] = newSources.splice(fromIndex, 1);
 					newSources.splice(toIndex, 0, moved);
@@ -6145,6 +6162,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 				snapTimerRef.current = setTimeout(() => {
 					if (toIndex !== fromIndex && fromIndex >= 1 && toIndex >= 1) {
+						// Keep the tab bar where the user left it: the state.sources
+						// change re-runs the tab-scroll restore layout effect, which
+						// would otherwise snap back to the active (leftmost) tab and
+						// hide the tab the user just dropped at the end. Save the
+						// current scroll so that restore keeps the dropped tab visible.
+						const scrollEl = tabsRef.current;
+						if (scrollEl) savedTabScrolls.set(activeSourceId, scrollEl.scrollLeft);
 						const newSources = [...state.sources];
 						const [moved] = newSources.splice(fromIndex, 1);
 						newSources.splice(toIndex, 0, moved);
