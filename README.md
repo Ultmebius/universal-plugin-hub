@@ -7,13 +7,13 @@ English | [中文](README.zh.md)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
 
-> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Browse plugins from multiple Git sources, install with one click, and let their skills, subagents, MCP connectors, LSP servers, and hooks light up in DSH.
+> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The official Claude plugin catalog comes pre-loaded, and any Git repository can be added as a source — install with one click, and skills, subagents, MCP connectors, LSP servers, and hooks wire themselves into DSH.
 
 ![Universal Plugin Hub overview](assets/hero.png)
 
 ## What it does
 
-Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin sources (the Anthropic official catalog, community repos, or any Git repository), lists what each plugin actually provides, and wires those pieces into DSH:
+Universal Plugin Hub is a visual plugin manager for DSH. The official Claude plugin catalog is pre-loaded out of the box; add community repos or any Git repository when you need more. It lists what each plugin actually provides and wires those pieces into DSH:
 
 - skills and slash commands become agent skills (`commands/` is mirrored into `skills/`, as is a root `SKILL.md`)
 - subagents are compiled into one delegated Hub skill per plugin (`skills/<plugin>-agents/`)
@@ -23,7 +23,8 @@ Universal Plugin Hub is a visual plugin manager for DSH. It clones plugin source
 
 ## Features
 
-- **Multiple sources** — add or remove Git repositories as plugin sources; the built-in Anthropic catalog is always there
+- **Ready on first open** — the official Claude plugin catalog (`anthropics/claude-plugins-official`) is pre-loaded; nothing to configure
+- **Multiple sources** — add or remove Git repositories as plugin sources anytime
 - **Drag-to-reorder source tabs** — hold and drag a source tab to reorder it (the bar auto-scrolls at the edges, so you can reach the last tab); the order persists
 - **Search, filter & sort** — fuzzy search across the current source plus filter and sort controls; hover a card for a quick preview before opening it
 - **Skill & subagent scanning** — detects skills, slash commands, and subagent definitions in a plugin, and compiles subagents into a Hub skill DSH can delegate to
@@ -74,7 +75,7 @@ Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 
 ## Quick start
 
-1. Open the panel. The built-in **Anthropic** source is loaded by default.
+1. Open the panel — the official **Claude plugin catalog** is already loaded and searchable. No setup needed.
 2. Optional: add another source, e.g. `anthropics/claude-plugins-community`.
 3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
 4. Click **Install**. The hub copies the plugin, registers skills and subagents, wires any LSP servers and Claude/Codex hooks into DSH, and auto-connects what needs no setup.

@@ -7,13 +7,13 @@ English | [中文](README.zh.md)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
 
-> 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。在一个界面里浏览多个 Git 源的插件，一键安装，插件中的技能、子代理、MCP 连接器和 LSP 服务器自动接入 DSH。
+> 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。内置 Claude 官方插件目录，打开即可浏览；任意 Git 仓库可添加为插件源——一键安装，技能、子代理、MCP 连接器、LSP 服务器与 hooks 自动接线。
 
 ![Universal Plugin Hub overview](assets\hero.png)
 
 ## 它能做什么
 
-Universal Plugin Hub 是 DSH 的可视化插件管理器。它克隆插件源（Anthropic 官方目录、社区仓库、任意 Git 仓库），列出每个插件实际提供的东西，再把它们接入 DSH：
+Universal Plugin Hub 是 DSH 的可视化插件管理器。开箱内置 Claude 官方插件目录，社区仓库或任意 Git 源随时可加；它列出每个插件实际提供的东西，再把它们接入 DSH：
 
 - skills 和斜杠命令变成 agent 技能（`commands/` 镜像进 `skills/`，根目录的 `SKILL.md` 同样处理）
 - 子代理编译成一个 Hub 技能（`skills/<plugin>-agents/`），交给 DSH 委派
@@ -23,7 +23,8 @@ Universal Plugin Hub 是 DSH 的可视化插件管理器。它克隆插件源（
 
 ## 功能
 
-- **多源管理** — 自由添加或移除 Git 仓库作为插件源，内置 Anthropic 官方目录
+- **开箱即用** — 内置 Claude 官方插件目录（`anthropics/claude-plugins-official`），无需任何配置
+- **多源管理** — 随时添加或移除 Git 仓库作为插件源
 - **源标签拖拽排序** — 按住源标签拖拽即可重排（拖到边缘会横向自动滚动，能到达最后一个标签）；顺序持久保存
 - **搜索、过滤与排序** — 当前源内部模糊搜索，外加过滤与排序；悬停卡片可快速预览
 - **技能与子代理扫描** — 自动识别插件中的 skills、斜杠命令和子代理定义，把子代理编译成 DSH 可委派的 Hub 技能
@@ -74,7 +75,7 @@ npm install
 
 ## 快速上手
 
-1. 打开面板。内置的 **Anthropic** 源默认已加载。
+1. 打开面板——Claude 官方插件目录已加载完毕，直接浏览或搜索，无需配置。
 2. 可选：添加其他源，例如 `anthropics/claude-plugins-community`。
 3. 浏览或搜索。点开插件看它带什么：技能、子代理、连接器、LSP 服务器。
 4. 点 **Install**。Hub 复制插件、注册技能和子代理、把 LSP 服务器和 Claude/Codex hooks 接入 DSH、自动接上无需配置的连接器。
