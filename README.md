@@ -33,7 +33,7 @@ When you install a plugin, the hub wires its pieces into DSH automatically:
 - **Tab drag sorting** — drag source tabs to reorder them; the bar auto-scrolls when you drag to an edge, and the order persists
 - **Tab bar scrolling** — the mouse wheel scrolls the bar horizontally, and fade masks at the edges show when more tabs are hidden
 - **Scroll memory** — each source keeps its own scroll position and filter; switching tabs or coming back from a detail page restores them
-- **Back to top** — clicking the selected source's tab again scrolls the grid to the top and re-sorts, bringing recently installed plugins to the front
+- **Quick scroll to top** — clicking the selected source's tab again scrolls the grid to the top and re-sorts, bringing recently installed plugins to the front
 - **Fuzzy search** — ranked matching over name, author, and description, ignoring separators like `-` and `_`; filter and sort controls sit next to the search bar
 - **Hover preview** — hovering a card shows its description and category in a popover
 
