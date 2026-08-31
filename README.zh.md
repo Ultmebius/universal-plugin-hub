@@ -7,14 +7,14 @@ English | [中文](README.zh.md)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
 
-> 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。内置 Claude 官方插件目录，打开即可浏览；任意 Git 仓库可添加为插件源——一键安装，技能、子代理、MCP 连接器、LSP 服务器与 hooks 自动接线。
+> 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。内置 Claude 官方插件目录，打开即可浏览；支持添加 Git 仓库作为插件源——一键安装，技能、子代理、MCP 连接器、LSP 服务器与 hooks 自动接线。
 
 ![主界面总览](assets/hero.png)
 <!-- 截图占位 #1（主图）：替换为插件市场浏览页全屏截图——顶部搜索框、源标签栏与插件卡片网格。保存为 assets/hero.png -->
 
 ## 它能做什么
 
-Universal Plugin Hub 给 DSH 带来一个**图形化的插件市场**。内置 **Claude 官方插件目录**：打开面板、选中插件、点一下安装，装完就能在 DSH 里直接用；也可以添加任意 Git 仓库作为插件源，用同样的方式安装里面的插件。
+Universal Plugin Hub 给 DSH 带来一个**图形化的插件市场**。内置 **Claude 官方插件目录**：打开面板、选中插件、点一下安装，装完就能在 DSH 里直接用；也可以添加 Git 仓库作为插件源，用同样的方式安装里面的插件。
 
 安装插件时，Hub 会自动把这些能力接进 DSH：
 

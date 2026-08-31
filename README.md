@@ -7,14 +7,14 @@ English | [中文](README.zh.md)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
 
-> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The official Claude plugin catalog comes pre-loaded, and any Git repository can be added as a source — install with one click, and skills, subagents, MCP connectors, LSP servers, and hooks wire themselves into DSH.
+> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The official Claude plugin catalog comes pre-loaded, and Git repositories can be added as plugin sources — install with one click, and skills, subagents, MCP connectors, LSP servers, and hooks wire themselves into DSH.
 
 ![Universal Plugin Hub overview](assets/hero.png)
 <!-- SCREENSHOT #1 (hero): replace with a full screenshot of the browse page — search bar on top, source tabs, plugin card grid. Save as assets/hero.png -->
 
 ## What it does
 
-Universal Plugin Hub brings a **visual plugin market** to DSH. The **official Claude plugin catalog** is built in: pick a plugin, click Install, and it is ready to use in DSH. You can add any other Git repository as a plugin source and install its plugins the same way.
+Universal Plugin Hub brings a **visual plugin market** to DSH. The **official Claude plugin catalog** is built in: pick a plugin, click Install, and it is ready to use in DSH. You can add other Git repositories as plugin sources and install their plugins the same way.
 
 When you install a plugin, the hub wires its pieces into DSH automatically:
 
