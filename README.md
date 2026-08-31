@@ -32,7 +32,8 @@ When you install a plugin, the hub wires its pieces into DSH automatically:
 - **Plugin sources** — add Git repositories as sources; a new source is test-cloned first and its plugin count is shown before it is saved
 - **Tab drag sorting** — drag source tabs to reorder them; the bar auto-scrolls when you drag to an edge, and the order persists
 - **Tab bar scrolling** — the mouse wheel scrolls the bar horizontally, and fade masks at the edges show when more tabs are hidden
-- **Scroll memory** — switching sources scrolls the grid back to the top and brings recently installed plugins to the front; each source keeps its own scroll position
+- **Scroll memory** — each source keeps its own scroll position and filter; switching tabs or coming back from a detail page restores them
+- **Back to top** — clicking the selected source's tab again scrolls the grid to the top and re-sorts, bringing recently installed plugins to the front
 - **Fuzzy search** — ranked matching over name, author, and description, ignoring separators like `-` and `_`; filter and sort controls sit next to the search bar
 - **Hover preview** — hovering a card shows its description and category in a popover
 
@@ -54,6 +55,7 @@ When you install a plugin, the hub wires its pieces into DSH automatically:
 **Interface**
 
 - **Light and dark themes** — separate design-token palettes for each mode, following the DSH UI theme
+- **Markdown rendering** — plugin descriptions render through a built-in Markdown renderer with headings, lists, quotes, code blocks, `Note:`/`Warning:` callouts, command highlighting, and links, styled for both themes
 - **Local cache** — sources and marketplace listings are cached in the browser, so the panel renders immediately while fresh data loads
 - **Icon caching** — avatars are served through a disk-cached proxy; plugins without an avatar get a vector badge picked by name hash
 - **Rendering performance** — offscreen cards skip layout (`content-visibility: auto`), and scroll masks update at most once per frame
