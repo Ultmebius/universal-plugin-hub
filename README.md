@@ -23,15 +23,37 @@ Universal Plugin Hub is a visual plugin manager for DSH. The official Claude plu
 
 ## Features
 
+**Marketplace & browsing**
+
 - **Ready on first open** — the official Claude plugin catalog (`anthropics/claude-plugins-official`) is pre-loaded; nothing to configure
-- **Multiple sources** — add or remove Git repositories as plugin sources anytime
-- **Drag-to-reorder source tabs** — hold and drag a source tab to reorder it (the bar auto-scrolls at the edges, so you can reach the last tab); the order persists
-- **Search, filter & sort** — fuzzy search across the current source plus filter and sort controls; hover a card for a quick preview before opening it
-- **Skill & subagent scanning** — detects skills, slash commands, and subagent definitions in a plugin, and compiles subagents into a Hub skill DSH can delegate to
-- **MCP connectors** — connectors that need no auth register automatically on install; the rest you verify and enable from the manage page, and you can toggle individual MCP tools on or off per connector
-- **LSP servers** — plugins declaring `lspServers` (clangd, pyright, typescript-lsp, and more) are registered into DSH on install; the detail page shows them with an active dot
-- **Hooks** — a plugin's Claude/Codex `hooks.json` is parsed and loaded into DSH via the Claude hooks bridge; the detail page shows the real events (e.g. `SessionStart`, `PreToolUse: Bash`) rather than filenames
-- **Light / dark theme** — follows the DSH UI theme
+- **Bring your own sources** — add a Git repository as a plugin source; it is test-cloned and its plugin count previewed first, so a bad URL never reaches your source list
+- **Drag-to-reorder tabs** — grab a source tab and drop it anywhere: a ghost follows the pointer, neighbors swap live, and the bar auto-scrolls at its edges so even the last tab is reachable; the order persists
+- **Fluid tab bar** — the mouse wheel scrolls it horizontally, feathered masks mark hidden tabs, and rapid clicks never jitter thanks to ease-out scrolling with a locked destination
+- **Click a tab, back to the top** — selecting a source glides the grid back to the top and re-sorts freshly installed plugins first; every source remembers where you left off
+- **Six-tier fuzzy search** — exact, prefix, substring, multi-word, subsequence, and author/description matching, all punctuation-insensitive; filter and sort from the toolbar
+- **Hover to preview** — a popover with description and category appears before you open a plugin
+
+**Install & wiring**
+
+- **One click, fully wired** — skills and slash commands are mirrored into the skills directory, subagents are compiled into a single delegable Hub skill, and MCP connectors, LSP servers, and Claude/Codex hooks are registered into `cordis.patch.yml` — all during install
+- **See what a plugin ships** — the detail page lists skills, subagents, and prompts; connectors show live connection state, LSP servers an active dot, and hooks their real event names (`SessionStart`, `PreToolUse: Bash`)
+- **LSP pre-flight check** — a missing language-server binary is caught before registration, with the exact remediation hint, so DSH never fails to boot over a plugin
+- **Same-name replace** — reinstalling over an existing plugin replaces it cleanly; a same-name plugin from another source supersedes the old record
+
+**Management**
+
+- **Live enable/disable** — plugins and connectors switch on and off in place, no restart
+- **Per-tool MCP control** — hover a tool to read its description and parameters, then click the status badge to disable or re-enable that one tool
+- **Connector auth console** — verify tokens with a live 8-second probe (remote HTTP/SSE and local stdio), then save token, URL, custom headers, env, args, or OAuth per connector
+- **Version-aware updates** — the update button lights up only when a newer version exists, and the tooltip names the target version
+- **Clean uninstall** — one confirmation removes the plugin copy, skill registrations, patch entries, and cached tool state
+
+**Interface**
+
+- **Tuned light & dark themes** — a complete design-token set adjusted per mode, following the DSH UI theme automatically
+- **Instant reopen** — sources and marketplace rows are cached locally, so the panel is interactive immediately while fresh data loads
+- **Cached icon pipeline** — avatars stream through a local disk-cached proxy; plugins without an avatar get a deterministic badge from a 64-icon vector set
+- **Smooth at full frame** — offscreen cards skip layout work (`content-visibility`), and scroll masks recalculate at most once per animation frame
 
 ## Requirements
 
