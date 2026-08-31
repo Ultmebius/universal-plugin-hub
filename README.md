@@ -10,10 +10,13 @@ English | [中文](README.zh.md)
 > Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The official Claude plugin catalog comes pre-loaded, and any Git repository can be added as a source — install with one click, and skills, subagents, MCP connectors, LSP servers, and hooks wire themselves into DSH.
 
 ![Universal Plugin Hub overview](assets/hero.png)
+<!-- SCREENSHOT #1 (hero): replace with a full screenshot of the browse page — search bar on top, source tabs, plugin card grid. Save as assets/hero.png -->
 
 ## What it does
 
-Universal Plugin Hub is a visual plugin manager for DSH. The official Claude plugin catalog is pre-loaded out of the box; add community repos or any Git repository when you need more. It lists what each plugin actually provides and wires those pieces into DSH:
+Universal Plugin Hub brings a **visual plugin market** to DSH. The **official Claude plugin catalog** is built in: pick a plugin, click Install, and it is ready to use in DSH. You can add any other Git repository as a plugin source and install its plugins the same way.
+
+When you install a plugin, the hub wires its pieces into DSH automatically:
 
 - skills and slash commands become agent skills (`commands/` is mirrored into `skills/`, as is a root `SKILL.md`)
 - subagents are compiled into one delegated Hub skill per plugin (`skills/<plugin>-agents/`)
@@ -102,9 +105,6 @@ Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
 4. Click **Install**. The hub copies the plugin, registers skills and subagents, wires any LSP servers and Claude/Codex hooks into DSH, and auto-connects what needs no setup.
 5. Manage installed plugins from the manage page — enable/disable, toggle connectors and individual MCP tools, verify auth tokens, update, or remove.
-
-![Install dialog](assets/install-flow.png)
-<!-- 截图占位 #2（安装）：替换为安装确认对话框，或某个已装插件管理页的截图。保存为 assets/install-flow.png -->
 
 ## Project structure
 

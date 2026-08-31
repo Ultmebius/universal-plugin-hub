@@ -9,11 +9,14 @@ English | [中文](README.zh.md)
 
 > 为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 打造的插件市场。内置 Claude 官方插件目录，打开即可浏览；任意 Git 仓库可添加为插件源——一键安装，技能、子代理、MCP 连接器、LSP 服务器与 hooks 自动接线。
 
-![Universal Plugin Hub overview](assets\hero.png)
+![主界面总览](assets/hero.png)
+<!-- 截图占位 #1（主图）：替换为插件市场浏览页全屏截图——顶部搜索框、源标签栏与插件卡片网格。保存为 assets/hero.png -->
 
 ## 它能做什么
 
-Universal Plugin Hub 是 DSH 的可视化插件管理器。开箱内置 Claude 官方插件目录，社区仓库或任意 Git 源随时可加；它列出每个插件实际提供的东西，再把它们接入 DSH：
+Universal Plugin Hub 给 DSH 带来一个**图形化的插件市场**。内置 **Claude 官方插件目录**：打开面板、选中插件、点一下安装，装完就能在 DSH 里直接用；也可以添加任意 Git 仓库作为插件源，用同样的方式安装里面的插件。
+
+安装插件时，Hub 会自动把这些能力接进 DSH：
 
 - skills 和斜杠命令变成 agent 技能（`commands/` 镜像进 `skills/`，根目录的 `SKILL.md` 同样处理）
 - 子代理编译成一个 Hub 技能（`skills/<plugin>-agents/`），交给 DSH 委派
@@ -102,9 +105,6 @@ npm install
 3. 浏览或搜索。点开插件看它带什么：技能、子代理、连接器、LSP 服务器。
 4. 点 **Install**。Hub 复制插件、注册技能和子代理、把 LSP 服务器和 Claude/Codex hooks 接入 DSH、自动接上无需配置的连接器。
 5. 在管理页管理已装插件：启用或禁用、开关连接器与单个 MCP 工具、验证授权、更新、卸载。
-
-![安装对话框](assets/install-flow.png)
-<!-- 截图占位 #2（安装）：替换为安装确认对话框，或某个已装插件管理页的截图。保存为 assets/install-flow.png -->
 
 ## 项目结构
 
