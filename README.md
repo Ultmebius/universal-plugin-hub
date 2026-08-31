@@ -7,7 +7,7 @@ English | [中文](README.zh.md)
 [![DSH](https://img.shields.io/badge/DSH-DeepSeek_Harness-4D6BFE)](https://github.com/topics/dsh)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
 
-> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The official Claude plugin catalog comes pre-loaded, and Git repositories can be added as plugin sources — install with one click, and skills, subagents, MCP connectors, LSP servers, and hooks wire themselves into DSH.
+> Plugin marketplace for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The official Claude plugin catalog comes pre-loaded, and Git repositories can be added as plugin sources — install with one click and skills, subagents, MCP connectors, LSP servers, and hooks are wired into DSH.
 
 ![Universal Plugin Hub overview](assets/hero.png)
 <!-- SCREENSHOT #1 (hero): replace with a full screenshot of the browse page — search bar on top, source tabs, plugin card grid. Save as assets/hero.png -->
@@ -26,37 +26,37 @@ When you install a plugin, the hub wires its pieces into DSH automatically:
 
 ## Features
 
-**Marketplace & browsing**
+**Marketplace and browsing**
 
-- **Ready on first open** — the official Claude plugin catalog (`anthropics/claude-plugins-official`) is pre-loaded; nothing to configure
-- **Bring your own sources** — add a Git repository as a plugin source; it is test-cloned and its plugin count previewed first, so a bad URL never reaches your source list
-- **Drag-to-reorder tabs** — grab a source tab and drop it anywhere: a ghost follows the pointer, neighbors swap live, and the bar auto-scrolls at its edges so even the last tab is reachable; the order persists
-- **Fluid tab bar** — the mouse wheel scrolls it horizontally, feathered masks mark hidden tabs, and rapid clicks never jitter thanks to ease-out scrolling with a locked destination
-- **Click a tab, back to the top** — selecting a source glides the grid back to the top and re-sorts freshly installed plugins first; every source remembers where you left off
-- **Six-tier fuzzy search** — exact, prefix, substring, multi-word, subsequence, and author/description matching, all punctuation-insensitive; filter and sort from the toolbar
-- **Hover to preview** — a popover with description and category appears before you open a plugin
+- **Built-in catalog** — the official Claude plugin catalog (`anthropics/claude-plugins-official`) loads by default, no configuration needed
+- **Plugin sources** — add Git repositories as sources; a new source is test-cloned first and its plugin count is shown before it is saved
+- **Tab drag sorting** — drag source tabs to reorder them; the bar auto-scrolls when you drag to an edge, and the order persists
+- **Tab bar scrolling** — the mouse wheel scrolls the bar horizontally, and fade masks at the edges show when more tabs are hidden
+- **Scroll memory** — switching sources scrolls the grid back to the top and brings recently installed plugins to the front; each source keeps its own scroll position
+- **Fuzzy search** — ranked matching over name, author, and description, ignoring separators like `-` and `_`; filter and sort controls sit next to the search bar
+- **Hover preview** — hovering a card shows its description and category in a popover
 
-**Install & wiring**
+**Install and wiring**
 
-- **One click, fully wired** — skills and slash commands are mirrored into the skills directory, subagents are compiled into a single delegable Hub skill, and MCP connectors, LSP servers, and Claude/Codex hooks are registered into `cordis.patch.yml` — all during install
-- **See what a plugin ships** — the detail page lists skills, subagents, and prompts; connectors show live connection state, LSP servers an active dot, and hooks their real event names (`SessionStart`, `PreToolUse: Bash`)
-- **LSP pre-flight check** — a missing language-server binary is caught before registration, with the exact remediation hint, so DSH never fails to boot over a plugin
-- **Same-name replace** — reinstalling over an existing plugin replaces it cleanly; a same-name plugin from another source supersedes the old record
+- **Automatic wiring** — installing a plugin mirrors its skills and slash commands into the skills directory, compiles subagents into one Hub skill, and registers MCP connectors, LSP servers, and Claude/Codex hooks into `cordis.patch.yml`
+- **Detail page** — lists a plugin's skills, subagents, and prompts; connectors show connection state, LSP servers show an active dot, and hooks are listed by event name (`SessionStart`, `PreToolUse: Bash`)
+- **LSP pre-flight** — if a language server binary is missing, registration is skipped with an installation hint instead of writing a broken entry
+- **Reinstall and replace** — installing over an existing plugin replaces it; a same-name plugin from another source takes over the old record
 
 **Management**
 
-- **Live enable/disable** — plugins and connectors switch on and off in place, no restart
-- **Per-tool MCP control** — hover a tool to read its description and parameters, then click the status badge to disable or re-enable that one tool
-- **Connector auth console** — verify tokens with a live 8-second probe (remote HTTP/SSE and local stdio), then save token, URL, custom headers, env, args, or OAuth per connector
-- **Version-aware updates** — the update button lights up only when a newer version exists, and the tooltip names the target version
-- **Clean uninstall** — one confirmation removes the plugin copy, skill registrations, patch entries, and cached tool state
+- **Enable / disable** — toggle plugins and connectors without restarting DSH
+- **Per-tool MCP switches** — hover a tool to see its description and parameters, then click the status badge to disable or re-enable that single tool
+- **Connector auth** — test a token against the real endpoint (8-second timeout) before saving; token, URL, custom headers, env, args, and OAuth are stored per connector
+- **Updates** — the update button is enabled only when a newer version exists; the tooltip shows the target version
+- **Uninstall** — one confirmation removes the plugin copy, skill registration, patch entries, and cached tool state
 
 **Interface**
 
-- **Tuned light & dark themes** — a complete design-token set adjusted per mode, following the DSH UI theme automatically
-- **Instant reopen** — sources and marketplace rows are cached locally, so the panel is interactive immediately while fresh data loads
-- **Cached icon pipeline** — avatars stream through a local disk-cached proxy; plugins without an avatar get a deterministic badge from a 64-icon vector set
-- **Smooth at full frame** — offscreen cards skip layout work (`content-visibility`), and scroll masks recalculate at most once per animation frame
+- **Light and dark themes** — separate design-token palettes for each mode, following the DSH UI theme
+- **Local cache** — sources and marketplace listings are cached in the browser, so the panel renders immediately while fresh data loads
+- **Icon caching** — avatars are served through a disk-cached proxy; plugins without an avatar get a vector badge picked by name hash
+- **Rendering performance** — offscreen cards skip layout (`content-visibility: auto`), and scroll masks update at most once per frame
 
 ## Requirements
 
@@ -100,7 +100,7 @@ Restart DSH, then open the Universal Plugin Hub panel from the DSH UI.
 
 ## Quick start
 
-1. Open the panel — the official **Claude plugin catalog** is already loaded and searchable. No setup needed.
+1. Open the panel. The official Claude plugin catalog is loaded by default; browse or search right away.
 2. Optional: add another source, e.g. `anthropics/claude-plugins-community`.
 3. Browse or search. Open a plugin to see what it ships: skills, subagents, connectors, LSP servers.
 4. Click **Install**. The hub copies the plugin, registers skills and subagents, wires any LSP servers and Claude/Codex hooks into DSH, and auto-connects what needs no setup.
