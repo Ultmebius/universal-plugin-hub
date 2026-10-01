@@ -363,16 +363,28 @@ export function findDshMainNodeModules() {
   } catch {}
 
   // 2.5) Desktop application bundle resources (Electron app)
-  const desktopRoots = [
-    join(dirname(process.execPath), 'resources', 'app.asar.unpacked', 'dsh', 'node_modules'),
-    join(dirname(process.execPath), 'resources', 'app.asar', 'dsh', 'node_modules'),
-    join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness', 'resources', 'app.asar.unpacked', 'dsh', 'node_modules'),
-    'D:/Users/CaesarEmperor/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules',
+  const desktopDirs = [
+    dirname(process.execPath),
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'),
+    join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness'),
   ]
-  for (const root of desktopRoots) {
+  if (process.platform === 'win32') {
     try {
-      if (root && existsSync(root) && hasLoader(root)) return root
+      const regOut = String(execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', 'DeepSeek Harness'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }))
+      const m = regOut.match(/InstallLocation\s+REG_SZ\s+(.+)/i)
+      if (m && m[1]) desktopDirs.unshift(m[1].trim())
     } catch {}
+  }
+  for (const base of desktopDirs) {
+    if (!base) continue
+    for (const sub of [
+      join(base, 'resources', 'app.asar.unpacked', 'dsh', 'node_modules'),
+      join(base, 'resources', 'app.asar', 'dsh', 'node_modules'),
+    ]) {
+      try {
+        if (existsSync(sub) && hasLoader(sub)) return sub
+      } catch {}
+    }
   }
   // 3) NODE_PATH (npx exec sets it to the cached install for bin scripts)
   const np = process.env.NODE_PATH
@@ -456,11 +468,31 @@ function versionLine(v) {
 /** Read the running DSH release version from its installation, or '' when unknown. */
 export function findDshVersion() {
   const main = findDshMainNodeModules()
-  if (!main) return ''
-  for (const anchor of ['dsh-app-boot', 'dsh-session', 'dsh']) {
+  if (main) {
+    for (const anchor of ['dsh-app-boot', 'dsh-session', 'dsh']) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(main, '@deepseek-ai', anchor, 'package.json'), 'utf8'))
+        if (typeof pkg.version === 'string' && pkg.version.trim()) return pkg.version.trim()
+      } catch {}
+    }
+  }
+  // Desktop runtime metadata fallback (reads Electron runtime manifest)
+  const bases = [dirname(process.execPath), process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'), join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness')]
+  if (process.platform === 'win32') {
     try {
-      const pkg = JSON.parse(readFileSync(join(main, '@deepseek-ai', anchor, 'package.json'), 'utf8'))
-      if (typeof pkg.version === 'string' && pkg.version.trim()) return pkg.version.trim()
+      const regOut = String(execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', 'DeepSeek Harness'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }))
+      const m = regOut.match(/InstallLocation\s+REG_SZ\s+(.+)/i)
+      if (m && m[1]) bases.unshift(m[1].trim())
+    } catch {}
+  }
+  for (const b of bases) {
+    if (!b) continue
+    try {
+      const rj = join(b, 'resources', 'runtime', 'primary-runtime', 'runtime.json')
+      if (existsSync(rj)) {
+        const meta = JSON.parse(readFileSync(rj, 'utf8'))
+        if (typeof meta.desktopVersion === 'string' && meta.desktopVersion.trim()) return meta.desktopVersion.trim()
+      }
     } catch {}
   }
   return ''
