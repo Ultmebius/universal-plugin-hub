@@ -8,7 +8,29 @@
  */
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+
+/** Robust directory deletion handling Windows readonly/locked files. */
+export function safeRmDir(dir) {
+  if (!dir || !existsSync(dir)) return
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+  } catch (err) {
+    if (process.platform === 'win32') {
+      try {
+        execFileSync('cmd.exe', ['/c', `attrib -r -s -h "${dir}\\*" /s /d`], { stdio: 'ignore', windowsHide: true })
+        rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+        return
+      } catch {}
+      try {
+        execFileSync('cmd.exe', ['/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
+        return
+      } catch {}
+    }
+    throw err
+  }
+}
 
 let STATE_CACHE = null
 let STATE_CACHE_MTIME = 0

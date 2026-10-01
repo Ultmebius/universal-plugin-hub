@@ -751,7 +751,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-add-btn {
 	width: 28px;
 	height: 28px;
-	border-radius: 6px;
+	border-radius: 8px;
 	border: none;
 	background: transparent;
 	color: var(--cpm-text);
@@ -1059,7 +1059,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	top: 34px;
 	background: var(--cpm-modal-bg);
 	border: 1px solid var(--cpm-modal-border);
-	border-radius: 8px;
+	border-radius: 10px;
 	padding: 5px;
 	z-index: 100;
 	min-width: 120px;
@@ -1070,7 +1070,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-menu-item {
 	padding: 7px 10px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 12.5px;
 	cursor: pointer;
 	color: var(--cpm-text);
@@ -1093,7 +1093,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	cursor: pointer;
 	border: 1px solid transparent;
 	background: transparent;
-	border-radius: 6px;
+	border-radius: 8px;
 	transition: all .15s ease;
 }
 .cpm-tab2:hover {
@@ -1114,7 +1114,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-tab-search-btn {
 	width: 28px;
 	height: 28px;
-	border-radius: 6px;
+	border-radius: 8px;
 	background: transparent;
 	border: none;
 	color: var(--cpm-muted);
@@ -1133,7 +1133,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	align-items: center;
 	background: var(--cpm-search-bg);
 	border: 1px solid var(--cpm-search-border);
-	border-radius: 8px;
+	border-radius: 10px;
 	padding: 4px 10px;
 	gap: 6px;
 	width: 210px;
@@ -1280,7 +1280,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	width: 100%;
 	background: var(--cpm-search-bg);
 	border: 1px solid var(--cpm-border);
-	border-radius: 6px;
+	border-radius: 8px;
 	padding: 8px 10px;
 	color: var(--cpm-text);
 	font-size: 13.5px;
@@ -1490,7 +1490,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 8px;
 	padding: 8px 10px;
 	border: 1px solid var(--cpm-border);
-	border-radius: 6px;
+	border-radius: 8px;
 	cursor: pointer;
 	font-size: 13px;
 	color: var(--cpm-text);
@@ -1575,7 +1575,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: var(--cpm-muted);
 	cursor: pointer;
 	padding: 3px;
-	border-radius: 6px;
+	border-radius: 8px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1641,7 +1641,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	height: 34px;
 	background: #ffffff;
 	border: 1px solid rgba(0, 0, 0, 0.12);
-	border-radius: 6px;
+	border-radius: 8px;
 	padding: 0 10px;
 	color: #18181b;
 	font-size: 13px;
@@ -1747,7 +1747,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: var(--cpm-muted);
 	cursor: pointer;
 	padding: 6px;
-	border-radius: 6px;
+	border-radius: 8px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1763,7 +1763,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 6px;
 	background: transparent;
 	border: 1px dashed rgba(0, 0, 0, 0.16);
-	border-radius: 6px;
+	border-radius: 8px;
 	height: 30px;
 	padding: 0 12px;
 	color: var(--cpm-text);
@@ -1798,7 +1798,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: space-between;
 	background: #ffffff;
 	border: 1px solid rgba(0, 0, 0, 0.12);
-	border-radius: 6px;
+	border-radius: 8px;
 	padding: 0 10px;
 	color: #18181b;
 	font-size: 13px;
@@ -1852,7 +1852,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	align-items: center;
 	justify-content: space-between;
 	padding: 7px 10px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 13px;
 	color: #18181b;
 	cursor: pointer;
@@ -1925,7 +1925,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: var(--cpm-muted);
 	height: 32px;
 	padding: 0 12px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 13px;
 	font-weight: 500;
 	cursor: pointer;
@@ -1946,7 +1946,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 12px;
 	font-weight: 500;
 	padding: 3px 8px;
-	border-radius: 6px;
+	border-radius: 8px;
 	transition: all 0.15s ease;
 }
 
@@ -2048,7 +2048,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	grid-column: span 2;
 	background: rgba(0, 0, 0, 0.04);
 	border: 1px solid rgba(0, 0, 0, 0.06);
-	border-radius: 6px;
+	border-radius: 8px;
 	padding: 6px 8px;
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 	font-size: 11px;
@@ -2141,7 +2141,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	align-items: center;
 	gap: 6.5px;
 	padding: 5px 10px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 12px;
 	font-family: var(--cpm-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
 	background: #ffffff;
@@ -2434,7 +2434,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-smart-md .cpm-md-pre {
 	margin: 6px 0;
 	padding: 8px 10px;
-	border-radius: 6px;
+	border-radius: 8px;
 	background: rgba(0, 0, 0, 0.04);
 	border: 1px solid rgba(0, 0, 0, 0.08);
 	overflow-x: auto;
@@ -2663,7 +2663,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-toast-close {
 	width: 22px;
 	height: 22px;
-	border-radius: 6px;
+	border-radius: 8px;
 	border: none;
 	background: transparent;
 	color: #71717a;
@@ -2703,7 +2703,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-tooltip {
 	padding: 5px 10px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 11.5px;
 	font-weight: 500;
 	line-height: 1.35;

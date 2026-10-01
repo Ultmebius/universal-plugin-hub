@@ -13,10 +13,10 @@
  * complex tasks to the specialized subagents via DSH's native `@deepseek-ai/dsh-tool-subagent` tool,
  * completely avoiding slash command palette clutter, preset pollution, and naming collisions.
  */
-import { mkdirSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
-import { dshHome } from './store.js'
+import { dshHome, safeRmDir } from './store.js'
 import { safeSegment } from './market.js'
 
 export const PRESET_ROOT = () => join(dshHome(), '.agent-presets')
@@ -33,7 +33,7 @@ export function cleanupLegacyPresets(pluginName) {
     for (const entry of readdirSync(root)) {
       if (!prefix || entry.startsWith(prefix) || entry === pluginName) {
         const dir = join(root, entry)
-        rmSync(dir, { recursive: true, force: true })
+        safeRmDir(dir)
       }
     }
   } catch {
@@ -46,7 +46,7 @@ export function removeConvertedPreset(id) {
   try {
     if (!id || !/^[a-z0-9][a-z0-9-]*$/.test(id)) return
     const dir = join(PRESET_ROOT(), id)
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+    safeRmDir(dir)
   } catch {}
 }
 

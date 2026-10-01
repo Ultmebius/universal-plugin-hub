@@ -6,9 +6,9 @@
  * user-facing message; network/git failures are retryable at the UI level.
  */
 import { execFile } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { sourceCacheDir } from './store.js'
+import { sourceCacheDir, safeRmDir } from './store.js'
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i
 
@@ -75,7 +75,7 @@ export async function ensureSourceCloned(sourceId, url) {
     // Clean incomplete cache if previous clone failed
     if (existsSync(dir)) {
       try {
-        rmSync(dir, { recursive: true, force: true })
+        safeRmDir(dir)
       } catch {
         // ignore rm error
       }
@@ -86,7 +86,7 @@ export async function ensureSourceCloned(sourceId, url) {
     } catch (err) {
       if (existsSync(dir) && !existsSync(join(dir, '.git'))) {
         try {
-          rmSync(dir, { recursive: true, force: true })
+          safeRmDir(dir)
         } catch {
           // ignore rm error
         }

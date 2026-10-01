@@ -13,31 +13,10 @@ import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
-import { installedDir, readState, writeState, slugify, dshHome } from './store.js'
+import { installedDir, readState, writeState, slugify, dshHome, safeRmDir } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
-
-/** Robust directory deletion handling Windows readonly/locked files. */
-export function safeRmDir(dir) {
-  if (!dir || !existsSync(dir)) return
-  try {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
-  } catch (err) {
-    if (process.platform === 'win32') {
-      try {
-        execFileSync('cmd.exe', ['/c', `attrib -r -s -h "${dir}\\*" /s /d`], { stdio: 'ignore', windowsHide: true })
-        rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
-        return
-      } catch {}
-      try {
-        execFileSync('cmd.exe', ['/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
-        return
-      } catch {}
-    }
-    throw err
-  }
-}
 
 /** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
 export function resolveActiveProfileName() {
