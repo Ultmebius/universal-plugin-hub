@@ -18,9 +18,18 @@ import { materializePlugin, pullSource } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 
-/** cordis.patch.yml path (prefers profiles/web/cordis.patch.yml). */
+/** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
+export function resolveActiveProfileName() {
+  if (process.env.DSH_PROFILE) return process.env.DSH_PROFILE
+  const desktopPatch = join(dshHome(), 'profiles', 'desktop', 'cordis.patch.yml')
+  if (existsSync(desktopPatch)) return 'desktop'
+  return 'web'
+}
+
+/** cordis.patch.yml path (auto-detects desktop or web profile). */
 export function cordisPatchPath() {
-  const profilePatch = join(dshHome(), 'profiles', 'web', 'cordis.patch.yml')
+  const profileName = resolveActiveProfileName()
+  const profilePatch = join(dshHome(), 'profiles', profileName, 'cordis.patch.yml')
   if (existsSync(profilePatch)) return profilePatch
   const homePatch = join(dshHome(), 'cordis.patch.yml')
   if (existsSync(homePatch)) return homePatch
@@ -352,6 +361,19 @@ export function findDshMainNodeModules() {
       }
     }
   } catch {}
+
+  // 2.5) Desktop application bundle resources (Electron app)
+  const desktopRoots = [
+    join(dirname(process.execPath), 'resources', 'app.asar.unpacked', 'dsh', 'node_modules'),
+    join(dirname(process.execPath), 'resources', 'app.asar', 'dsh', 'node_modules'),
+    join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness', 'resources', 'app.asar.unpacked', 'dsh', 'node_modules'),
+    'D:/Users/CaesarEmperor/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules',
+  ]
+  for (const root of desktopRoots) {
+    try {
+      if (root && existsSync(root) && hasLoader(root)) return root
+    } catch {}
+  }
   // 3) NODE_PATH (npx exec sets it to the cached install for bin scripts)
   const np = process.env.NODE_PATH
   if (np) {
