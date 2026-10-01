@@ -109,7 +109,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-toast-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
 }
 
-.cpm-root * { box-sizing: border-box; }
+.cpm-root,
+.cpm-root *,
+.cpm-root *::before,
+.cpm-root *::after {
+	box-sizing: border-box;
+	corner-shape: squircle;
+	-webkit-corner-smoothing: 100%;
+	corner-smoothing: 100%;
+}
 
 /* Main Panel */
 .cpm-main {
@@ -146,7 +154,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 8px;
 	background: var(--cpm-search-bg);
 	border: 1px solid var(--cpm-search-border);
-	border-radius: 8px;
+	border-radius: 10px;
 	padding: 7px 12px;
 	transition: border-color .15s ease, box-shadow .15s ease;
 }
@@ -215,7 +223,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-icon-btn, .cpm-add-btn {
 	width: 30px;
 	height: 30px;
-	border-radius: 6px;
+	border-radius: 8px;
 	border: 1px solid var(--cpm-icon-btn-border);
 	background: var(--cpm-icon-btn-bg);
 	color: var(--cpm-text);
@@ -244,7 +252,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 5px;
 	height: 30px;
 	padding: 0 9px;
-	border-radius: 6px;
+	border-radius: 8px;
 	border: 1px solid var(--cpm-icon-btn-border);
 	background: var(--cpm-icon-btn-bg);
 	color: var(--cpm-text);
@@ -288,7 +296,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	position: relative;
 	height: 30px;
 	padding: 0 8px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 12.5px;
 	color: var(--cpm-tab-text);
 	cursor: pointer;
@@ -326,7 +334,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: center !important;
 	height: 30px !important;
 	padding: 0 10px !important;
-	border-radius: 7px !important;
+	border-radius: 8px !important;
 	font-size: 12.5px !important;
 	font-weight: 600 !important;
 	white-space: nowrap !important;
@@ -520,7 +528,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-tab-add {
 	padding: 4px 10px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 14px;
 	font-weight: 500;
 	color: var(--cpm-muted);
@@ -800,7 +808,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-btn {
 	height: 32px;
 	padding: 0 14px;
-	border-radius: 6px;
+	border-radius: 8px;
 	font-size: 13px;
 	cursor: pointer;
 	border: 1px solid transparent;

@@ -58,14 +58,17 @@ npm install
 
 ---
 
-## 本地数据目录
+## 本地数据与目录结构
 
-插件数据保存在用户主目录下的 `~/.dsh/`：
-
-- `~/.dsh/agent-skills/universal-plugin-hub/state.json`：插件源与已安装插件配置。
-- `~/.dsh/agent-skills/universal-plugin-hub/installed/`：已安装插件的工作副本。
-- `~/.dsh/agent-skills/universal-plugin-hub/market/`：插件源 Git 缓存。
-- `~/.dsh/profiles/<profile>/cordis.patch.yml`：接入的运行时补丁。
+- **Hub 插件本体位置**：
+  - DSH 桌面端安装：`~/.dsh/profiles/desktop/node_modules/universal-plugin-hub`
+  - 本地插件目录：`~/.dsh/plugins/universal-plugin-hub`
+- **市场内安装的插件**：
+  - 插件安装目录：`~/.dsh/agent-skills/universal-plugin-hub/installed/<plugin-name>`
+  - 插件源 Git 缓存：`~/.dsh/agent-skills/universal-plugin-hub/market/<source-id>`
+  - 插件源与安装记录：`~/.dsh/agent-skills/universal-plugin-hub/state.json`
+- **运行时配置补丁**：
+  - `~/.dsh/profiles/<profile>/cordis.patch.yml`
 
 ---
 

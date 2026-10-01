@@ -24,3 +24,6 @@ docs/
 
 # 锁文件（让用户自行生成）
 package-lock.json
+
+# 本地 Claude 配置
+.claude/

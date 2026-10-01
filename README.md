@@ -58,14 +58,17 @@ npm install
 
 ---
 
-## Data locations
+## Data and directory layout
 
-All hub data lives in `~/.dsh/`:
-
-- `~/.dsh/agent-skills/universal-plugin-hub/state.json`: Sources and installed plugin records.
-- `~/.dsh/agent-skills/universal-plugin-hub/installed/`: Installed plugin files.
-- `~/.dsh/agent-skills/universal-plugin-hub/market/`: Cloned plugin sources.
-- `~/.dsh/profiles/<profile>/cordis.patch.yml`: Runtime patch configuration.
+- **Hub installation**:
+  - DSH Desktop install: `~/.dsh/profiles/desktop/node_modules/universal-plugin-hub`
+  - Local plugin directory: `~/.dsh/plugins/universal-plugin-hub`
+- **Marketplace plugins**:
+  - Installed plugin files: `~/.dsh/agent-skills/universal-plugin-hub/installed/<plugin-name>`
+  - Cloned source cache: `~/.dsh/agent-skills/universal-plugin-hub/market/<source-id>`
+  - State and source registry: `~/.dsh/agent-skills/universal-plugin-hub/state.json`
+- **Runtime patch configuration**:
+  - `~/.dsh/profiles/<profile>/cordis.patch.yml`
 
 ---
 

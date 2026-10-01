@@ -18,6 +18,27 @@ import { materializePlugin, pullSource } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 
+/** Robust directory deletion handling Windows readonly/locked files. */
+export function safeRmDir(dir) {
+  if (!dir || !existsSync(dir)) return
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+  } catch (err) {
+    if (process.platform === 'win32') {
+      try {
+        execFileSync('cmd.exe', ['/c', `attrib -r -s -h "${dir}\\*" /s /d`], { stdio: 'ignore', windowsHide: true })
+        rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+        return
+      } catch {}
+      try {
+        execFileSync('cmd.exe', ['/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
+        return
+      } catch {}
+    }
+    throw err
+  }
+}
+
 /** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
 export function resolveActiveProfileName() {
   if (process.env.DSH_PROFILE) return process.env.DSH_PROFILE
@@ -617,14 +638,14 @@ export async function installProfilePackages(packageNames) {
       const buffer = Buffer.from(await res.arrayBuffer())
       const dest = join(main, name)
       mkdirSync(dirname(dest), { recursive: true })
-      rmSync(dest, { recursive: true, force: true })
+      safeRmDir(dest)
       untarStripFirst(buffer, dest)
       // Verify the tarball actually unpacked a usable package — `untarStripFirst`
       // walks the UStar header stream and silently exits on any malformed input
       // (e.g. a 404 HTML page mistakenly returned as a gzipped stream), which
       // would leave the package directory empty and downstream gates blind.
       if (!existsSync(join(dest, 'package.json'))) {
-        rmSync(dest, { recursive: true, force: true })
+        safeRmDir(dest)
         return { ok: false, error: `${name} 解包后缺少 package.json（tarball 可能不完整）`, installed }
       }
       installed.push(name)
@@ -1386,7 +1407,7 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
   const target = installedDir(pluginName)
 
   // Idempotent reinstall: clear the previous copy first.
-  if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+  safeRmDir(target)
   mkdirSync(dirname(target), { recursive: true })
   copyDir(dir, target)
 
@@ -1624,7 +1645,7 @@ export function uninstallPlugin(pluginName) {
     unregisterPluginHooks(pluginName)
   }
   if (existsSync(join(target, 'skills'))) unregisterScanDir(join(target, 'skills'))
-  if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+  safeRmDir(target)
   
   // Clean any legacy preset directories left by prior versions
   cleanupLegacyPresets(pluginName)
