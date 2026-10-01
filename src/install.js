@@ -518,14 +518,20 @@ export function findDshVersion() {
  */
 export async function matchingPublishedVersion(packageName) {
   try {
-    const out = await runNpm(['view', packageName, 'versions', '--json'], dirname(cordisPatchPath()))
-    const versions = JSON.parse(out)
-    if (!Array.isArray(versions)) return ''
-    const all = versions.filter((v) => typeof v === 'string')
-    if (all.length === 0) return ''
+    const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(packageName)}`, { headers: { accept: 'application/json' } })
+    let versions = []
+    if (res.ok) {
+      const data = await res.json()
+      versions = Object.keys(data.versions || {})
+    } else {
+      const out = await runNpm(['view', packageName, 'versions', '--json'], dirname(cordisPatchPath()))
+      const parsed = JSON.parse(out)
+      if (Array.isArray(parsed)) versions = parsed.filter((v) => typeof v === 'string')
+    }
+    if (versions.length === 0) return ''
     const line = versionLine(findDshVersion())
-    const pool = line ? all.filter((v) => versionLine(v) === line) : []
-    const candidates = pool.length > 0 ? pool : all
+    const pool = line ? versions.filter((v) => versionLine(v) === line) : []
+    const candidates = pool.length > 0 ? pool : versions
     let best = ''
     for (const v of candidates) {
       if (semverGt(v, best)) best = v
@@ -565,9 +571,12 @@ export async function installProfilePackages(packageNames) {
   const names = Array.from(new Set((packageNames || []).filter((n) => typeof n === 'string' && n.trim())))
   if (names.length === 0) return { ok: true, installed: [] }
 
-  const main = findDshMainNodeModules()
+  let main = findDshMainNodeModules()
   if (!main) {
-    return { ok: false, error: '未找到 DSH 主包 node_modules（无法定位 npx 缓存），请确认通过 npx @deepseek-ai/dsh 启动', installed: [] }
+    const activeNm = join(dshHome(), 'profiles', resolveActiveProfileName(), 'node_modules')
+    const sharedNm = join(dshHome(), 'profiles', 'node_modules')
+    main = existsSync(activeNm) ? activeNm : sharedNm
+    try { mkdirSync(main, { recursive: true }) } catch {}
   }
 
   const need = []
@@ -588,10 +597,20 @@ export async function installProfilePackages(packageNames) {
       // line as the installed DSH), not the `latest` dist-tag which can lag behind.
       const ver = await matchingPublishedVersion(name)
       if (!ver) return { ok: false, error: `无法确定 ${name} 的匹配版本`, installed }
-      // Pin the tarball to the resolved version: `npm view <name> dist.tarball`
-      // without a specifier resolves the `latest` dist-tag, which can differ.
-      const tarballOut = await runNpm(['view', `${name}@${ver}`, 'dist.tarball'], dirname(main))
-      const url = tarballOut.trim().split('\n').pop()?.trim()
+      let url = null
+      try {
+        const resMeta = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`, { headers: { accept: 'application/json' } })
+        if (resMeta.ok) {
+          const meta = await resMeta.json()
+          url = meta.versions?.[ver]?.dist?.tarball
+        }
+      } catch {}
+      if (!url) {
+        try {
+          const tarballOut = await runNpm(['view', `${name}@${ver}`, 'dist.tarball'], dirname(main))
+          url = tarballOut.trim().split('\n').pop()?.trim()
+        } catch {}
+      }
       if (!url) return { ok: false, error: `无法获取 ${name} 的 tarball 地址`, installed }
       const res = await fetch(url)
       if (!res.ok) throw new Error(`tarball 下载失败 (HTTP ${res.status})`)

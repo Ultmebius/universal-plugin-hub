@@ -16,10 +16,11 @@ DeepSeek Harness (DSH) 的跨生态插件市场与管理器。默认预置 Claud
 
 1. 打开 DeepSeek Harness 桌面客户端。
 2. 进入 **设置 (Settings)** -> **插件 (Plugins)**。
-3. 在安装输入框中填入插件包名：
+3. 在安装输入框中粘贴 Git 仓库地址：
    ```text
-   universal-plugin-hub
+   https://github.com/Ultmebius/universal-plugin-hub.git
    ```
+   *(或简写 `github:Ultmebius/universal-plugin-hub`；若发布至 npm 也可直接输入 `universal-plugin-hub`)*
 4. 点击安装。安装完成后即可在左侧导航或插件列表中打开。
 
 ### 方式 2：命令行 (CLI)
@@ -27,6 +28,10 @@ DeepSeek Harness (DSH) 的跨生态插件市场与管理器。默认预置 Claud
 如果使用 DSH 命令行或 Web 模式，可在终端直接执行：
 
 ```bash
+# 通过 GitHub 仓库直接安装
+dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
+
+# 或使用 npm 包名（需已发布至 npm）
 dsh plugin add universal-plugin-hub
 ```
 

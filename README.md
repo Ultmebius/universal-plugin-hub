@@ -16,10 +16,11 @@ A graphical plugin marketplace and manager for [DeepSeek Harness (DSH)](https://
 
 1. Open the DeepSeek Harness Desktop application.
 2. Go to **Settings** -> **Plugins**.
-3. In the install input box, enter the package name:
+3. In the install input box, enter the Git repository URL:
    ```text
-   universal-plugin-hub
+   https://github.com/Ultmebius/universal-plugin-hub.git
    ```
+   *(or shorthand `github:Ultmebius/universal-plugin-hub`; if published on npm, `universal-plugin-hub` also works)*
 4. Click install. Once installed, access the marketplace from the navigation menu.
 
 ### Method 2: Command Line (CLI)
@@ -27,6 +28,10 @@ A graphical plugin marketplace and manager for [DeepSeek Harness (DSH)](https://
 If you are using DSH via CLI or web mode:
 
 ```bash
+# Install directly from GitHub repository
+dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
+
+# Or use npm package name (once published to npm)
 dsh plugin add universal-plugin-hub
 ```
 
