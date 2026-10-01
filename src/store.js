@@ -16,6 +16,7 @@ export function safeRmDir(dir) {
   if (!dir || !existsSync(dir)) return
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    return
   } catch (err) {
     if (process.platform === 'win32') {
       try {
@@ -25,10 +26,17 @@ export function safeRmDir(dir) {
       } catch {}
       try {
         execFileSync('cmd.exe', ['/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
+        if (!existsSync(dir)) return
+      } catch {}
+      try {
+        const trash = `${dir}.trash-${Date.now()}`
+        renameSync(dir, trash)
+        try {
+          execFileSync('cmd.exe', ['/c', `rd /s /q "${trash}"`], { stdio: 'ignore', windowsHide: true })
+        } catch {}
         return
       } catch {}
     }
-    throw err
   }
 }
 

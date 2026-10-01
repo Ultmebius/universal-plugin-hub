@@ -1624,7 +1624,7 @@ export function uninstallPlugin(pluginName) {
     unregisterPluginHooks(pluginName)
   }
   if (existsSync(join(target, 'skills'))) unregisterScanDir(join(target, 'skills'))
-  safeRmDir(target)
+  try { safeRmDir(target) } catch {}
   
   // Clean any legacy preset directories left by prior versions
   cleanupLegacyPresets(pluginName)
