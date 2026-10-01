@@ -60,15 +60,12 @@ npm install
 
 ## 本地数据与目录结构
 
-- **Hub 插件本体位置**：
-  - DSH 桌面端安装：`~/.dsh/profiles/desktop/node_modules/universal-plugin-hub`
-  - 本地插件目录：`~/.dsh/plugins/universal-plugin-hub`
+- **Hub 插件本体**：`~/.dsh/profiles/desktop/node_modules/universal-plugin-hub`
 - **市场内安装的插件**：
   - 插件安装目录：`~/.dsh/agent-skills/universal-plugin-hub/installed/<plugin-name>`
   - 插件源 Git 缓存：`~/.dsh/agent-skills/universal-plugin-hub/market/<source-id>`
   - 插件源与安装记录：`~/.dsh/agent-skills/universal-plugin-hub/state.json`
-- **运行时配置补丁**：
-  - `~/.dsh/profiles/<profile>/cordis.patch.yml`
+- **运行时配置补丁**：`~/.dsh/profiles/<profile>/cordis.patch.yml`
 
 ---
 
