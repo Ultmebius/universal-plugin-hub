@@ -2,106 +2,70 @@
 
 [English](README.md) | 简体中文
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![DSH Plugin](https://img.shields.io/badge/DSH-Plugin-brightgreen)](https://github.com/topics/dsh-plugin)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet)](https://github.com/topics/deepseek-harness)
-
-DeepSeek Harness (DSH) 的跨生态插件市场与管理器。默认预置 Claude 官方插件源，支持一键安装 Agent 技能（Skills）、子代理（Subagents）、MCP 连接器与 LSP 服务。
+DeepSeek Harness (DSH) 的插件市场。内置 Claude 官方插件源，支持一键安装 Agent 技能（Skills）、子代理、MCP 工具和 LSP 服务。
 
 ![主界面预览](assets/hero.png)
 
 ## 安装
 
-### 方式 1：DeepSeek Harness Desktop (桌面端)
+### DeepSeek Harness 桌面端
 
-1. 打开 DeepSeek Harness 桌面客户端。
-2. 进入 **设置 (Settings)** -> **插件 (Plugins)**。
-3. 在安装输入框中粘贴 Git 仓库地址：
+1. 打开 DeepSeek Harness 客户端。
+2. 进入**设置** -> **插件**。
+3. 在安装输入框中粘贴仓库地址：
    ```text
    https://github.com/Ultmebius/universal-plugin-hub.git
    ```
-   *(或简写 `github:Ultmebius/universal-plugin-hub`；若发布至 npm 也可直接输入 `universal-plugin-hub`)*
-4. 点击安装。安装完成后即可在左侧导航或插件列表中打开。
+4. 点击安装。
 
-### 方式 2：命令行 (CLI)
+### 命令行安装
 
-如果使用 DSH 命令行或 Web 模式，可在终端直接执行：
+在终端执行：
 
 ```bash
-# 通过 GitHub 仓库直接安装
 dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
-
-# 或使用 npm 包名（需已发布至 npm）
-dsh plugin add universal-plugin-hub
 ```
 
-### 方式 3：源码手动安装
+### 源码安装
 
 ```bash
-# 进入 DSH 插件目录
 cd ~/.dsh/plugins
-
-# 克隆仓库
 git clone https://github.com/Ultmebius/universal-plugin-hub.git
 cd universal-plugin-hub
-
-# 安装依赖并初始化
 npm install
 ```
 
-安装完成后重启 DeepSeek Harness 即可生效。
+---
+
+## 主要功能
+
+- **内置官方插件源**：默认载入 Claude 官方插件目录（`anthropics/claude-plugins-official`），开箱即用。
+- **自定义 Git 插件源**：支持添加任意 GitHub 或 Git 仓库地址作为插件源。
+- **自动接入**：
+  - Commands 和 Skills 会自动转换为 DSH Agent 可调用的技能。
+  - 子代理会自动编译为对应的 Hub 技能并支持委派。
+  - MCP 连接器自动写入配置文件，支持单个工具粒度的开关和鉴权测试。
+  - 自动注册 LSP 语言服务。
+- **环境支持**：同时支持 DeepSeek Harness Desktop 桌面客户端与命令行 Web 模式。
 
 ---
 
-## 核心特性
+## 使用方法
 
-- **预置官方生态**：开箱即用内置 Claude 官方插件源（`anthropics/claude-plugins-official`），无需额外配置。
-- **第三方源支持**：支持直接添加任意 GitHub / Git 插件仓库地址作为新源。
-- **自动配线与桥接**：
-  - **Skills & Commands**：插件中的命令与提示词自动转为 DSH 可用的 Agent 技能。
-  - **Subagents**：自动编译多代理定义，支持由主智能体按需派发。
-  - **MCP 连接器**：一键写入 DSH 连接配置，提供细粒度的单个 MCP 工具开关与参数测试。
-  - **LSP 语言服务**：自动接入对应语言的 LSP 检查与补全服务。
-- **环境自适应**：同时兼容 DeepSeek Harness Desktop 桌面版与命令行 Web 模式。
+1. **浏览与搜索**：打开插件市场面板，输入关键词搜索插件。
+2. **一键安装**：点击插件卡片上的 **Install**，插件会自动下载并接入系统。
+3. **插件管理**：在管理面板中开启或停用插件，配置 MCP 工具鉴权 Token，或一键更新与卸载。
 
 ---
 
-## 快速使用
+## 本地数据目录
 
-1. **浏览与搜索**：打开 Universal Plugin Hub 界面，支持按名称、作者与标签模糊搜索。
-2. **安装插件**：在卡片中点击 **Install**，系统会自动拉取代码、解析技能并挂载连接器。
-3. **插件管理**：
-   - 在已安装列表中随时开启/停用插件，无需重启客户端。
-   - 支持逐个控制 MCP 工具的启用状态并配置访问 Token。
-   - 随时一键检查更新或完全卸载。
+插件数据保存在用户主目录下的 `~/.dsh/`：
 
----
-
-## 数据与存储路径
-
-插件运行时数据均保存在本地系统目录 `~/.dsh/`：
-
-| 路径 | 说明 |
-| :--- | :--- |
-| `~/.dsh/agent-skills/universal-plugin-hub/state.json` | 插件源列表及已安装插件元数据 |
-| `~/.dsh/agent-skills/universal-plugin-hub/installed/` | 已安装插件的实际代码与技能文件 |
-| `~/.dsh/agent-skills/universal-plugin-hub/market/` | 插件源 Git 缓存目录 |
-| `~/.dsh/profiles/<profile>/cordis.patch.yml` | 动态挂载的 MCP、LSP 与运行时补丁 |
-
----
-
-## 开发与调试
-
-```bash
-# 语法检查
-node --check src/index.js
-node --check client/client.js
-
-# 兼容性测试
-node scratch/test-desktop-compat.js
-```
-
-前端界面为单文件 React（位于 `client/client.js`），由 DSH 客户端直接挂载运行，修改后刷新界面即可生效。
+- `~/.dsh/agent-skills/universal-plugin-hub/state.json`：插件源与已安装插件配置。
+- `~/.dsh/agent-skills/universal-plugin-hub/installed/`：已安装插件的工作副本。
+- `~/.dsh/agent-skills/universal-plugin-hub/market/`：插件源 Git 缓存。
+- `~/.dsh/profiles/<profile>/cordis.patch.yml`：接入的运行时补丁。
 
 ---
 
