@@ -21,8 +21,8 @@ import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } 
 /** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
 export function resolveActiveProfileName() {
   if (process.env.DSH_PROFILE) return process.env.DSH_PROFILE
-  const desktopPatch = join(dshHome(), 'profiles', 'desktop', 'cordis.patch.yml')
-  if (existsSync(desktopPatch)) return 'desktop'
+  const desktopDir = join(dshHome(), 'profiles', 'desktop')
+  if (existsSync(desktopDir)) return 'desktop'
   return 'web'
 }
 
@@ -341,6 +341,36 @@ const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm'
  * accept profile and global install trees so other install modes provision
  * host packages (hooks bridge, LSP) into the tree DSH actually loads from.
  */
+/** Candidate base installation directories for DeepSeek Harness Desktop across platforms. */
+function resolveDesktopCandidateDirs() {
+  const dirs = [
+    dirname(process.execPath),
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'),
+    join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness'),
+    '/Applications/DeepSeek Harness.app/Contents/Resources',
+    '/opt/DeepSeek Harness/resources',
+  ]
+  if (process.platform === 'win32') {
+    try {
+      const regOut = String(execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', 'DeepSeek Harness'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }))
+      const match = regOut.match(/InstallLocation\s+REG_SZ\s+(.+)/i)
+      if (match && match[1]) dirs.unshift(match[1].trim())
+    } catch {}
+  }
+  return dirs.filter(Boolean)
+}
+
+/**
+ * Locate the `node_modules` root containing `@deepseek-ai/dsh-app-boot`.
+ *
+ * Scans in priority order:
+ *   1) $DSH_HOME/profiles/node_modules (shared runtime directory)
+ *   2) $DSH_HOME/profiles/<profile>/node_modules (per-profile directory)
+ *   2.5) Desktop application bundle resources (Electron app)
+ *   3) NODE_PATH (set by npx exec)
+ *   4) npm npx cache (_npx/<hash>/node_modules)
+ *   5) Global npm install (`npm root -g`)
+ */
 export function findDshMainNodeModules() {
   const hasLoader = (nm) => existsSync(join(nm, '@deepseek-ai', 'dsh-app-boot'))
 
@@ -363,20 +393,7 @@ export function findDshMainNodeModules() {
   } catch {}
 
   // 2.5) Desktop application bundle resources (Electron app)
-  const desktopDirs = [
-    dirname(process.execPath),
-    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'),
-    join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness'),
-  ]
-  if (process.platform === 'win32') {
-    try {
-      const regOut = String(execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', 'DeepSeek Harness'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }))
-      const m = regOut.match(/InstallLocation\s+REG_SZ\s+(.+)/i)
-      if (m && m[1]) desktopDirs.unshift(m[1].trim())
-    } catch {}
-  }
-  for (const base of desktopDirs) {
-    if (!base) continue
+  for (const base of resolveDesktopCandidateDirs()) {
     for (const sub of [
       join(base, 'resources', 'app.asar.unpacked', 'dsh', 'node_modules'),
       join(base, 'resources', 'app.asar', 'dsh', 'node_modules'),
@@ -477,20 +494,11 @@ export function findDshVersion() {
     }
   }
   // Desktop runtime metadata fallback (reads Electron runtime manifest)
-  const bases = [dirname(process.execPath), process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'), join(homedir(), 'AppData', 'Local', 'Programs', 'DeepSeek Harness')]
-  if (process.platform === 'win32') {
+  for (const desktopDir of resolveDesktopCandidateDirs()) {
     try {
-      const regOut = String(execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', 'DeepSeek Harness'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }))
-      const m = regOut.match(/InstallLocation\s+REG_SZ\s+(.+)/i)
-      if (m && m[1]) bases.unshift(m[1].trim())
-    } catch {}
-  }
-  for (const b of bases) {
-    if (!b) continue
-    try {
-      const rj = join(b, 'resources', 'runtime', 'primary-runtime', 'runtime.json')
-      if (existsSync(rj)) {
-        const meta = JSON.parse(readFileSync(rj, 'utf8'))
+      const runtimeJsonPath = join(desktopDir, 'resources', 'runtime', 'primary-runtime', 'runtime.json')
+      if (existsSync(runtimeJsonPath)) {
+        const meta = JSON.parse(readFileSync(runtimeJsonPath, 'utf8'))
         if (typeof meta.desktopVersion === 'string' && meta.desktopVersion.trim()) return meta.desktopVersion.trim()
       }
     } catch {}
