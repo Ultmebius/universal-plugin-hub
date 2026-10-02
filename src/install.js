@@ -1292,7 +1292,11 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
 
 export function isScanDirRegistered(path) {
   const state = readState()
-  const plugin = state.plugins.find((p) => join(installedDir(p.name), 'skills') === path)
+  const target = (path || '').replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '')
+  const plugin = state.plugins.find((p) => {
+    const pPath = join(installedDir(p.name), 'skills').replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '')
+    return pPath === target
+  })
   return plugin ? plugin.enabled !== false : existsSync(path)
 }
 

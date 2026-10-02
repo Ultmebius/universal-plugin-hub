@@ -508,3 +508,8 @@ export function compileSubagentsHubSkill(pluginName, pluginDisplayName, agentsLi
   }
 }
 
+function yamlScalar(value) {
+  const text = String(value || '')
+  if (/^[A-Za-z0-9 _./:-]+$/.test(text) && !text.includes('\n')) return text
+  return JSON.stringify(text)
+}
