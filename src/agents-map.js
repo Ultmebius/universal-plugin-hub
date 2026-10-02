@@ -41,14 +41,6 @@ export function cleanupLegacyPresets(pluginName) {
   }
 }
 
-/** Legacy alias for backward compatibility. */
-export function removeConvertedPreset(id) {
-  try {
-    if (!id || !/^[a-z0-9][a-z0-9-]*$/.test(id)) return
-    const dir = join(PRESET_ROOT(), id)
-    safeRmDir(dir)
-  } catch {}
-}
 
 /**
  * Parse one Claude agent definition file (.yaml|.yml|.md|.json).
@@ -514,24 +506,5 @@ export function compileSubagentsHubSkill(pluginName, pluginDisplayName, agentsLi
     subagentCount: agentsList.length,
     domainCount: domainGroups.length,
   }
-}
-
-/**
- * Backward compatibility helper: compile single agent or hub.
- */
-export function compileAgentToSkill(pluginName, agentFile, rawText, skillsDir) {
-  const parsed = parseAgentDefinition(pluginName, agentFile, rawText)
-  if (!parsed || parsed.error) return parsed
-  return compileSubagentsHubSkill(pluginName, pluginName, [parsed], skillsDir)
-}
-
-export function convertAgent(pluginName, agentFile, text, skillsDir) {
-  return compileAgentToSkill(pluginName, agentFile, text, skillsDir)
-}
-
-function yamlScalar(value) {
-  const text = String(value || '')
-  if (/^[A-Za-z0-9 _./:-]+$/.test(text) && !text.includes('\n')) return text
-  return JSON.stringify(text)
 }
 

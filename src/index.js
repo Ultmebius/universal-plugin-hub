@@ -10,10 +10,18 @@
  * through it are still missing dependencies.
  */
 import { mountRoutes } from './routes.js'
+import { syncAllInstalledSkillsToDsh } from './install.js'
 
 export const name = 'universal-plugin-hub'
 
 export function apply(ctx) {
+  // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
+  try {
+    syncAllInstalledSkillsToDsh()
+  } catch (err) {
+    ctx.logger?.warn?.(`[universal-plugin-hub] skill sync error: ${err.message}`)
+  }
+
   ctx.inject(['webServer'], (hostCtx) => {
     hostCtx.effect(() => mountRoutes(hostCtx.webServer), 'universal-plugin-hub: http routes')
   })

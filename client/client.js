@@ -114,9 +114,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-root *::before,
 .cpm-root *::after {
 	box-sizing: border-box;
-	corner-shape: squircle;
-	-webkit-corner-smoothing: 100%;
-	corner-smoothing: 100%;
 }
 
 /* Main Panel */
@@ -154,7 +151,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 8px;
 	background: var(--cpm-search-bg);
 	border: 1px solid var(--cpm-search-border);
-	border-radius: 10px;
+	border-radius: var(--dsw-radius-md, 12px);
 	padding: 7px 12px;
 	transition: border-color .15s ease, box-shadow .15s ease;
 }
@@ -223,7 +220,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-icon-btn, .cpm-add-btn {
 	width: 30px;
 	height: 30px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	border: 1px solid var(--cpm-icon-btn-border);
 	background: var(--cpm-icon-btn-bg);
 	color: var(--cpm-text);
@@ -252,7 +249,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 5px;
 	height: 30px;
 	padding: 0 9px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	border: 1px solid var(--cpm-icon-btn-border);
 	background: var(--cpm-icon-btn-bg);
 	color: var(--cpm-text);
@@ -295,8 +292,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-tab {
 	position: relative;
 	height: 30px;
-	padding: 0 8px;
-	border-radius: 8px;
+	padding: 0 10px;
+	border-radius: var(--dsw-radius-md, 12px);
 	font-size: 12.5px;
 	color: var(--cpm-tab-text);
 	cursor: pointer;
@@ -528,7 +525,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-tab-add {
 	padding: 4px 10px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	font-size: 14px;
 	font-weight: 500;
 	color: var(--cpm-muted);
@@ -620,7 +617,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 10px;
 	background: transparent;
 	border: 1px solid transparent;
-	border-radius: 10px;
+	border-radius: var(--dsw-radius-lg, 16px);
 	padding: 6px 8px;
 	cursor: pointer;
 	min-height: 52px;
@@ -643,9 +640,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-card-icon {
 	width: 38px;
 	height: 38px;
-	border-radius: 9px;
-	-webkit-corner-smoothing: 100%;
-	corner-smoothing: 100%;
+	border-radius: 12px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -667,9 +662,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	height: 100%;
 	object-fit: cover;
 	display: block;
-	border-radius: 8px;
-	-webkit-corner-smoothing: 100%;
-	corner-smoothing: 100%;
+	border-radius: 10px;
 }
 .cpm-card-body {
 	flex: 1 1 auto;
@@ -751,7 +744,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-add-btn {
 	width: 28px;
 	height: 28px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	border: none;
 	background: transparent;
 	color: var(--cpm-text);
@@ -808,7 +801,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-btn {
 	height: 32px;
 	padding: 0 14px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	font-size: 13px;
 	cursor: pointer;
 	border: 1px solid transparent;
@@ -1059,7 +1052,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	top: 34px;
 	background: var(--cpm-modal-bg);
 	border: 1px solid var(--cpm-modal-border);
-	border-radius: 10px;
+	border-radius: var(--dsw-radius-md, 12px);
 	padding: 5px;
 	z-index: 100;
 	min-width: 120px;
@@ -1070,7 +1063,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-menu-item {
 	padding: 7px 10px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	font-size: 12.5px;
 	cursor: pointer;
 	color: var(--cpm-text);
@@ -1093,7 +1086,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	cursor: pointer;
 	border: 1px solid transparent;
 	background: transparent;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	transition: all .15s ease;
 }
 .cpm-tab2:hover {
@@ -1114,7 +1107,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-tab-search-btn {
 	width: 28px;
 	height: 28px;
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	background: transparent;
 	border: none;
 	color: var(--cpm-muted);
@@ -1133,7 +1126,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	align-items: center;
 	background: var(--cpm-search-bg);
 	border: 1px solid var(--cpm-search-border);
-	border-radius: 10px;
+	border-radius: var(--dsw-radius-md, 12px);
 	padding: 4px 10px;
 	gap: 6px;
 	width: 210px;
@@ -1245,7 +1238,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-dialog-box {
 	background: var(--cpm-modal-bg);
 	border: 1px solid var(--cpm-border);
-	border-radius: 12px;
+	border-radius: var(--dsw-radius-lg, 16px);
 	padding: 22px 24px;
 	width: 440px;
 	max-width: 92vw;
@@ -1280,7 +1273,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	width: 100%;
 	background: var(--cpm-search-bg);
 	border: 1px solid var(--cpm-border);
-	border-radius: 8px;
+	border-radius: var(--dsw-radius-md, 12px);
 	padding: 8px 10px;
 	color: var(--cpm-text);
 	font-size: 13.5px;
@@ -1310,7 +1303,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-form-row:last-child { margin-bottom: 0; }
 .cpm-source-dialog-box {
 	width: 460px;
-	border-radius: 14px;
+	border-radius: var(--dsw-radius-lg, 16px);
 	padding: 22px 24px 20px 24px;
 	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.08);
 }
@@ -1505,7 +1498,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-install-dialog {
 	width: 440px;
 	padding: 22px 24px;
-	border-radius: 12px;
+	border-radius: var(--dsw-radius-lg, 16px);
 }
 .cpm-install-dialog-header {
 	display: flex;
@@ -1517,7 +1510,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	width: 44px;
 	height: 44px;
 	flex: 0 0 44px;
-	border-radius: 10px;
+	border-radius: 12px;
 }
 .cpm-install-dialog-header-info {
 	flex: 1;
@@ -1549,7 +1542,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-mcp-modal {
 	width: 540px;
 	max-width: calc(100vw - 32px);
-	border-radius: 14px;
+	border-radius: var(--dsw-radius-lg, 16px);
 	background: #ffffff;
 	border: 1px solid rgba(0, 0, 0, 0.08);
 	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.06);
@@ -2140,8 +2133,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: inline-flex;
 	align-items: center;
 	gap: 6.5px;
-	padding: 5px 10px;
-	border-radius: 8px;
+	padding: 5px 12px;
+	border-radius: 999px;
 	font-size: 12px;
 	font-family: var(--cpm-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
 	background: #ffffff;
@@ -2537,8 +2530,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: #09090b;
 	border: 1px solid rgba(0, 0, 0, 0.08);
 	border-radius: 12px;
-	-webkit-corner-smoothing: 100%;
-	corner-smoothing: 100%;
 	padding: 11px 16px;
 	font-size: 13px;
 	z-index: 100001;
@@ -6670,14 +6661,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		const doInstall = async (convertAgents) => {
+		const doInstall = async () => {
 			try {
 				const result = await api("/plugins/install", {
 					method: "POST",
 					body: JSON.stringify({
 						sourceId: installFor.sourceId,
 						pluginName: installFor.name,
-						convertAgents,
 					}),
 				});
 				const parts = [];

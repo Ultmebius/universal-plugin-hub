@@ -13,7 +13,7 @@ import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
-import { installedDir, readState, writeState, slugify, dshHome, safeRmDir } from './store.js'
+import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
@@ -1290,91 +1290,113 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
   return { ok: true, tools: [], disabledTools }
 }
 
-/** dsh-agent-skills scan state path + shape (version 1). */
-function agentSkillsStatePath() {
-  return join(dshHome(), 'agent-skills', 'state.json')
-}
-
-function readAgentSkillsState() {
-  try {
-    const parsed = JSON.parse(readFileSync(agentSkillsStatePath(), 'utf8'))
-    if (parsed && parsed.version === 1 && Array.isArray(parsed.dirs)) return parsed
-  } catch { /* fall through */ }
-  return { version: 1, dirs: [], disabledSkills: [], disabledDirs: [] }
-}
-
-function writeAgentSkillsState(state) {
-  const path = agentSkillsStatePath()
-  mkdirSync(dirname(path), { recursive: true })
-  const tmp = join(dirname(path), `.state.${process.pid}.${Date.now().toString(36)}.tmp`)
-  writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8')
-  renameSync(tmp, path)
-}
-
-function normalizePathForCompare(p) {
-  return p ? p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '') : ''
-}
-
-/** Register a scan dir (absolute path) as enabled; dedupe by resolved path. */
-function registerScanDir(path, skillNames = []) {
-  const state = readAgentSkillsState()
-  const resolved = normalizePathForCompare(path)
-  const existing = state.dirs.find((d) => normalizePathForCompare(d.path) === resolved)
-  if (existing) {
-    existing.enabled = true
-  } else {
-    state.dirs.push({ path, enabled: true })
-  }
-  if (Array.isArray(state.disabledSkills) && skillNames.length > 0) {
-    const toEnable = new Set(skillNames.map((s) => String(s).toLowerCase()))
-    state.disabledSkills = state.disabledSkills.filter((s) => !toEnable.has(String(s).toLowerCase()))
-  }
-  writeAgentSkillsState(state)
-}
-
-/** Disable a scan dir (keeps the entry, flips enabled). */
-function disableScanDir(path) {
-  const state = readAgentSkillsState()
-  const resolved = normalizePathForCompare(path)
-  const entry = state.dirs.find((d) => normalizePathForCompare(d.path) === resolved)
-  if (entry) entry.enabled = false
-  writeAgentSkillsState(state)
-}
-
-/** Remove a scan dir entry entirely. */
-function unregisterScanDir(path) {
-  const state = readAgentSkillsState()
-  const resolved = normalizePathForCompare(path)
-  state.dirs = state.dirs.filter((d) => normalizePathForCompare(d.path) !== resolved)
-  writeAgentSkillsState(state)
-}
-
 export function isScanDirRegistered(path) {
-  const state = readAgentSkillsState()
-  const resolved = normalizePathForCompare(path)
-  const entry = state.dirs.find((d) => normalizePathForCompare(d.path) === resolved)
-  return entry?.enabled !== false
+  const state = readState()
+  const plugin = state.plugins.find((p) => join(installedDir(p.name), 'skills') === path)
+  return plugin ? plugin.enabled !== false : existsSync(path)
 }
 
-function ensureSkillFrontmatter(content, skillName) {
+function ensureSkillFrontmatter(content, skillName, description) {
+  const desc = description || skillName
   if (content.startsWith('---')) {
     const end = content.indexOf('---', 3)
     if (end > 0) {
-      const yaml = content.slice(3, end)
-      if (!/^\s*name\s*:/m.test(yaml)) {
-        return `---\nname: ${skillName}\n${yaml.trim()}\n---` + content.slice(end + 3)
+      const yamlStr = content.slice(3, end)
+      let extra = ''
+      if (!/^\s*name\s*:/m.test(yamlStr)) {
+        extra += `name: ${skillName}\n`
+      }
+      if (!/^\s*description\s*:/m.test(yamlStr)) {
+        extra += `description: ${desc}\n`
+      }
+      if (!/^\s*user-invocable\s*:/m.test(yamlStr)) {
+        extra += `user-invocable: true\n`
+      }
+      if (extra) {
+        return `---\n${extra}${yamlStr.trim()}\n---` + content.slice(end + 3)
       }
       return content
     }
   }
-  return `---\nname: ${skillName}\ndescription: ${skillName}\n---\n\n` + content
+  return `---\nname: ${skillName}\ndescription: ${desc}\nuser-invocable: true\n---\n\n` + content
+}
+
+/**
+ * Synchronize all skills from an installed plugin into $DSH_HOME/skills.
+ * This ensures DSH Desktop's @deepseek-ai/dsh-skill-filesystem discovers them
+ * natively and hot-reloads them into the composer's "/" slash command menu.
+ */
+export function syncPluginSkillsToDsh(pluginName) {
+  const target = installedDir(pluginName)
+  const pluginSkillsDir = join(target, 'skills')
+  if (!existsSync(pluginSkillsDir)) return []
+
+  const dshSkills = dshSkillsDir()
+  mkdirSync(dshSkills, { recursive: true })
+
+  const synced = []
+  for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      const srcSkillDir = join(pluginSkillsDir, entry.name)
+      const srcSkillFile = join(srcSkillDir, 'SKILL.md')
+      if (existsSync(srcSkillFile)) {
+        const destSkillDir = join(dshSkills, entry.name)
+        safeRmDir(destSkillDir)
+        copyDir(srcSkillDir, destSkillDir)
+        synced.push(entry.name)
+      }
+    }
+  }
+  return synced
+}
+
+/**
+ * Remove a plugin's skills from $DSH_HOME/skills upon uninstall or disabling.
+ */
+export function removePluginSkillsFromDsh(pluginName) {
+  const target = installedDir(pluginName)
+  const pluginSkillsDir = join(target, 'skills')
+  const dshSkills = dshSkillsDir()
+  if (!existsSync(dshSkills)) return
+
+  // 1. If installed copy exists, remove matching skill directories
+  if (existsSync(pluginSkillsDir)) {
+    for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const destSkillDir = join(dshSkills, entry.name)
+        safeRmDir(destSkillDir)
+      }
+    }
+  }
+
+  // 2. Also remove any skills prefixed with plugin name or compiled subagent hub
+  const subagentHubName = `${pluginName}-agents`
+  safeRmDir(join(dshSkills, subagentHubName))
+}
+
+/**
+ * Sync all installed and enabled plugins into $DSH_HOME/skills.
+ * Called at boot or after configuration change.
+ */
+export function syncAllInstalledSkillsToDsh() {
+  const state = readState()
+  const dshSkills = dshSkillsDir()
+  mkdirSync(dshSkills, { recursive: true })
+
+  const results = {}
+  for (const plugin of state.plugins || []) {
+    if (plugin.enabled !== false) {
+      results[plugin.name] = syncPluginSkillsToDsh(plugin.name)
+    }
+  }
+  return results
 }
 
 /**
  * Install a plugin from the marketplace into the installed tree.
  * Returns a result summary for the UI.
  */
-export async function installPlugin({ sourceId, pluginName, convertAgents = true }) {
+export async function installPlugin({ sourceId, pluginName }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
@@ -1477,6 +1499,22 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
       convertErrors.push(parsed.error)
     } else if (parsed) {
       validAgents.push(parsed)
+      // Also generate individual skill for direct user invocation and model task-delegation
+      const agentSkillDir = join(skillsDir, parsed.name)
+      mkdirSync(agentSkillDir, { recursive: true })
+      const agentSkillContent = ensureSkillFrontmatter(
+        `# ${parsed.displayName || parsed.name}\n\n` +
+        `Specialized subagent from **${pluginName}**.\n\n` +
+        `${parsed.description}\n\n` +
+        `## Autonomous Subagent Delegation\n` +
+        `When delegating a task to this specialized agent using the \`subagent\` tool:\n\n` +
+        '```markdown\n' +
+        parsed.instructions + '\n' +
+        '```\n',
+        parsed.name,
+        parsed.description
+      )
+      writeFileSync(join(agentSkillDir, 'SKILL.md'), agentSkillContent, 'utf8')
     }
   }
 
@@ -1507,9 +1545,9 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
   const connectors = listConnectors(target)
   const hooks = listHooks(target)
 
-  // Register the skills directory for scanning (now includes all skills + subagent delegates).
+  // Sync skills and subagent delegates to DSH native skills directory.
   if (existsSync(skillsDir)) {
-    registerScanDir(skillsDir, skills.map((s) => s.command || s.name || pluginName))
+    syncPluginSkillsToDsh(pluginName)
   }
 
   // Auto-register and connect any MCP connectors defined in the plugin that do NOT require auth and have valid URLs/commands.
@@ -1549,7 +1587,6 @@ export async function installPlugin({ sourceId, pluginName, convertAgents = true
     author: row.author ?? null,
     enabled: true,
     installedAt: Date.now(),
-    convertAgents: false,
     skillCount: skills.length,
     agentCount: agents.length,
     promptCount: prompts.length,
@@ -1623,7 +1660,7 @@ export function uninstallPlugin(pluginName) {
     unregisterPluginLsp(pluginName)
     unregisterPluginHooks(pluginName)
   }
-  if (existsSync(join(target, 'skills'))) unregisterScanDir(join(target, 'skills'))
+  removePluginSkillsFromDsh(pluginName)
   try { safeRmDir(target) } catch {}
   
   // Clean any legacy preset directories left by prior versions
@@ -1662,7 +1699,9 @@ export async function togglePlugin(pluginName, enabled) {
   const lspErrors = []
 
   if (enabled) {
-    if (existsSync(skillsDir)) registerScanDir(skillsDir, skillNames)
+    if (existsSync(skillsDir)) {
+      syncPluginSkillsToDsh(pluginName)
+    }
     for (const c of pluginConnectors) {
       registerConnector(pluginName, c.name, c)
     }
@@ -1671,7 +1710,7 @@ export async function togglePlugin(pluginName, enabled) {
     }
     await registerPluginHooks(pluginName)
   } else {
-    if (existsSync(skillsDir)) disableScanDir(skillsDir)
+    removePluginSkillsFromDsh(pluginName)
     for (const c of pluginConnectors) {
       unregisterConnector(pluginName, c.name)
     }
@@ -1707,7 +1746,7 @@ export async function updatePlugin(pluginName) {
   }
 
   // Freshly materialized install (re-copies, re-registers, re-converts).
-  return installPlugin({ sourceId: rec.sourceId, pluginName, convertAgents: rec.convertAgents })
+  return installPlugin({ sourceId: rec.sourceId, pluginName })
 }
 
 /** Find one marketplace row by name. */

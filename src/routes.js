@@ -393,7 +393,6 @@ async function handle(req, res, prefix = API_PREFIX) {
       const result = await installPlugin({
         sourceId,
         pluginName,
-        convertAgents: body.convertAgents !== false,
       })
       invalidateMarketplaceCache(sourceId)
       return sendJson(res, 200, result)

@@ -49,6 +49,10 @@ export function dshHome() {
   return process.env.DSH_HOME || join(homedir(), '.dsh')
 }
 
+export function dshSkillsDir() {
+  return join(dshHome(), 'skills')
+}
+
 export function marketRoot() {
   return join(dshHome(), 'agent-skills', ROOT_DIR_NAME)
 }
