@@ -35,8 +35,6 @@ cd universal-plugin-hub
 npm install
 ```
 
----
-
 ## Features
 
 - **Preloaded catalog**: Loads the official Claude plugin catalog (`anthropics/claude-plugins-official`) by default.
@@ -48,15 +46,11 @@ npm install
   - LSP servers register automatically.
 - **Environment support**: Works in both DeepSeek Harness Desktop and the CLI web profile.
 
----
-
 ## Usage
 
 1. **Browse and search**: Open the marketplace panel and search plugins by name or keywords.
 2. **Install**: Click **Install** on a plugin card. The hub downloads the plugin and configures it.
 3. **Manage**: Toggle plugins, configure MCP tokens, or uninstall plugins from the management tab.
-
----
 
 ## Data and directory layout
 
@@ -66,8 +60,6 @@ npm install
   - Cloned source cache: `~/.dsh/agent-skills/universal-plugin-hub/market/<source-id>`
   - State and source registry: `~/.dsh/agent-skills/universal-plugin-hub/state.json`
 - **Runtime patch configuration**: `~/.dsh/profiles/<profile>/cordis.patch.yml`
-
----
 
 ## License
 

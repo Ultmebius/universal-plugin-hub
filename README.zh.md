@@ -35,8 +35,6 @@ cd universal-plugin-hub
 npm install
 ```
 
----
-
 ## 主要功能
 
 - **内置官方插件源**：默认载入 Claude 官方插件目录（`anthropics/claude-plugins-official`），开箱即用。
@@ -48,15 +46,11 @@ npm install
   - 自动注册 LSP 语言服务。
 - **环境支持**：同时支持 DeepSeek Harness Desktop 桌面客户端与命令行 Web 模式。
 
----
-
 ## 使用方法
 
 1. **浏览与搜索**：打开插件市场面板，输入关键词搜索插件。
 2. **一键安装**：点击插件卡片上的 **Install**，插件会自动下载并接入系统。
 3. **插件管理**：在管理面板中开启或停用插件，配置 MCP 工具鉴权 Token，或一键更新与卸载。
-
----
 
 ## 本地数据与目录结构
 
@@ -66,8 +60,6 @@ npm install
   - 插件源 Git 缓存：`~/.dsh/agent-skills/universal-plugin-hub/market/<source-id>`
   - 插件源与安装记录：`~/.dsh/agent-skills/universal-plugin-hub/state.json`
 - **运行时配置补丁**：`~/.dsh/profiles/<profile>/cordis.patch.yml`
-
----
 
 ## 开源协议
 
