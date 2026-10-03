@@ -9,12 +9,12 @@ export function sendJson(res, status, payload) {
   res.end(body)
 }
 
-export function readJsonBody(req) {
+export function readJsonBody(req, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let data = ''
     req.on('data', (chunk) => {
       data += chunk
-      if (data.length > 1_000_000) {
+      if (data.length > maxBytes) {
         reject(new Error('request body too large'))
         req.destroy()
       }

@@ -133,15 +133,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-topbar {
 	display: flex;
 	flex-direction: column;
+	align-items: center;
 	gap: 12px;
-	padding: 14px 16px 10px 16px;
-	border-bottom: 1px solid var(--cpm-border);
+	padding: 14px 24px 10px 24px;
 	background: var(--cpm-bg);
+	width: 100%;
+}
+.cpm-topbar::after {
+	content: "";
+	display: block;
+	width: 100%;
+	max-width: 1210px;
+	border-bottom: 1px solid var(--cpm-border);
+	margin-top: 2px;
 }
 .cpm-topbar-row1 {
 	display: flex;
 	align-items: center;
 	width: 100%;
+	max-width: 1200px;
 }
 .cpm-search {
 	flex: 1;
@@ -179,6 +189,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: space-between;
 	gap: 10px;
 	width: 100%;
+	max-width: 1200px;
 	position: relative;
 	z-index: 10;
 }
@@ -426,7 +437,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-preview-popover {
 	position: fixed;
 	z-index: 99999;
-	width: 360px;
+	width: 380px;
 	max-width: calc(100vw - 32px);
 	padding: 14px 16px 12px;
 	border-radius: 8px;
@@ -546,13 +557,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-grid, .cpm-grid-container {
 	flex: 1;
 	overflow-y: auto;
-	padding: 12px 16px 24px 16px;
+	padding: 16px 24px 28px 24px;
 	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
+	box-sizing: border-box;
+	width: 100%;
 }
 .cpm-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 8px 14px;
+	grid-template-columns: repeat(2, minmax(0, 576px));
+	justify-content: center;
+	gap: 10px 48px;
 	align-content: start;
 	contain: content;
 }
@@ -565,12 +579,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-grid-installed {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 8px 14px;
+	grid-template-columns: repeat(2, minmax(0, 576px));
+	justify-content: center;
+	gap: 10px 48px;
 	align-content: start;
 }
 .cpm-installed-group {
-	margin-bottom: 22px;
+	max-width: 1200px;
+	margin: 0 auto 22px auto;
 }
 .cpm-installed-group:last-child {
 	margin-bottom: 6px;
@@ -623,6 +639,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	min-height: 52px;
 	transition: background .18s cubic-bezier(0.16, 1, 0.3, 1), transform .12s ease;
 	min-width: 0;
+	width: 100%;
+	box-sizing: border-box;
 	position: relative;
 	content-visibility: auto;
 	contain-intrinsic-size: auto 52px;
@@ -764,9 +782,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-detail {
 	flex: 1;
 	overflow-y: auto;
-	padding: 16px 16px 28px 16px;
-	max-width: 100%;
+	padding: 16px 24px 28px 24px;
+	width: 100%;
 	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	box-sizing: border-box;
+}
+.cpm-detail > * {
+	width: 100%;
+	max-width: 1200px;
 }
 .cpm-detail.mask-bottom {
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
@@ -982,10 +1008,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-manage {
 	flex: 1;
 	overflow-y: auto;
-	padding: 16px 16px 28px 16px;
-	max-width: 100%;
+	padding: 16px 24px 28px 24px;
+	width: 100%;
 	background: var(--cpm-bg);
 	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	box-sizing: border-box;
+}
+.cpm-manage > * {
+	width: 100%;
+	max-width: 1200px;
 }
 .cpm-manage.mask-bottom {
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
@@ -1311,6 +1345,107 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: #1c1c20;
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.cpm-dropzone {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 18px 14px;
+	margin-top: 12px;
+	border: 1.5px dashed var(--cpm-border);
+	border-radius: var(--dsw-radius-md, 12px);
+	background: var(--cpm-search-bg);
+	cursor: pointer;
+	transition: border-color .15s ease, background .15s ease;
+	text-align: center;
+}
+.cpm-dropzone:hover, .cpm-dropzone.is-active {
+	border-color: var(--cpm-accent);
+	background: rgba(37, 99, 235, 0.04);
+}
+.cpm-dark .cpm-dropzone:hover, .cpm-dark .cpm-dropzone.is-active {
+	background: rgba(59, 130, 246, 0.08);
+}
+.cpm-dropzone-icon {
+	color: var(--cpm-muted);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: color .15s ease, transform .15s ease;
+}
+.cpm-dropzone:hover .cpm-dropzone-icon, .cpm-dropzone.is-active .cpm-dropzone-icon {
+	color: var(--cpm-accent);
+	transform: translateY(-2px);
+}
+.cpm-dropzone-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--cpm-text);
+}
+.cpm-dropzone-sub {
+	font-size: 11.5px;
+	color: var(--cpm-muted);
+}
+.cpm-source-drag-overlay {
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: var(--cpm-modal-bg);
+	opacity: 0.96;
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	border: 2px dashed var(--cpm-accent);
+	z-index: 20;
+	pointer-events: none;
+	animation: cpm-dialog-in 0.15s ease;
+}
+.cpm-local-preview-card {
+	display: flex;
+	align-items: flex-start;
+	gap: 14px;
+	padding: 14px 16px;
+	border-radius: var(--dsw-radius-md, 12px);
+	background: var(--cpm-search-bg);
+	border: 1px solid var(--cpm-border);
+	margin: 12px 0 16px 0;
+}
+.cpm-local-dup-card {
+	padding: 14px 16px;
+	border-radius: var(--dsw-radius-md, 12px);
+	background: rgba(245, 158, 11, 0.06);
+	border: 1px solid rgba(245, 158, 11, 0.25);
+	margin: 12px 0 16px 0;
+}
+.cpm-local-dup-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+	padding: 10px 12px;
+	background: var(--cpm-modal-bg);
+	border: 1px solid var(--cpm-border);
+	border-radius: 8px;
+	margin: 10px 0 8px 0;
+}
+.cpm-pill-success {
+	border-color: rgba(16, 185, 129, 0.3) !important;
+	color: #10b981 !important;
+	background: rgba(16, 185, 129, 0.08) !important;
+}
+.cpm-btn-warning {
+	background: #d97706 !important;
+	border-color: #d97706 !important;
+	color: #ffffff !important;
+}
+.cpm-btn-warning:hover {
+	background: #b45309 !important;
+	border-color: #b45309 !important;
 }
 
 .cpm-source-header {
@@ -4155,7 +4290,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		},
 			h(PluginIcon, { plugin, isDark }),
 			h("div", { className: "cpm-card-body" },
-				h("div", { className: "cpm-card-name" }, plugin.displayName || plugin.name),
+				h("div", { className: "cpm-card-name" },
+					h("span", { className: "cpm-card-name-text" }, plugin.displayName || plugin.name),
+				),
 				h("div", { className: "cpm-card-desc" }, plugin.description || (plugin.author ? `by ${plugin.author}` : "")),
 			),
 			installed
@@ -5318,36 +5455,39 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return () => clearTimeout(timer);
 		}, [updateDescMask, preview]);
 
-		const popWidth = 360;
-		const popHeight = 180;
-		const margin = 10;
+		const popWidth = 380;
+		const margin = 12;
 		const vpW = (typeof window !== "undefined" ? window.innerWidth : 1000) || 1000;
 		const vpH = (typeof window !== "undefined" ? window.innerHeight : 800) || 800;
 
-		let left = rect.right + margin;
-		let top = rect.top - 6;
+		const popRef = useRef(null);
+		const [measuredH, setMeasuredH] = useState(0);
 
-		if (left + popWidth + margin > vpW) {
-			if (rect.left - popWidth - margin > margin) {
-				left = rect.left - popWidth - margin;
-			} else {
-				left = Math.max(margin, Math.min(rect.left, vpW - popWidth - margin));
-				if (rect.bottom + popHeight + margin < vpH) {
-					top = rect.bottom + margin;
-				} else {
-					top = Math.max(margin, rect.top - popHeight - margin);
-				}
+		useEffect(() => {
+			if (popRef.current) {
+				const h = popRef.current.offsetHeight;
+				if (h && h !== measuredH) setMeasuredH(h);
 			}
+		}, [preview, measuredH]);
+
+		const actualHeight = measuredH || 140;
+		const isUpward = (vpH - rect.bottom - margin < actualHeight) && (rect.top - margin >= actualHeight);
+
+		let left = preview.titleRight || (rect.left + 80);
+		if (left + popWidth + margin > vpW) {
+			left = Math.max(margin, vpW - popWidth - margin);
 		}
 
-		top = Math.max(margin, Math.min(top, vpH - popHeight - margin));
+		const topStyle = isUpward ? "auto" : `${rect.bottom + 6}px`;
+		const bottomStyle = isUpward ? `${vpH - rect.top + 6}px` : "auto";
 
 		const author = p.author ? (typeof p.author === "string" ? p.author : p.author.name) : null;
 		const desc = p.description || "暂无详细功能描述";
 
 		return h("div", {
+			ref: popRef,
 			className: "cpm-preview-popover",
-			style: { left: `${left}px`, top: `${top}px` },
+			style: { left: `${left}px`, top: topStyle, bottom: bottomStyle },
 			onMouseEnter,
 			onMouseLeave,
 			onClick,
@@ -5563,7 +5703,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const rect = el.getBoundingClientRect();
 				const gridRect = gridRef.current.getBoundingClientRect();
 				if (rect.bottom >= gridRect.top + 8 && rect.top <= gridRect.bottom - 8) {
-					setHoveredPreview({ plugin, rect, gridRect });
+					const textEl = el.querySelector(".cpm-card-name-text") || el.querySelector(".cpm-card-name");
+					const titleRight = textEl ? textEl.getBoundingClientRect().right : (rect.left + 80);
+					setHoveredPreview({ plugin, rect, gridRect, titleRight });
 					prefetchDetail(plugin.sourceId || activeSourceId, plugin.name);
 				}
 			}
@@ -6999,9 +7141,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}),
 
 			addDialog && h(AddSourceDialog, {
+				isDark,
 				onCancel: () => setAddDialog(false),
-				onAdded: async (newSourceId) => {
-					setAddDialog(false);
+				onAdded: async (newSourceId, keepOpen) => {
+					if (!keepOpen) setAddDialog(false);
 					await refreshState();
 					if (newSourceId) setActiveSourceId(newSourceId);
 				},
@@ -7097,7 +7240,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Add Source Dialog (2-Step Naming) ──────────────────────────────
-	function AddSourceDialog({ onCancel, onAdded, showToast }) {
+	function AddSourceDialog({ onCancel, onAdded, showToast, isDark }) {
 		const [url, setUrl] = useState("");
 		const [phase, setPhase] = useState("url");
 		const [suggested, setSuggested] = useState("");
@@ -7107,7 +7250,101 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [repoLabel, setRepoLabel] = useState("");
 		const [pluginCount, setPluginCount] = useState(0);
 		const [busy, setBusy] = useState(false);
+		const [isDragging, setIsDragging] = useState(false);
+		const [localPreview, setLocalPreview] = useState(null);
+		const [localDuplicate, setLocalDuplicate] = useState(null);
 		const customInputRef = useRef(null);
+
+		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.zip$/i.test(String(str || "").trim());
+
+		const handleInspectLocal = async (rawPath) => {
+			const clean = String(rawPath || "").trim();
+			if (!clean) return;
+			const payload = { path: clean };
+			setBusy(true);
+			try {
+				const res = await api("/plugins/local/inspect", {
+					method: "POST",
+					body: JSON.stringify(payload)
+				});
+				if (!res.ok) {
+					showToast("不符合规范，不可以上传", res.error || "最低限度规范：根目录下需存在 skill.md 或有效插件配置", { restart: false });
+					return;
+				}
+				if (res.exists) {
+					setLocalDuplicate({ plugin: res.plugin, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
+					setPhase("local-duplicate");
+				} else {
+					setLocalPreview({ plugin: res.plugin, payload });
+					setPhase("local-preview");
+				}
+			} catch (e) {
+				showToast("不符合规范，不可以上传", cleanError(e), { restart: false });
+			} finally {
+				setBusy(false);
+			}
+		};
+
+		const fileToBase64 = (file) => new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				const result = String(reader.result || "");
+				resolve(result.slice(result.indexOf(",") + 1));
+			};
+			reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+			reader.readAsDataURL(file);
+		});
+
+		const handleInspectLocalUpload = async (file) => {
+			if (file.size > 22 * 1024 * 1024) {
+				showToast("压缩包过大", "本地压缩包上限 22MB，请解压后改用文件夹路径导入", { restart: false });
+				return;
+			}
+			setBusy(true);
+			try {
+				const data = await fileToBase64(file);
+				const payload = { data, filename: file.name };
+				const res = await api("/plugins/local/inspect", {
+					method: "POST",
+					body: JSON.stringify(payload)
+				});
+				if (!res.ok) {
+					showToast("不符合规范，不可以上传", res.error || "最低限度规范：根目录下需存在 skill.md 或有效插件配置", { restart: false });
+					return;
+				}
+				if (res.exists) {
+					setLocalDuplicate({ plugin: res.plugin, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
+					setPhase("local-duplicate");
+				} else {
+					setLocalPreview({ plugin: res.plugin, payload });
+					setPhase("local-preview");
+				}
+			} catch (e) {
+				showToast("不符合规范，不可以上传", cleanError(e), { restart: false });
+			} finally {
+				setBusy(false);
+			}
+		};
+
+		const handleImportLocal = async (payload, overwrite) => {
+			setBusy(true);
+			try {
+				const res = await api("/plugins/local/import", {
+					method: "POST",
+					body: JSON.stringify({ ...payload, overwrite })
+				});
+				showToast("本地插件已添加", `成功导入「${res.plugin.displayName || res.plugin.name}」`, { restart: false });
+				await onAdded("local", true);
+				setUrl("");
+				setPhase("url");
+				setLocalPreview(null);
+				setLocalDuplicate(null);
+			} catch (e) {
+				showToast("添加本地插件失败", cleanError(e), { restart: false });
+			} finally {
+				setBusy(false);
+			}
+		};
 
 		const extractRepoLabel = (raw) => {
 			if (!raw) return "";
@@ -7157,17 +7394,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				"dsh-plugins", "extensions", "packages", "repo", "repository", "custom"
 			]);
 
-			// If server suggestion is valid and NOT a generic word, trust it
 			if (serverSuggested && !genericWords.has(serverSuggested.toLowerCase())) {
 				return serverSuggested;
 			}
 
-			// If repo name is generic (like "skills"), use capitalized owner (e.g. "Mattpocock")
 			if (genericWords.has(repoLower) && owner) {
 				return owner.charAt(0).toUpperCase() + owner.slice(1);
 			}
 
-			// Clean up repo name: strip prefixes (claude-, dsh-) and suffixes (-skill, -skills, -plugins, etc.)
 			const simplified = repo
 				.replace(/^(claude|dsh|anthropic)[-_]?(plugins?)?[-_]?/i, "")
 				.replace(/[-_]?(plugins?|skills?|agents?|official|marketplace)$/i, "");
@@ -7193,7 +7427,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const ensure = async () => {
 			const raw = url.trim();
 			if (!raw) {
-				showToast("请输入仓库地址", "支持格式：owner/repo 或 https://github.com/...", { restart: false });
+				showToast("请输入地址或拖入插件", "支持 Git 仓库、本地插件文件夹或 .zip 压缩包", { restart: false });
+				return;
+			}
+			if (isLocalPath(raw)) {
+				await handleInspectLocal(raw);
 				return;
 			}
 			setBusy(true);
@@ -7237,15 +7475,53 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		return h("div", { className: "cpm-dialog", onClick: onCancel },
-			h("div", { className: "cpm-dialog-box cpm-source-dialog-box", onClick: (e) => e.stopPropagation() },
+			h("div", {
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-labelledby": "cpm-dialog-title",
+				className: "cpm-dialog-box cpm-source-dialog-box" + (isDragging ? " is-dragging" : ""),
+				style: { position: "relative" },
+				onClick: (e) => e.stopPropagation(),
+				onDragOver: (e) => { e.preventDefault(); setIsDragging(true); },
+				onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDragging(false); },
+				onDrop: (e) => {
+					e.preventDefault();
+					setIsDragging(false);
+					const file = e.dataTransfer?.files?.[0];
+					const text = e.dataTransfer?.getData("text/plain")?.trim();
+					const dropPath = file?.path || text;
+					if (!dropPath && file && /\.zip$/i.test(file.name)) {
+						// Web drop: no filesystem path available — upload the zip content instead.
+						setUrl(file.name);
+						handleInspectLocalUpload(file);
+					} else if (!dropPath && file) {
+						showToast("无法读取拖入内容", "浏览器环境拿不到文件夹路径，请将路径粘贴到输入框，或改为拖入 .zip 压缩包", { restart: false });
+					} else if (dropPath) {
+						setUrl(dropPath);
+						handleInspectLocal(dropPath);
+					}
+				},
+			},
+				isDragging && h("div", { className: "cpm-source-drag-overlay" },
+					h("svg", { width: 36, height: 36, viewBox: "0 0 24 24", fill: "none", stroke: "var(--cpm-accent)", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+						h("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
+						h("polyline", { points: "17 8 12 3 7 8" }),
+						h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
+					),
+					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14 } }, "释放以上传并解析插件"),
+					h("div", { className: "cpm-dropzone-sub" }, "支持本地插件目录或 .zip 压缩包")
+				),
 				phase === "url" && [
-					h("div", { className: "cpm-dialog-title", key: "title" }, "添加插件源"),
-					h("div", { className: "cpm-field", key: "f", style: { marginBottom: 0 } },
-						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址"),
+					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "添加插件"),
+					h("div", { className: "cpm-field", key: "f" },
+						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址 或 本地路径"),
 						h("div", { className: "cpm-input-wrap" },
 							h("input", {
 								className: "cpm-input",
-								placeholder: "Select a repository",
+								type: "text",
+								autoComplete: "off",
+								spellCheck: false,
+								placeholder: "输入 Git 地址，如 https://github.com/... 或 owner/repo",
 								value: url,
 								onChange: (e) => setUrl(e.target.value),
 								onKeyDown: (e) => {
@@ -7256,19 +7532,115 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							h(ClearBtn, { value: url, onClear: () => setUrl("") }),
 						),
 						h("div", {
-							className: "cpm-smart-md",
-							style: {
-								color: "var(--cpm-muted)",
-								fontSize: "11.5px",
-								marginTop: 6,
-								textAlign: "left",
-								lineHeight: 1.3,
-							},
-						}, renderInlineMarkdownNodes("A GitHub `owner/repo` or a git repository URL")),
+							className: "cpm-dropzone",
+							key: "dropzone",
+						},
+							h("div", { className: "cpm-dropzone-icon" },
+								h("svg", { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" },
+									h("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
+									h("polyline", { points: "17 8 12 3 7 8" }),
+									h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
+								)
+							),
+							h("div", { className: "cpm-dropzone-title" }, "拖入本地插件文件夹 或 .zip 压缩包")
+						),
 					),
-					h("div", { className: "cpm-dialog-actions", key: "a", style: { marginTop: 0 } },
+					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? "正在拉取与解析…" : "下一步"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? "正在解析…" : "下一步"),
+					),
+				],
+				phase === "local-preview" && localPreview && [
+					h("div", { className: "cpm-source-header", key: "header" },
+						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, "发现本地插件"),
+						h("div", { className: "cpm-source-meta-row" },
+							h("div", { className: "cpm-source-live-dot" }),
+							h("span", { className: "cpm-source-repo-text" }, "本地插件"),
+							h("span", { className: "cpm-source-meta-sep" }, "·"),
+							h("span", { className: "cpm-source-count-text" }, "规范校验通过"),
+						),
+					),
+					h("div", { className: "cpm-local-preview-card", key: "card" },
+						h(PluginIcon, { plugin: localPreview.plugin, isDark }),
+						h("div", { style: { flex: 1, minWidth: 0 } },
+							h("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 } },
+								h("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)" } }, localPreview.plugin.displayName || localPreview.plugin.name),
+								h("span", {
+									style: {
+										fontSize: 11,
+										padding: "1px 6px",
+										borderRadius: 4,
+										background: "var(--cpm-pill-bg)",
+										border: "1px solid var(--cpm-pill-border)",
+										color: "var(--cpm-text)",
+										fontWeight: 600,
+									}
+								}, `v${localPreview.plugin.version || '1.0.0'}`),
+								localPreview.plugin.author && h("span", { style: { fontSize: 11.5, color: "var(--cpm-muted)" } }, `by ${localPreview.plugin.author}`),
+							),
+							h("div", {
+								style: {
+									fontSize: 12,
+									color: "var(--cpm-muted)",
+									lineHeight: 1.5,
+									display: "-webkit-box",
+									WebkitLineClamp: 2,
+									WebkitBoxOrient: "vertical",
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									marginBottom: 8,
+								}
+							}, localPreview.plugin.description || "本地插件，未提供额外描述。"),
+							h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+								h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.skillsCount || 0} 个技能`),
+								localPreview.plugin.agentsCount > 0 && h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.agentsCount} 个智能体`),
+								h("span", { className: "cpm-card-pill cpm-pill-success", style: { fontSize: 11, height: 22, padding: "0 8px" } }, "✓ 符合规范"),
+							),
+						),
+					),
+					h("div", { className: "cpm-dialog-actions", key: "a" },
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase("url"); } }, "返回"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => handleImportLocal(localPreview.payload, false) }, busy ? "正在导入…" : "确认添加"),
+					),
+				],
+				phase === "local-duplicate" && localDuplicate && [
+					h("div", { className: "cpm-source-header", key: "header" },
+						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title", style: { color: "#d97706" } }, "已存在同名插件"),
+						h("div", { className: "cpm-source-meta-row" },
+							h("span", { className: "cpm-source-repo-text" }, localDuplicate.plugin.name),
+							h("span", { className: "cpm-source-meta-sep" }, "·"),
+							h("span", { className: "cpm-source-count-text" }, `已安装版本: ${localDuplicate.existingVersion || '1.0.0'}`),
+						),
+					),
+					h("div", { className: "cpm-local-dup-card", key: "info" },
+						h("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8 } },
+							h(PluginIcon, { plugin: localDuplicate.plugin, isDark }),
+							h("div", null,
+								h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)" } }, localDuplicate.plugin.displayName || localDuplicate.plugin.name),
+								h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)" } }, `标识：${localDuplicate.plugin.name}`),
+							),
+						),
+						h("div", { className: "cpm-local-dup-grid" },
+							h("div", null,
+								h("div", { style: { color: "var(--cpm-muted)", fontSize: 11, marginBottom: 2 } }, "当前已安装版本"),
+								h("div", { style: { fontWeight: 600, color: "var(--cpm-text)" } }, `v${localDuplicate.existingVersion || '1.0.0'}`),
+								localDuplicate.existingUpdatedAt && h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, new Date(localDuplicate.existingUpdatedAt).toLocaleDateString()),
+							),
+							h("div", null,
+								h("div", { style: { color: "var(--cpm-muted)", fontSize: 11, marginBottom: 2 } }, "新导入版本"),
+								h("div", { style: { fontWeight: 600, color: "#10b981" } }, `v${localDuplicate.plugin.version || '1.0.0'}`),
+								h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, "准备覆盖"),
+							),
+						),
+						h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)", lineHeight: 1.4 } }, "覆盖更新将用新版本文件替换现有本地插件，是否确认继续？"),
+					),
+					h("div", { className: "cpm-dialog-actions", key: "a" },
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalDuplicate(null); setPhase("url"); } }, "取消"),
+						h("button", {
+							className: "cpm-btn cpm-btn-warning",
+							disabled: busy,
+							onClick: () => handleImportLocal(localDuplicate.payload, true),
+						}, busy ? "正在覆盖…" : "覆盖更新"),
 					),
 				],
 				phase === "name" && [
@@ -9302,9 +9674,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}
 	}
 
-	// ────────────────────────────── Settings section entry ──────────────────────────────
+	// ────────────────────────────── Main sidebar & panel entry ──────────────────────────────
 	function Section({ ctx }) {
 		return h(ErrorBoundary, null, h(MarketApp, { ctx }));
+	}
+
+	function SidebarIcon({ size = 18 }) {
+		return h("svg", {
+			width: size,
+			height: size,
+			viewBox: "0 0 24 24",
+			fill: "none",
+			stroke: "currentColor",
+			strokeWidth: 2,
+			strokeLinecap: "round",
+			strokeLinejoin: "round",
+			style: { display: "block" },
+		},
+			h("path", { d: "M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" }),
+			h("line", { x1: "3", y1: "6", x2: "21", y2: "6" }),
+			h("path", { d: "M16 10a4 4 0 0 1-8 0" })
+		);
 	}
 
 	const name = "universal-plugin-hub";
@@ -9312,11 +9702,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	function apply(ctx) {
 		ensureCss();
-		ctx.slots.inject("settings.section", () => ctx.slots.register({
-			name: "settings.section",
+		ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
+			name: "sidebar.panellist",
 			id: "universal-plugin-hub",
-			order: 50,
+			order: 5,
 			label: () => "Agent 插件市场",
+		}, SidebarIcon));
+
+		ctx.slots.inject("main", () => ctx.slots.register({
+			name: "main",
+			key: "universal-plugin-hub",
 		}, () => h(Section, { ctx })));
 	}
 

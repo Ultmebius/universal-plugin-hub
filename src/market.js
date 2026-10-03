@@ -6,7 +6,7 @@
  * user-facing message; network/git failures are retryable at the UI level.
  */
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { sourceCacheDir, safeRmDir } from './store.js'
 
@@ -66,6 +66,10 @@ function runGit(args, cwd) {
 export async function ensureSourceCloned(sourceId, url) {
   safeSegment(sourceId, 'source id')
   const dir = sourceCacheDir(sourceId)
+  if (sourceId === 'local') {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    return dir
+  }
   if (existsSync(join(dir, '.git'))) return dir
 
   return withGitLock(`src:${sourceId}`, async () => {
@@ -100,6 +104,7 @@ export async function ensureSourceCloned(sourceId, url) {
 /** git pull in a source cache dir (waits for any in-flight clone of the same source). */
 export async function pullSource(sourceId) {
   safeSegment(sourceId, 'source id')
+  if (sourceId === 'local') return
   const dir = sourceCacheDir(sourceId)
   const inFlight = GIT_LOCKS.get(`src:${sourceId}`)
   if (inFlight) {
@@ -123,6 +128,12 @@ export async function pullSource(sourceId) {
 export async function materializePlugin(sourceId, pluginName, source) {
   safeSegment(sourceId, 'source id')
   safeSegment(pluginName, 'plugin name')
+
+  if (sourceId === 'local') {
+    const dir = join(sourceCacheDir('local'), pluginName)
+    if (!existsSync(dir)) throw new Error(`本地插件 ${pluginName} 不存在`)
+    return { dir }
+  }
 
   if (typeof source === 'string' && (source === './' || source === '.' || source === '' || source.startsWith('./'))) {
     const cache = sourceCacheDir(sourceId)

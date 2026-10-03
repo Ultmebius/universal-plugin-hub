@@ -130,6 +130,45 @@ export function readMarketplace(sourceId) {
   return rows
 }
 
+export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
+  const rootSkill = existsSync(join(entryDir, 'SKILL.md')) || existsSync(join(entryDir, 'skill.md'))
+  const hasSkill = rootSkill || existsSync(join(entryDir, 'skills')) || existsSync(join(entryDir, 'commands'))
+  const hasManifest = existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
+  const hasMcp = existsSync(join(entryDir, 'mcp.json')) || existsSync(join(entryDir, '.mcp.json')) || existsSync(join(entryDir, 'server.json'))
+  const hasAgents = existsSync(join(entryDir, 'agents'))
+  if (!hasSkill && !hasManifest && !hasMcp && !hasAgents) return null
+
+  let displayName = formatDisplayName(fallbackName)
+  let description = ''
+  let version = '1.0.0'
+  let author = undefined
+  let name = fallbackName
+
+  const manifest = readPluginManifest(entryDir)
+  if (manifest) {
+    if (manifest.name) name = manifest.name
+    if (manifest.displayName) displayName = manifest.displayName
+    if (manifest.description) description = manifest.description
+    if (manifest.version) version = manifest.version
+    if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author?.name
+  } else if (existsSync(join(entryDir, 'SKILL.md'))) {
+    try { description = extractMdDescription(readFileSync(join(entryDir, 'SKILL.md'), 'utf8')) } catch {}
+  } else if (existsSync(join(entryDir, 'skill.md'))) {
+    try { description = extractMdDescription(readFileSync(join(entryDir, 'skill.md'), 'utf8')) } catch {}
+  } else if (existsSync(join(entryDir, 'README.md'))) {
+    try { description = extractMdDescription(readFileSync(join(entryDir, 'README.md'), 'utf8')) } catch {}
+  }
+
+  return normalizeRow({
+    name,
+    displayName,
+    description,
+    version,
+    author,
+    source: `./${fallbackName}`,
+  }, sourceId)
+}
+
 function parseMarketplaceFromDisk(sourceId, cache) {
   // 1. Check Multi-Plugin Manifest Candidates
   const manifestCandidates = [
@@ -184,7 +223,23 @@ function parseMarketplaceFromDisk(sourceId, cache) {
     }
   }
 
-  // 2. Monorepo subdirectories auto-discovery (plugins/*, skills/*, packages/*, tools/*, extensions/*)
+  // 2. Local source direct subdirectories discovery
+  if (sourceId === 'local') {
+    const localRows = []
+    if (existsSync(cache)) {
+      try {
+        for (const entry of readdirSync(cache, { withFileTypes: true })) {
+          if (entry.isDirectory() && !entry.name.startsWith('.')) {
+            const row = parsePluginRowFromDir(join(cache, entry.name), entry.name, 'local')
+            if (row) localRows.push(row)
+          }
+        }
+      } catch {}
+    }
+    return localRows
+  }
+
+  // 3. Monorepo subdirectories auto-discovery (plugins/*, skills/*, packages/*, tools/*, extensions/*)
   const monoDirs = ['plugins', 'skills', 'packages', 'tools', 'extensions']
   const monoRows = []
   for (const sub of monoDirs) {
@@ -193,42 +248,10 @@ function parseMarketplaceFromDisk(sourceId, cache) {
       try {
         for (const entry of readdirSync(subRoot, { withFileTypes: true })) {
           if (entry.isDirectory()) {
-            const entryDir = join(subRoot, entry.name)
-            const hasSkill = existsSync(join(entryDir, 'SKILL.md')) || existsSync(join(entryDir, 'skills')) || existsSync(join(entryDir, 'commands'))
-            const hasManifest = existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
-            const hasMcp = existsSync(join(entryDir, 'mcp.json')) || existsSync(join(entryDir, '.mcp.json')) || existsSync(join(entryDir, 'server.json'))
-            const hasAgents = existsSync(join(entryDir, 'agents'))
-
-            if (hasSkill || hasManifest || hasMcp || hasAgents) {
-              let displayName = formatDisplayName(entry.name)
-              let description = ''
-              let version = '1.0.0'
-              let author = undefined
-
-              const manifest = readPluginManifest(entryDir)
-              if (manifest) {
-                if (manifest.displayName) displayName = manifest.displayName
-                if (manifest.description) description = manifest.description
-                if (manifest.version) version = manifest.version
-                if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author.name
-              } else if (existsSync(join(entryDir, 'SKILL.md'))) {
-                try {
-                  description = extractMdDescription(readFileSync(join(entryDir, 'SKILL.md'), 'utf8'))
-                } catch {}
-              } else if (existsSync(join(entryDir, 'README.md'))) {
-                try {
-                  description = extractMdDescription(readFileSync(join(entryDir, 'README.md'), 'utf8'))
-                } catch {}
-              }
-
-              monoRows.push(normalizeRow({
-                name: entry.name,
-                displayName,
-                description,
-                version,
-                author,
-                source: `./${sub}/${entry.name}`,
-              }, sourceId))
+            const row = parsePluginRowFromDir(join(subRoot, entry.name), entry.name, sourceId)
+            if (row) {
+              row.source = `./${sub}/${entry.name}`
+              monoRows.push(row)
             }
           }
         }

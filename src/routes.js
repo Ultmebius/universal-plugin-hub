@@ -17,6 +17,7 @@ import {
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
   fetchConnectorTools, setToolDisabled, isLspActive,
 } from './install.js'
+import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
 
 const API_PREFIX = '/universal-plugin-hub/api'
 
@@ -217,6 +218,23 @@ async function handle(req, res, prefix = API_PREFIX) {
         pluginCount: count,
         suggestedName: suggestSourceName(url),
       })
+    }
+
+    // ── local plugin inspection & import ──────────────────────────────────
+    if (method === 'POST' && path === '/plugins/local/inspect') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req, 30_000_000)
+      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
+      const result = await inspectLocalPlugin(target)
+      return sendJson(res, 200, result)
+    }
+
+    if (method === 'POST' && path === '/plugins/local/import') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req, 30_000_000)
+      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
+      const result = await importLocalPlugin({ path: target, overwrite: body.overwrite })
+      return sendJson(res, 200, result)
     }
 
     if (method === 'POST' && path === '/sources') {
