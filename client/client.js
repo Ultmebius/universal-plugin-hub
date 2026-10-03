@@ -434,7 +434,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 
 /* Floating Preview Popover */
+/* Pure hover tooltip: never traps the pointer; clicks pass through to the row below. */
 .cpm-preview-popover {
+	pointer-events: none;
 	position: fixed;
 	z-index: 99999;
 	width: 380px;
@@ -510,29 +512,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 12.5px;
 	line-height: 1.65;
 	color: var(--cpm-text-sub);
-	max-height: 220px;
-	overflow-y: auto;
 	word-break: break-word;
 	white-space: pre-wrap;
-	scrollbar-width: none;
-	-ms-overflow-style: none;
 	padding-bottom: 4px;
-	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
-}
-.cpm-preview-desc::-webkit-scrollbar {
-	display: none;
-}
-.cpm-preview-desc.mask-bottom {
-	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 48px), rgba(0,0,0,0.98) calc(100% - 40px), rgba(0,0,0,0.92) calc(100% - 32px), rgba(0,0,0,0.76) calc(100% - 24px), rgba(0,0,0,0.52) calc(100% - 16px), rgba(0,0,0,0.28) calc(100% - 10px), rgba(0,0,0,0.12) calc(100% - 5px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
-	-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 48px), rgba(0,0,0,0.98) calc(100% - 40px), rgba(0,0,0,0.92) calc(100% - 32px), rgba(0,0,0,0.76) calc(100% - 24px), rgba(0,0,0,0.52) calc(100% - 16px), rgba(0,0,0,0.28) calc(100% - 10px), rgba(0,0,0,0.12) calc(100% - 5px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
-}
-.cpm-preview-desc.mask-both {
-	mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.12) 5px, rgba(0,0,0,0.28) 10px, rgba(0,0,0,0.52) 16px, rgba(0,0,0,0.76) 24px, rgba(0,0,0,0.92) 32px, rgba(0,0,0,0.98) 40px, #000 48px, #000 calc(100% - 48px), rgba(0,0,0,0.98) calc(100% - 40px), rgba(0,0,0,0.92) calc(100% - 32px), rgba(0,0,0,0.76) calc(100% - 24px), rgba(0,0,0,0.52) calc(100% - 16px), rgba(0,0,0,0.28) calc(100% - 10px), rgba(0,0,0,0.12) calc(100% - 5px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
-	-webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.12) 5px, rgba(0,0,0,0.28) 10px, rgba(0,0,0,0.52) 16px, rgba(0,0,0,0.76) 24px, rgba(0,0,0,0.92) 32px, rgba(0,0,0,0.98) 40px, #000 48px, #000 calc(100% - 48px), rgba(0,0,0,0.98) calc(100% - 40px), rgba(0,0,0,0.92) calc(100% - 32px), rgba(0,0,0,0.76) calc(100% - 24px), rgba(0,0,0,0.52) calc(100% - 16px), rgba(0,0,0,0.28) calc(100% - 10px), rgba(0,0,0,0.12) calc(100% - 5px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
-}
-.cpm-preview-desc.mask-top {
-	mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.12) 5px, rgba(0,0,0,0.28) 10px, rgba(0,0,0,0.52) 16px, rgba(0,0,0,0.76) 24px, rgba(0,0,0,0.92) 32px, rgba(0,0,0,0.98) 40px, #000 48px, #000 100%);
-	-webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.12) 5px, rgba(0,0,0,0.28) 10px, rgba(0,0,0,0.52) 16px, rgba(0,0,0,0.76) 24px, rgba(0,0,0,0.92) 32px, rgba(0,0,0,0.98) 40px, #000 48px, #000 100%);
 }
 .cpm-tab-add {
 	padding: 4px 10px;
@@ -5417,41 +5399,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Floating Plugin Preview Popover ──────────────────────────────
-	function PluginPreviewPopover({ preview, isDark, onMouseEnter, onMouseLeave, onClick }) {
+	function PluginPreviewPopover({ preview, isDark }) {
 		if (!preview || !preview.plugin || !preview.rect) return null;
 		const p = preview.plugin;
 		const rect = preview.rect;
 		const gridRect = preview.gridRect;
-		const descRef = useRef(null);
-		const [descMaskClass, setDescMaskClass] = useState("");
-
-		const updateDescMask = useCallback(() => {
-			const el = descRef.current;
-			if (!el) return;
-			const { scrollTop, scrollHeight, clientHeight } = el;
-			const maxScroll = scrollHeight - clientHeight;
-			if (maxScroll <= 2) {
-				setDescMaskClass("");
-				return;
-			}
-			const canScrollUp = scrollTop > 2;
-			const canScrollDown = scrollTop < maxScroll - 2;
-			if (canScrollUp && canScrollDown) {
-				setDescMaskClass(" mask-both");
-			} else if (canScrollDown) {
-				setDescMaskClass(" mask-bottom");
-			} else if (canScrollUp) {
-				setDescMaskClass(" mask-top");
-			} else {
-				setDescMaskClass("");
-			}
-		}, []);
-
-		useEffect(() => {
-			updateDescMask();
-			const timer = setTimeout(updateDescMask, 40);
-			return () => clearTimeout(timer);
-		}, [updateDescMask, preview]);
 
 		const popWidth = 380;
 		const margin = 12;
@@ -5486,9 +5438,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			ref: popRef,
 			className: "cpm-preview-popover",
 			style: { left: `${left}px`, top: topStyle, bottom: bottomStyle },
-			onMouseEnter,
-			onMouseLeave,
-			onClick,
 		},
 			h("div", { className: "cpm-preview-header" },
 				h(PluginIcon, { plugin: p, isDark }),
@@ -5501,11 +5450,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					),
 				),
 			),
-			h("div", {
-				ref: descRef,
-				className: "cpm-preview-desc" + descMaskClass,
-				onScroll: updateDescMask,
-			}, h(SmartMarkdown, { text: desc })),
+			h("div", { className: "cpm-preview-desc" }, h(SmartMarkdown, { text: desc })),
 		);
 	}
 
@@ -5570,7 +5515,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [installFor, setInstallFor] = useState(null);
 		const [hoveredPreview, setHoveredPreview] = useState(null);
 		const hoverTimerRef = useRef(null);
-		const leaveTimerRef = useRef(null);
 		const gridRef = useRef(null);
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
@@ -5711,10 +5655,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const handleCardMouseEnter = useCallback((p, el) => {
 			pendingHoverRef.current = { plugin: p, el };
-			if (leaveTimerRef.current) {
-				clearTimeout(leaveTimerRef.current);
-				leaveTimerRef.current = null;
-			}
 			if (hoverTimerRef.current) {
 				clearTimeout(hoverTimerRef.current);
 				hoverTimerRef.current = null;
@@ -5738,22 +5678,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				clearTimeout(hoverTimerRef.current);
 				hoverTimerRef.current = null;
 			}
-			leaveTimerRef.current = setTimeout(() => {
-				setHoveredPreview(null);
-			}, 140);
-		}, []);
-
-		const handlePopoverMouseEnter = useCallback(() => {
-			if (leaveTimerRef.current) {
-				clearTimeout(leaveTimerRef.current);
-				leaveTimerRef.current = null;
-			}
-		}, []);
-
-		const handlePopoverMouseLeave = useCallback(() => {
-			leaveTimerRef.current = setTimeout(() => {
-				setHoveredPreview(null);
-			}, 140);
+			setHoveredPreview(null);
 		}, []);
 
 		const updateTabsMask = useCallback(() => {
@@ -5813,7 +5738,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		useEffect(() => {
 			return () => {
 				if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-				if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
 				if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
 				if (currentTabAnim) {
 					cancelAnimationFrame(currentTabAnim);
@@ -6415,10 +6339,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (hoverTimerRef.current) {
 				clearTimeout(hoverTimerRef.current);
 				hoverTimerRef.current = null;
-			}
-			if (leaveTimerRef.current) {
-				clearTimeout(leaveTimerRef.current);
-				leaveTimerRef.current = null;
 			}
 			isScrollingRef.current = true;
 			if (hoveredPreview) setHoveredPreview(null);
@@ -7118,17 +7038,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				preview: hoveredPreview,
 				isDark,
 				installed: currentSourceInstalledNames.has(hoveredPreview.plugin.name),
-				onMouseEnter: handlePopoverMouseEnter,
-				onMouseLeave: handlePopoverMouseLeave,
-				onClick: () => {
-					const p = hoveredPreview.plugin;
-					setHoveredPreview(null);
-					if (gridRef.current) {
-						if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-						SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-					}
-					setView({ type: "detail", sourceId: activeSourceId, plugin: p });
-				},
 			}),
 
 			installFor && h(InstallDialog, {
