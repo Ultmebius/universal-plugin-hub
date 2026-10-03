@@ -1416,6 +1416,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px solid var(--cpm-border);
 	margin: 12px 0 16px 0;
 }
+.cpm-local-preview-card .cpm-card-pill {
+	margin-left: 0;
+}
 .cpm-local-dup-card {
 	padding: 14px 16px;
 	border-radius: var(--dsw-radius-md, 12px);
@@ -1432,11 +1435,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px solid var(--cpm-border);
 	border-radius: 8px;
 	margin: 10px 0 8px 0;
-}
-.cpm-pill-success {
-	border-color: rgba(16, 185, 129, 0.3) !important;
-	color: #10b981 !important;
-	background: rgba(16, 185, 129, 0.08) !important;
 }
 .cpm-btn-warning {
 	background: #d97706 !important;
@@ -7555,9 +7553,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, "发现本地插件"),
 						h("div", { className: "cpm-source-meta-row" },
 							h("div", { className: "cpm-source-live-dot" }),
-							h("span", { className: "cpm-source-repo-text" }, "本地插件"),
-							h("span", { className: "cpm-source-meta-sep" }, "·"),
-							h("span", { className: "cpm-source-count-text" }, "规范校验通过"),
+							h("span", { className: "cpm-source-count-text", style: { maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+								localPreview.payload?.filename || String(localPreview.payload?.path || "").split(/[\\/]/).filter(Boolean).pop() || "本地文件"),
 						),
 					),
 					h("div", { className: "cpm-local-preview-card", key: "card" },
@@ -7594,7 +7591,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
 								h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.skillsCount || 0} 个技能`),
 								localPreview.plugin.agentsCount > 0 && h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.agentsCount} 个智能体`),
-								h("span", { className: "cpm-card-pill cpm-pill-success", style: { fontSize: 11, height: 22, padding: "0 8px" } }, "✓ 符合规范"),
 							),
 						),
 					),
