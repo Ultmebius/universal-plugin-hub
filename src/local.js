@@ -134,7 +134,7 @@ export async function inspectLocalPlugin(rawPath) {
   }
 }
 
-export async function importLocalPlugin({ path: rawPath, overwrite = false }) {
+export async function importLocalPlugin({ path: rawPath, overwrite = false, sourceName = '' }) {
   const inspectRes = await inspectLocalPlugin(rawPath)
   if (!inspectRes.ok) {
     throw new Error(inspectRes.error)
@@ -158,13 +158,19 @@ export async function importLocalPlugin({ path: rawPath, overwrite = false }) {
     if (tempExtractDir) safeRmDir(tempExtractDir)
   }
 
-  // Ensure 'local' source exists in state.sources
+  // Ensure 'local' source exists in state.sources; apply the user-chosen tab name if given
+  const srcName = String(sourceName || '').trim().slice(0, 30)
   const state = readState()
   let localSource = state.sources.find((s) => s.id === 'local')
-  if (!localSource) {
+  if (localSource) {
+    if (srcName && localSource.name !== srcName) {
+      localSource.name = srcName
+      writeState(state)
+    }
+  } else {
     localSource = {
       id: 'local',
-      name: '本地插件',
+      name: srcName || '本地插件',
       url: 'local://',
       addedAt: Date.now(),
     }

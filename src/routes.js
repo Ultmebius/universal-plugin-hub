@@ -15,7 +15,7 @@ import { readMarketplace, pluginDetail, invalidateMarketplaceCache } from './par
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
-  fetchConnectorTools, setToolDisabled, isLspActive,
+  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, getConnectorEntry,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
 
@@ -127,6 +127,23 @@ export function mountRoutes(webServer) {
   }
 }
 
+function normalizeMcpName(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+|-+$/g, '') || 'mcp'
+}
+
+function userMcpConfig(name, body) {
+  return {
+    name,
+    transport: body.transport === 'http' ? 'http' : 'stdio',
+    url: body.url || null,
+    command: body.command || null,
+    args: Array.isArray(body.args) ? body.args : [],
+    env: body.env && typeof body.env === 'object' ? body.env : {},
+    headers: body.headers && typeof body.headers === 'object' ? body.headers : {},
+    oauth: body.oauth || 'none',
+  }
+}
+
 async function handle(req, res, prefix = API_PREFIX) {
   const url = new URL(req.url, 'http://localhost')
   const path = url.pathname.slice(prefix.length).replace(/\/+$/, '') || '/'
@@ -233,7 +250,7 @@ async function handle(req, res, prefix = API_PREFIX) {
       requireSameOrigin(req)
       const body = await readJsonBody(req, 30_000_000)
       const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
-      const result = await importLocalPlugin({ path: target, overwrite: body.overwrite })
+      const result = await importLocalPlugin({ path: target, overwrite: body.overwrite, sourceName: body.sourceName })
       return sendJson(res, 200, result)
     }
 
@@ -310,6 +327,98 @@ async function handle(req, res, prefix = API_PREFIX) {
       state.sources = state.sources.filter((s) => s.id !== sourceId)
       writeState(state)
       invalidateMarketplaceCache(sourceId)
+      return sendJson(res, 200, { ok: true })
+    }
+
+    // ── user-added MCP servers (standalone, not tied to an installed plugin) ──
+    if (method === 'GET' && path === '/mcps') {
+      const state = readState()
+      if (!Array.isArray(state.userMcps)) state.userMcps = []
+      const patch = readCordisPatch()
+      const enabledIds = new Set()
+      for (const block of patch) {
+        if (!block || !Array.isArray(block.insert)) continue
+        for (const item of block.insert) {
+          if (item && typeof item.id === 'string') enabledIds.add(item.id)
+        }
+      }
+      // Migrate legacy patch-only entries (saved before userMcps state existed)
+      let changed = false
+      for (const block of patch) {
+        if (!block || !Array.isArray(block.insert)) continue
+        for (const item of block.insert) {
+          if (!item || typeof item.id !== 'string' || !item.id.startsWith('mcp-user-mcp-')) continue
+          const cfg = item.config || {}
+          if (cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
+            state.userMcps.push(userMcpConfig(cfg.serverName, {
+              transport: cfg.transport, url: cfg.url, command: cfg.command,
+              args: Array.isArray(cfg.args) ? cfg.args : [], env: cfg.env || {},
+              headers: cfg.headers || {}, oauth: cfg.oauth || 'none',
+            }))
+            changed = true
+          }
+        }
+      }
+      if (changed) writeState(state)
+      const mcps = state.userMcps
+        .filter((x) => x && x.name)
+        .map((x) => ({ ...x, enabled: enabledIds.has('mcp-user-mcp-' + x.name) }))
+      return sendJson(res, 200, { ok: true, mcps })
+    }
+    if (method === 'POST' && path === '/mcps/verify') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      const name = String(body.name || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+|-+$/g, '') || 'mcp'
+      const result = await verifyConnectorAuth('user-mcp', name, body)
+      return sendJson(res, 200, result)
+    }
+
+    if (method === 'POST' && path === '/mcps') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      const name = safeSegment(normalizeMcpName(body.name), 'MCP 名称')
+      const result = saveConnectorAuth('user-mcp', name, body)
+      if (result && result.ok) {
+        const state = readState()
+        if (!Array.isArray(state.userMcps)) state.userMcps = []
+        state.userMcps = state.userMcps.filter((x) => x && x.name !== name)
+        state.userMcps.push(userMcpConfig(name, body))
+        writeState(state)
+      }
+      return sendJson(res, 200, result)
+    }
+
+    if (method === 'POST' && path === '/mcps/update') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      const name = safeSegment(normalizeMcpName(body.name), 'MCP 名称')
+      const state = readState()
+      if (!Array.isArray(state.userMcps)) state.userMcps = []
+      const idx = state.userMcps.findIndex((x) => x && x.name === name)
+      if (idx < 0) throw new Error(`MCP 不存在：${name}`)
+      const wasEnabled = !!getConnectorEntry('user-mcp', name)
+      let result = { ok: true }
+      if (wasEnabled) {
+        result = saveConnectorAuth('user-mcp', name, body)
+        if (!result || !result.ok) return sendJson(res, 200, result)
+      }
+      state.userMcps[idx] = userMcpConfig(name, body)
+      writeState(state)
+      return sendJson(res, 200, result)
+    }
+
+    if (method === 'POST' && path === '/mcps/toggle') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      const name = safeSegment(normalizeMcpName(body.name), 'MCP 名称')
+      const state = readState()
+      const cfg = (state.userMcps || []).find((x) => x && x.name === name)
+      if (!cfg) throw new Error(`MCP 不存在：${name}`)
+      if (body.enabled !== false) {
+        const result = saveConnectorAuth('user-mcp', name, cfg)
+        return sendJson(res, 200, result)
+      }
+      unregisterConnector('user-mcp', name)
       return sendJson(res, 200, { ok: true })
     }
 

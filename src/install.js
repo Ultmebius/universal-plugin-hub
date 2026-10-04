@@ -890,9 +890,10 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   const customHeaders = (typeof payload === 'object' && payload?.headers) ? { ...payload.headers } : {}
   const transport = (typeof payload === 'object' && payload?.transport) ? payload.transport : (found?.type || 'http')
   const url = (typeof payload === 'object' && payload?.url) || found?.url || (connectorName === 'notion' ? 'https://mcp.notion.com/mcp' : null)
+  const command = (typeof payload === 'object' && payload?.command) || found?.command || null
 
   if (transport === 'stdio') {
-    if (found && found.url && !found.command) {
+    if (found && found.url && !command) {
       return {
         ok: false,
         status: 400,
@@ -904,7 +905,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
         duration: 5,
       }
     }
-    if (!found?.command) {
+    if (!command) {
       return {
         ok: false,
         status: 400,
@@ -916,12 +917,13 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
         duration: 5,
       }
     }
+    const args = (typeof payload === 'object' && Array.isArray(payload?.args)) ? payload.args : (found?.args || [])
     return {
       ok: true,
       message: '本地 Connector (stdio) 服务已就绪',
       server: connectorName,
       transport: 'stdio',
-      endpoint: `${found.command} ${(found.args || []).join(' ')}`.trim(),
+      endpoint: `${command} ${args.join(' ')}`.trim(),
       duration: 10,
     }
   }
@@ -1042,11 +1044,11 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
   }
 
   const isStdio = (transport === 'stdio')
-  registerConnector(pluginName, connectorName, {
+  const result = registerConnector(pluginName, connectorName, {
     ...found,
     type: isStdio ? 'stdio' : (transport === 'sse' ? 'sse' : 'http'),
     url: isStdio ? null : (url || found.url || null),
-    command: found.command || null,
+    command: (typeof payload === 'object' && payload?.command) || found.command || null,
     args: customArgs,
     env: { ...baseEnv, ...customEnv },
     headers: { ...baseHeaders, ...customHeaders },
@@ -1060,7 +1062,7 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
     const mem = MEMORY_TOOLS_CACHE.get(toolsKey)
     MEMORY_TOOLS_CACHE.set(toolsKey, { ...mem, tools: [], disabledTools: mem.disabledTools || [] })
   }
-  return { ok: true }
+  return result
 }
 
 /** MCP Tools Cache & State store */

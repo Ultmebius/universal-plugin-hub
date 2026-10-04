@@ -295,7 +295,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	margin: auto;
 }
 .cpm-filter.open .cpm-filter-chevron,
-.cpm-sort.open .cpm-filter-chevron {
+.cpm-sort.open .cpm-filter-chevron,
+.cpm-add-btn.open .cpm-filter-chevron {
 	transform: rotate(180deg);
 }
 
@@ -379,7 +380,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-tab.active {
 	background: var(--cpm-tab-active-bg);
 	color: var(--cpm-tab-active-text);
-	font-weight: 600;
 }
 .cpm-tab-del-zone {
 	position: absolute;
@@ -5511,6 +5511,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [isRefreshing, setIsRefreshing] = useState(false);
 		const [loadingSourceId, setLoadingSourceId] = useState(null);
 		const [addDialog, setAddDialog] = useState(false);
+		const [showAddMenu, setShowAddMenu] = useState(false);
+		const [mcpDialog, setMcpDialog] = useState(false);
+		const [mcps, setMcps] = useState([]);
+		const [mcpsOpen, setMcpsOpen] = useState(false);
+		const [editMcp, setEditMcp] = useState(null);
+
+		const refreshMcps = useCallback(async () => {
+			try {
+				const res = await api("/mcps");
+				setMcps(res.mcps || []);
+			} catch {}
+		}, []);
+
+		useEffect(() => {
+			refreshMcps();
+		}, [refreshMcps]);
 		const [confirmRemoveSource, setConfirmRemoveSource] = useState(null);
 		const [installFor, setInstallFor] = useState(null);
 		const [hoveredPreview, setHoveredPreview] = useState(null);
@@ -5800,6 +5816,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (prevSourceRef.current !== activeSourceId) {
 				prevSourceRef.current = activeSourceId;
 				scrollActiveTabIntoView(activeSourceId, true);
+				setMcpsOpen(false);
 			}
 		}, [activeSourceId, scrollActiveTabIntoView]);
 
@@ -6502,16 +6519,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		useEffect(() => {
 			const onDocClick = (e) => {
-				if (!e.target.closest(".cpm-filter") && !e.target.closest(".cpm-sort") && !e.target.closest(".cpm-menu-pop")) {
+				if (!e.target.closest(".cpm-filter") && !e.target.closest(".cpm-sort") && !e.target.closest(".cpm-add-btn") && !e.target.closest(".cpm-menu-pop")) {
 					setShowFilter(false);
 					setShowSort(false);
+					setShowAddMenu(false);
 				}
 			};
-			if (showFilter || showSort) {
+			if (showFilter || showSort || showAddMenu) {
 				document.addEventListener("mousedown", onDocClick);
 				return () => document.removeEventListener("mousedown", onDocClick);
 			}
-		}, [showFilter, showSort]);
+		}, [showFilter, showSort, showAddMenu]);
 
 		const loadMarket = useCallback(async (sourceId, force = false) => {
 			if (!force && rows && rows[sourceId]) {
@@ -6646,17 +6664,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [view]);
 
 		useEffect(() => {
-			if (!installFor && !addDialog && !confirmRemoveSource) return;
+			if (!installFor && !addDialog && !confirmRemoveSource && !mcpDialog) return;
 			const onKey = (e) => {
 				if (e.key === "Escape") {
 					if (installFor) setInstallFor(null);
 					if (addDialog) setAddDialog(false);
 					if (confirmRemoveSource) setConfirmRemoveSource(null);
+					if (mcpDialog) setMcpDialog(false);
 				}
 			};
 			window.addEventListener("keydown", onKey);
 			return () => window.removeEventListener("keydown", onKey);
-		}, [installFor, addDialog, confirmRemoveSource]);
+		}, [installFor, addDialog, confirmRemoveSource, mcpDialog]);
 
 		const removePlugin = async (pluginName) => {
 			try {
@@ -6803,7 +6822,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							return h("button", {
 								key: s.id,
 								ref: (el) => { if (el) tabRefs.current[s.id] = el; },
-								className: "cpm-tab" + (s.id === activeSourceId ? " active" : "") + tabClassExtra,
+								className: "cpm-tab" + (s.id === activeSourceId && !mcpsOpen ? " active" : "") + tabClassExtra,
 								style: tabTransform ? { transform: tabTransform } : undefined,
 								onPointerDown: (e) => handleTabPointerDown(e, s, idx),
 								onPointerMove: handleTabPointerMove,
@@ -6811,6 +6830,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								onPointerCancel: (e) => handleTabPointerUp(e, s, idx),
 								onContextMenu: (e) => e.preventDefault(),
 								onMouseDown: (e) => e.preventDefault(),
+								onClick: () => setMcpsOpen(false),
 							},
 								h("span", null, s.name),
 								!s.builtin && h("span", {
@@ -6839,6 +6859,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								),
 							);
 						}),
+						mcps.length > 0 && h("button", {
+							key: "__mcps",
+							className: "cpm-tab" + (mcpsOpen ? " active" : ""),
+							onClick: () => { setMcpsOpen(true); refreshMcps(); setView({ type: "browse", sourceId: activeSourceId }); },
+						}, h("span", null, "MCP")),
 					),
 					h("div", { className: "cpm-topbar-right" },
 						h("button", { className: "cpm-icon-btn" + (isRefreshing ? " is-refreshing" : ""), onClick: refresh, disabled: isRefreshing }, h(IconRefresh)),
@@ -6903,10 +6928,21 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								} }, "名称 (Z-A)"),
 							),
 						),
-						h("button", {
-							className: "cpm-add-btn",
-							onClick: () => setAddDialog(true),
-						}, h(IconPlus)),
+						h("div", { style: { position: "relative" } },
+							h("button", {
+								className: "cpm-add-btn" + (showAddMenu ? " open" : ""),
+								style: { width: "auto", padding: "0 8px", gap: 3 },
+								onClick: () => { setShowAddMenu(!showAddMenu); },
+							},
+								h(IconPlus),
+								h("span", { className: "cpm-filter-chevron" }, h(IconArrow)),
+							),
+							showAddMenu && h("div", { className: "cpm-menu-pop", style: { top: 34, right: 0, minWidth: 150 } },
+								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setAddDialog({ initialPhase: "url" }); } }, "添加插件市场"),
+								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setAddDialog({ initialPhase: "upload" }); } }, "上传插件"),
+								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setEditMcp(null); setMcpDialog(true); } }, "添加 MCP"),
+							),
+						),
 					),
 				),
 			),
@@ -6935,7 +6971,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}),
 
 			// Browse View — Mode A: Grouped Installed across all sources (Selected active tab source displayed first)
-			isBrowse && filter === "installed" && h("div", {
+			isBrowse && filter === "installed" && !mcpsOpen && h("div", {
 				ref: gridRef,
 				onWheel: onGridWheel,
 				onScroll: onGridScroll,
@@ -6990,7 +7026,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			// Browse View — Mode B: Normal Source Browser Grid
-			isBrowse && filter !== "installed" && h("div", {
+			isBrowse && filter !== "installed" && !mcpsOpen && h("div", {
 				ref: gridRef,
 				onWheel: onGridWheel,
 				onScroll: onGridScroll,
@@ -7034,6 +7070,56 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}),
 			),
 
+			isBrowse && mcpsOpen && h("div", {
+				className: "cpm-grid-container" + gridMaskClass,
+			},
+				h("div", { style: { maxWidth: 900, margin: "0 auto", width: "100%" } },
+					mcps.length === 0 && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
+					mcps.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
+					mcps.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
+					mcps.map((m, i) => h("div", {
+						key: m.name,
+						style: { display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderTop: i > 0 ? "1px solid var(--cpm-border)" : "none" },
+					},
+						h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 } },
+							h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--cpm-text)" } }, m.name),
+							h("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, m.transport === "stdio" ? "stdio" : "http"),
+						),
+						h("button", {
+							type: "button",
+							title: "编辑",
+							style: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 8, border: "none", background: "transparent", color: "var(--cpm-muted)", cursor: "pointer", padding: 0, flexShrink: 0 },
+							onClick: () => { setEditMcp(m); setMcpDialog(true); },
+						},
+							h("svg", { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+								h("path", { d: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" }),
+								h("circle", { cx: "12", cy: "12", r: "3" })
+							)
+						),
+						h("button", {
+							type: "button",
+							"aria-label": m.enabled ? "停用" : "启用",
+							style: { position: "relative", width: 38, height: 21, borderRadius: 999, border: "none", background: m.enabled ? "#3b82f6" : "rgba(128,128,128,0.35)", cursor: "pointer", flexShrink: 0, transition: "background .15s ease", padding: 0 },
+							onClick: async () => {
+								try {
+									const res = await api("/mcps/toggle", { method: "POST", body: JSON.stringify({ name: m.name, enabled: !m.enabled }) });
+									if (res && res.ok === false) {
+										showToast("操作失败", res.error || "请稍后重试", { restart: false });
+										return;
+									}
+									await refreshMcps();
+								} catch (err) {
+									showToast("操作失败", cleanError(err), { restart: false });
+								}
+							},
+						},
+							h("span", { style: { position: "absolute", top: 2.5, left: m.enabled ? 19 : 3, width: 16, height: 16, borderRadius: "50%", background: "#ffffff", transition: "left .15s ease", boxShadow: "0 1px 2px rgba(0,0,0,0.3)" } }),
+						),
+						)),
+					),
+				),
+			),
+
 			hoveredPreview && isBrowse && h(PluginPreviewPopover, {
 				preview: hoveredPreview,
 				isDark,
@@ -7049,12 +7135,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			addDialog && h(AddSourceDialog, {
 				isDark,
+				initialPhase: addDialog.initialPhase,
 				onCancel: () => setAddDialog(false),
 				onAdded: async (newSourceId, keepOpen) => {
 					if (!keepOpen) setAddDialog(false);
 					await refreshState();
 					if (newSourceId) setActiveSourceId(newSourceId);
 				},
+				showToast,
+			}),
+
+			mcpDialog && h(AddMcpDialog, {
+				initial: editMcp,
+				onCancel: () => { setMcpDialog(false); setEditMcp(null); },
+				onSaved: async () => { await refreshMcps(); setMcpsOpen(true); setMcpDialog(false); setEditMcp(null); },
 				showToast,
 			}),
 
@@ -7146,10 +7240,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
+	function UploadDropIcon() {
+		return h("svg", { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" },
+			h("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
+			h("polyline", { points: "17 8 12 3 7 8" }),
+			h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
+		);
+	}
+
 	// ────────────────────────────── Add Source Dialog (2-Step Naming) ──────────────────────────────
-	function AddSourceDialog({ onCancel, onAdded, showToast, isDark }) {
+	function AddSourceDialog({ onCancel, onAdded, showToast, isDark, initialPhase }) {
 		const [url, setUrl] = useState("");
-		const [phase, setPhase] = useState("url");
+		const [phase, setPhase] = useState(initialPhase || "url");
 		const [suggested, setSuggested] = useState("");
 		const [mode, setMode] = useState("suggest");
 		const [customName, setCustomName] = useState("");
@@ -7160,11 +7262,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [isDragging, setIsDragging] = useState(false);
 		const [localPreview, setLocalPreview] = useState(null);
 		const [localDuplicate, setLocalDuplicate] = useState(null);
+		const [localName, setLocalName] = useState("本地插件");
 		const customInputRef = useRef(null);
+		const uploadInputRef = useRef(null);
 
 		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.zip$/i.test(String(str || "").trim());
 
 		const handleInspectLocal = async (rawPath) => {
+			if (busy) {
+				showToast("正在解析中", "请等待当前解析完成后再操作", { restart: false });
+				return;
+			}
 			const clean = String(rawPath || "").trim();
 			if (!clean) return;
 			const payload = { path: clean };
@@ -7203,6 +7311,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		});
 
 		const handleInspectLocalUpload = async (file) => {
+			if (busy) {
+				showToast("正在解析中", "请等待当前解析完成后再操作", { restart: false });
+				return;
+			}
 			if (file.size > 22 * 1024 * 1024) {
 				showToast("压缩包过大", "本地压缩包上限 22MB，请解压后改用文件夹路径导入", { restart: false });
 				return;
@@ -7233,17 +7345,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		const handleImportLocal = async (payload, overwrite) => {
+		const handleImportLocal = async (payload, overwrite, sourceName) => {
 			setBusy(true);
 			try {
 				const res = await api("/plugins/local/import", {
 					method: "POST",
-					body: JSON.stringify({ ...payload, overwrite })
+					body: JSON.stringify({ ...payload, overwrite, sourceName })
 				});
 				showToast("本地插件已添加", `成功导入「${res.plugin.displayName || res.plugin.name}」`, { restart: false });
 				await onAdded("local", true);
 				setUrl("");
-				setPhase("url");
+				setPhase(initialPhase || "url");
 				setLocalPreview(null);
 				setLocalDuplicate(null);
 			} catch (e) {
@@ -7394,10 +7506,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				onDrop: (e) => {
 					e.preventDefault();
 					setIsDragging(false);
+					if (phase !== "upload") return;
 					const file = e.dataTransfer?.files?.[0];
 					const text = e.dataTransfer?.getData("text/plain")?.trim();
 					const dropPath = file?.path || text;
-					if (!dropPath && file && /\.zip$/i.test(file.name)) {
+					if (!dropPath && file && /\.(zip|tgz|tar\.gz)$/i.test(file.name)) {
 						// Web drop: no filesystem path available — upload the zip content instead.
 						setUrl(file.name);
 						handleInspectLocalUpload(file);
@@ -7409,19 +7522,48 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 				},
 			},
-				isDragging && h("div", { className: "cpm-source-drag-overlay" },
+				isDragging && phase === "upload" && h("div", { className: "cpm-source-drag-overlay" },
 					h("svg", { width: 36, height: 36, viewBox: "0 0 24 24", fill: "none", stroke: "var(--cpm-accent)", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
 						h("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
 						h("polyline", { points: "17 8 12 3 7 8" }),
 						h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
 					),
 					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14 } }, "释放以上传并解析插件"),
-					h("div", { className: "cpm-dropzone-sub" }, "支持本地插件目录或 .zip 压缩包")
+					h("div", { className: "cpm-dropzone-sub" }, "支持文件夹或 .tar.gz、.tgz、.zip")
 				),
+				phase === "upload" && [
+					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "上传插件"),
+					h("div", {
+						className: "cpm-dropzone",
+						key: "dz",
+						style: { cursor: "pointer" },
+						onClick: () => uploadInputRef.current && uploadInputRef.current.click(),
+					},
+						h("div", { className: "cpm-dropzone-icon" }, h(UploadDropIcon)),
+						h("div", { className: "cpm-dropzone-title" }, "将插件拖放到此处，或点击上传"),
+						h("div", { className: "cpm-dropzone-sub" }, "支持文件夹或 .tar.gz、.tgz、.zip，大小上限 22MB"),
+					),
+					h("input", {
+						key: "file",
+						ref: uploadInputRef,
+						type: "file",
+						accept: ".zip,.tgz,.tar.gz",
+						style: { display: "none" },
+						onChange: (e) => {
+							const f = e.target.files && e.target.files[0];
+							if (f) handleInspectLocalUpload(f);
+							e.target.value = "";
+						},
+					}),
+					h("div", { className: "cpm-dialog-actions", key: "a" },
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => uploadInputRef.current && uploadInputRef.current.click() }, busy ? "解析中…" : "添加插件"),
+					),
+				],
 				phase === "url" && [
-					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "添加插件"),
+					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "添加插件市场"),
 					h("div", { className: "cpm-field", key: "f" },
-						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址 或 本地路径"),
+						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址"),
 						h("div", { className: "cpm-input-wrap" },
 							h("input", {
 								className: "cpm-input",
@@ -7437,19 +7579,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								autoFocus: true,
 							}),
 							h(ClearBtn, { value: url, onClear: () => setUrl("") }),
-						),
-						h("div", {
-							className: "cpm-dropzone",
-							key: "dropzone",
-						},
-							h("div", { className: "cpm-dropzone-icon" },
-								h("svg", { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" },
-									h("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
-									h("polyline", { points: "17 8 12 3 7 8" }),
-									h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
-								)
-							),
-							h("div", { className: "cpm-dropzone-title" }, "拖入本地插件文件夹 或 .zip 压缩包")
 						),
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
@@ -7503,9 +7632,47 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							),
 						),
 					),
+					h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "请选择本地插件分类标签的显示名称："),
+					h("div", { className: "cpm-radio-group", key: "group" },
+						h("div", {
+							className: "cpm-radio-card" + (localName === "本地插件" ? " is-selected" : ""),
+							onClick: () => setLocalName("本地插件")
+						},
+							h("div", { className: "cpm-custom-radio" + (localName === "本地插件" ? " checked" : "") },
+								h("div", { className: "cpm-custom-radio-inner" })
+							),
+							h("div", { className: "cpm-radio-card-content" },
+								h("div", { className: "cpm-radio-card-header" },
+									h("div", { className: "cpm-radio-card-title" }, "使用中文名"),
+									h("span", { className: "cpm-radio-rec-badge" }, "DEFAULT")
+								),
+								h("div", { className: "cpm-radio-card-desc" },
+									"分类标签名：",
+									h("span", { className: "cpm-tag-preview" }, "本地插件")
+								)
+							)
+						),
+						h("div", {
+							className: "cpm-radio-card" + (localName === "Local Plugins" ? " is-selected" : ""),
+							onClick: () => setLocalName("Local Plugins")
+						},
+							h("div", { className: "cpm-custom-radio" + (localName === "Local Plugins" ? " checked" : "") },
+								h("div", { className: "cpm-custom-radio-inner" })
+							),
+							h("div", { className: "cpm-radio-card-content" },
+								h("div", { className: "cpm-radio-card-header" },
+									h("div", { className: "cpm-radio-card-title" }, "使用英文名")
+								),
+								h("div", { className: "cpm-radio-card-desc" },
+									"分类标签名：",
+									h("span", { className: "cpm-tag-preview" }, "Local Plugins")
+								)
+							)
+						)
+					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase("url"); } }, "返回"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => handleImportLocal(localPreview.payload, false) }, busy ? "正在导入…" : "确认添加"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => handleImportLocal(localPreview.payload, false, localName) }, busy ? "正在导入…" : "确认添加"),
 					),
 				],
 				phase === "local-duplicate" && localDuplicate && [
@@ -7621,6 +7788,338 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || (mode === "custom" && !customName.trim()), onClick: confirm }, busy ? "正在保存…" : "确认添加"),
 					),
 				],
+			),
+		);
+	}
+
+	// ────────────────────────────── Add MCP Dialog ──────────────────────────────
+	function AddMcpDialog({ onCancel, onSaved, showToast, initial }) {
+		const [form, setForm] = useState(() => initial ? {
+			name: initial.name || "",
+			transport: initial.transport === "http" ? "http" : "stdio",
+			url: initial.url || "",
+			oauth: initial.oauth || "none",
+			command: initial.command || "",
+			args: Array.isArray(initial.args) ? JSON.stringify(initial.args) : (initial.args || ""),
+			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => ({ _id: `hi_${i}`, key: k, value: String(v), isSecret: true })),
+			envList: Object.entries(initial.env || {}).map(([k, v], i) => ({ _id: `ei_${i}`, key: k, value: String(v), isSecret: true })),
+		} : { name: "", transport: "stdio", url: "", oauth: "none", command: "", args: "", headersList: [], envList: [] });
+		const [testing, setTesting] = useState(false);
+		const [saving, setSaving] = useState(false);
+		const upd = (patch) => setForm((prev) => ({ ...prev, ...patch }));
+		const argsJsonError = (s) => {
+			const t = String(s || "").trim();
+			if (!t) return null;
+			try {
+				const v = JSON.parse(t);
+				return Array.isArray(v) ? null : "Arguments 必须是 JSON 数组";
+			} catch {
+				return "JSON 格式无效";
+			}
+		};
+		const argsError = form.transport === "stdio" ? argsJsonError(form.args) : null;
+
+		const buildPayload = () => {
+			const headers = {};
+			for (const hItem of form.headersList) {
+				const v = (hItem.value || "").trim();
+				if (!v) continue;
+				const k = (hItem.key || "").trim() || "Authorization";
+				headers[k] = v;
+			}
+			let args = [];
+			if (form.transport === "stdio" && form.args.trim()) {
+				try {
+					const parsed = JSON.parse(form.args);
+					args = Array.isArray(parsed) ? parsed : [String(parsed)];
+				} catch {
+					args = [];
+				}
+			}
+			const env = {};
+			if (form.transport === "stdio") {
+				for (const eItem of form.envList) {
+					if (eItem.key.trim()) env[eItem.key.trim()] = eItem.value;
+				}
+			}
+			return {
+				name: form.name.trim(),
+				transport: form.transport,
+				url: form.transport === "http" ? form.url : null,
+				command: form.transport === "stdio" ? (form.command.trim() || null) : null,
+				headers,
+				oauth: form.transport === "http" ? form.oauth : "none",
+				args,
+				env,
+			};
+		};
+
+		const cleanMcpError = (err) => {
+			if (!err) return "操作失败";
+			let msg = String(err.message || err).replace(/^Error:\s*/i, "").trim();
+			return msg.length > 50 ? msg.slice(0, 48) + "…" : msg;
+		};
+
+		const test = async () => {
+			if (!form.name.trim()) {
+				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
+				return;
+			}
+			setTesting(true);
+			try {
+				const res = await api("/mcps/verify", { method: "POST", body: JSON.stringify(buildPayload()) });
+				showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false });
+			} catch (err) {
+				showToast("验证失败", cleanMcpError(err), { restart: false });
+			} finally {
+				setTesting(false);
+			}
+		};
+
+		const save = async () => {
+			if (!form.name.trim()) {
+				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
+				return;
+			}
+			if (form.transport === "http" && !form.url.trim()) {
+				showToast("请输入服务 URL", "HTTP 连接需要有效的 MCP 服务地址，如 https://mcp.notion.com/mcp", { restart: false });
+				return;
+			}
+			if (form.transport === "stdio" && !form.command.trim()) {
+				showToast("请输入启动命令", "stdio 连接需要本地启动命令，如 npx、node 或 uvx", { restart: false });
+				return;
+			}
+			setSaving(true);
+			try {
+				const res = await api(initial ? "/mcps/update" : "/mcps", { method: "POST", body: JSON.stringify(buildPayload()) });
+				if (res && res.ok === false) {
+					showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
+					setSaving(false);
+					return;
+				}
+				showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${form.name.trim()}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
+				await onSaved();
+			} catch (err) {
+				showToast("保存失败", cleanMcpError(err), { restart: false });
+				setSaving(false);
+			}
+		};
+
+		return h("div", { className: "cpm-dialog", onClick: onCancel },
+			h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
+				h("button", { className: "cpm-mcp-close-top", onClick: onCancel }, h(IconClose, { size: 14 })),
+				h("div", { className: "cpm-mcp-body" },
+					h("div", { className: "cpm-mcp-row" },
+						h("div", { className: "cpm-mcp-label" }, "Name"),
+						h("div", { className: "cpm-mcp-control" },
+							h("input", {
+								className: "cpm-mcp-input",
+								placeholder: "mcp-name，如 github、notion",
+								value: form.name,
+								disabled: !!initial,
+								onChange: (e) => upd({ name: e.target.value }),
+							}),
+						),
+					),
+					h("div", { className: "cpm-mcp-row" },
+						h("div", { className: "cpm-mcp-label" }, "Transport"),
+						h("div", { className: "cpm-mcp-control" },
+							h(CustomSelect, {
+								value: form.transport,
+								options: [
+									{ label: "Streamable HTTP", value: "http" },
+									{ label: "Local (stdio)", value: "stdio" },
+								],
+								onChange: (val) => upd({ transport: val }),
+							}),
+						),
+					),
+					form.transport === "http" && h("div", { className: "cpm-mcp-row" },
+						h("div", { className: "cpm-mcp-label" }, "URL"),
+						h("div", { className: "cpm-mcp-control" },
+							h("input", {
+								className: "cpm-mcp-input",
+								placeholder: "https://...",
+								value: form.url,
+								onChange: (e) => upd({ url: e.target.value }),
+							}),
+						),
+					),
+					form.transport === "http" && h("div", { className: "cpm-mcp-row cpm-mcp-row-top" },
+						h("div", { className: "cpm-mcp-label" }, "Headers"),
+						h("div", { className: "cpm-mcp-control" },
+							h("div", { className: "cpm-mcp-card-box" },
+								form.headersList.map((hItem, idx) => {
+									return h("div", { key: hItem._id || idx, className: "cpm-mcp-list-item" },
+										h("input", {
+											className: "cpm-mcp-input",
+											style: { width: 140, flexShrink: 0 },
+											placeholder: "Authorization",
+											value: hItem.key,
+											onChange: (e) => {
+												const updated = [...form.headersList];
+												updated[idx] = { ...updated[idx], key: e.target.value };
+												upd({ headersList: updated });
+											},
+										}),
+										h("div", { className: "cpm-mcp-pw-wrap" },
+											h("input", {
+												type: hItem.isSecret ? "password" : "text",
+												className: "cpm-mcp-input",
+												style: { paddingRight: 32 },
+												placeholder: "Bearer ...",
+												value: hItem.value,
+												onChange: (e) => {
+													const updated = [...form.headersList];
+													updated[idx] = { ...updated[idx], value: e.target.value };
+													upd({ headersList: updated });
+												},
+											}),
+											h("button", {
+												type: "button",
+												className: "cpm-mcp-pw-btn",
+												onClick: () => {
+													const updated = [...form.headersList];
+													updated[idx] = { ...updated[idx], isSecret: !updated[idx].isSecret };
+													upd({ headersList: updated });
+												},
+											}, hItem.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
+										),
+										h("button", {
+											type: "button",
+											className: "cpm-mcp-del-btn",
+											onClick: () => {
+												upd({ headersList: form.headersList.filter((_, i) => i !== idx) });
+											},
+										}, h(IconClose, { size: 13 })),
+									);
+								}),
+								h("button", {
+									type: "button",
+									className: "cpm-mcp-add-btn",
+									onClick: () => upd({ headersList: [...form.headersList, { _id: `h_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: true }] }),
+								}, h(IconPlus, { size: 12 }), "Add"),
+							),
+						),
+					),
+					form.transport === "http" && h("div", { className: "cpm-mcp-row" },
+						h("div", { className: "cpm-mcp-label" }, "OAuth"),
+						h("div", { className: "cpm-mcp-control" },
+							h(CustomSelect, {
+								value: form.oauth,
+								options: [
+									{ label: "None", value: "none" },
+									{ label: "Auto-register (dynamic client registration)", value: "auto_register" },
+									{ label: "Bring your own client", value: "custom" },
+								],
+								onChange: (val) => upd({ oauth: val }),
+							}),
+						),
+					),
+					form.transport === "stdio" && h("div", { className: "cpm-mcp-row" },
+						h("div", { className: "cpm-mcp-label" }, "Command"),
+						h("div", { className: "cpm-mcp-control" },
+							h("input", {
+								className: "cpm-mcp-input",
+								placeholder: "npx",
+								value: form.command,
+								onChange: (e) => upd({ command: e.target.value }),
+							}),
+						),
+					),
+					form.transport === "stdio" && h("div", { className: "cpm-mcp-row" },
+						h("div", { className: "cpm-mcp-label" }, "Arguments"),
+						h("div", { className: "cpm-mcp-control" },
+							h("input", {
+								className: "cpm-mcp-input" + (argsError ? " is-invalid" : ""),
+								style: { fontFamily: (form.args && form.args.trim().length > 0) ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" : "inherit" },
+								placeholder: '["arg1", "arg2"]',
+								value: form.args,
+								onChange: (e) => upd({ args: e.target.value }),
+							}),
+							argsError && h("div", { className: "cpm-mcp-field-error-wrapper is-visible" },
+								h("div", { className: "cpm-mcp-field-error-inner" },
+									h("svg", { width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } },
+										h("circle", { cx: 12, cy: 12, r: 10 }),
+										h("line", { x1: 12, y1: 8, x2: 12, y2: 12 }),
+										h("line", { x1: 12, y1: 16, x2: 12.01, y2: 16 }),
+									),
+									h("span", null, argsError)
+								)
+							),
+						),
+					),
+					form.transport === "stdio" && h("div", { className: "cpm-mcp-row cpm-mcp-row-top" },
+						h("div", { className: "cpm-mcp-label" }, "Environment variables"),
+						h("div", { className: "cpm-mcp-control" },
+							h("div", { className: "cpm-mcp-card-box" },
+								form.envList.map((eItem, idx) => {
+									return h("div", { key: eItem._id || idx, className: "cpm-mcp-list-item" },
+										h("input", {
+											className: "cpm-mcp-input",
+											style: { width: 140, flexShrink: 0 },
+											placeholder: "KEY_NAME",
+											value: eItem.key,
+											onChange: (e) => {
+												const updated = [...form.envList];
+												updated[idx] = { ...updated[idx], key: e.target.value };
+												upd({ envList: updated });
+											},
+										}),
+										h("div", { className: "cpm-mcp-pw-wrap" },
+											h("input", {
+												type: eItem.isSecret ? "password" : "text",
+												className: "cpm-mcp-input",
+												style: { paddingRight: 32 },
+												placeholder: "Value",
+												value: eItem.value,
+												onChange: (e) => {
+													const updated = [...form.envList];
+													updated[idx] = { ...updated[idx], value: e.target.value };
+													upd({ envList: updated });
+												},
+											}),
+											h("button", {
+												type: "button",
+												className: "cpm-mcp-pw-btn",
+												onClick: () => {
+													const updated = [...form.envList];
+													updated[idx] = { ...updated[idx], isSecret: !updated[idx].isSecret };
+													upd({ envList: updated });
+												},
+											}, eItem.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
+										),
+										h("button", {
+											type: "button",
+											className: "cpm-mcp-del-btn",
+											onClick: () => {
+												upd({ envList: form.envList.filter((_, i) => i !== idx) });
+											},
+										}, h(IconClose, { size: 13 })),
+									);
+								}),
+								h("button", {
+									type: "button",
+									className: "cpm-mcp-add-btn",
+									onClick: () => upd({ envList: [...form.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: true }] }),
+								}, h(IconPlus, { size: 12 }), "Add"),
+							),
+						),
+					),
+				),
+				h("div", { className: "cpm-mcp-footer", style: { gap: 10 } },
+					h("div", { style: { flex: 1 } }),
+					h("button", {
+						className: "cpm-btn cpm-btn-secondary",
+						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
+						onClick: test,
+					}, testing ? "测试中…" : "测试连接"),
+					h("button", {
+						className: "cpm-btn cpm-btn-primary",
+						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
+						onClick: save,
+					}, saving ? "保存中…" : "保存并启用"),
+				),
 			),
 		);
 	}
@@ -9492,7 +9991,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												if (eItem.key.trim()) envMap[eItem.key.trim()] = eItem.value;
 											}
 										}
-										await api(`/plugins/${record.name}/connectors/${authDialog.connectorName}/auth`, {
+										const res = await api(`/plugins/${record.name}/connectors/${authDialog.connectorName}/auth`, {
 											method: "POST",
 											body: JSON.stringify({
 												transport: authDialog.transport,
@@ -9503,6 +10002,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												env: envMap,
 											}),
 										});
+										if (res && res.ok === false) {
+											showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
+											setAuthDialog((prev) => prev ? { ...prev, saving: false } : null);
+											return;
+										}
 										await refreshState();
 										showToast("配置成功", `已成功保存 ${authDialog.connectorName} 认证信息并注册为可用 MCP 服务`, { restart: false });
 										setAuthDialog(null);
