@@ -2206,16 +2206,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 4px;
 	border: none;
 	background: transparent;
-	padding: 0;
-	margin-left: 2px;
+	/* Real hit area: the label alone was a 11.5px-tall target sitting inside a
+	   row whose blank space navigates away, so misses sent users to the
+	   plugin page. Negative margins keep the text where it was. */
+	padding: 4px 8px;
+	margin: -4px 0 -4px -8px;
+	border-radius: 8px;
 	font-size: 11.5px;
 	font-weight: 500;
 	color: var(--cpm-muted);
 	cursor: pointer;
 	user-select: none;
+	transition: background .15s ease, color .15s ease;
 }
 .cpm-mcp-expand:hover {
 	color: var(--cpm-text);
+	background: var(--cpm-tab-hover);
 }
 
 .cpm-mcp-tools-panel {
