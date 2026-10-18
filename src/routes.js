@@ -422,6 +422,23 @@ async function handle(req, res, prefix = API_PREFIX) {
       return sendJson(res, 200, { ok: true })
     }
 
+    // ── user MCP tool list / per-tool toggle (same shape as plugin connectors) ──
+    if (method === 'GET' && path.startsWith('/mcps/') && path.endsWith('/tools')) {
+      const name = safeSegment(normalizeMcpName(path.slice('/mcps/'.length, -'/tools'.length)), 'MCP 名称')
+      const result = await fetchConnectorTools('user-mcp', name)
+      return sendJson(res, 200, result)
+    }
+
+    if (method === 'POST' && path.startsWith('/mcps/') && path.endsWith('/tools/toggle')) {
+      requireSameOrigin(req)
+      const name = safeSegment(normalizeMcpName(path.slice('/mcps/'.length, -'/tools/toggle'.length)), 'MCP 名称')
+      const body = await readJsonBody(req)
+      const toolName = String(body.toolName || body.tool || '')
+      const enabled = body.enabled !== false
+      const disabledTools = setToolDisabled('user-mcp', name, toolName, !enabled)
+      return sendJson(res, 200, { ok: true, disabledTools })
+    }
+
     // ── connector routes (must precede catch-all /plugins/ routes) ────────
     if (method === 'GET' && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/tools')) {
       const parts = path.slice('/plugins/'.length).split('/')

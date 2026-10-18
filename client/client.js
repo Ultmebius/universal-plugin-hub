@@ -2199,6 +2199,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	transform: rotate(180deg);
 }
 
+/* "N tools enabled" disclosure toggle on the MCP page rows */
+.cpm-mcp-expand {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border: none;
+	background: transparent;
+	padding: 0;
+	margin-left: 2px;
+	font-size: 11.5px;
+	font-weight: 500;
+	color: var(--cpm-muted);
+	cursor: pointer;
+	user-select: none;
+}
+.cpm-mcp-expand:hover {
+	color: var(--cpm-text);
+}
+
 .cpm-mcp-tools-panel {
 	margin-top: 10px;
 	padding: 12px 14px;
@@ -2621,11 +2640,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-wrap: wrap;
 	gap: 4px;
 	margin-top: 8px;
-	padding-top: 8px;
-	border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-.cpm-dark .cpm-mcp-tool-popover-params {
-	border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 .cpm-mcp-tool-popover-param-tag {
 	font-size: 10.5px;
@@ -4775,6 +4789,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [isDark, setIsDark] = useState(getEffectiveTheme);
 		const [view, setViewRaw] = useState(() => SESSION_STORE.view);
 		const [manageFor, setManageForRaw] = useState(() => SESSION_STORE.manageFor);
+		const [manageTab, setManageTab] = useState(null);
 		const [prevView, setPrevViewRaw] = useState(() => SESSION_STORE.prevView);
 
 		// Persistent browse state across views and sidebar tab switching
@@ -5016,8 +5031,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			};
 		}, []);
 
-		const openManage = useCallback((record, fromView) => {
+		const openManage = useCallback((record, fromView, tab) => {
 			setManageFor(record ? record.name : null);
+			setManageTab(tab || null);
 			setPrevView(fromView || view || { type: "browse" });
 		}, [view, setManageFor, setPrevView]);
 
@@ -5064,6 +5080,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				rows,
 				refreshState,
 				showToast,
+				initialTab: manageTab,
 				onBack: closeManage,
 				onClose: closeManage,
 			}),
@@ -5516,6 +5533,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [mcps, setMcps] = useState([]);
 		const [mcpsOpen, setMcpsOpen] = useState(false);
 		const [editMcp, setEditMcp] = useState(null);
+		// MCP page: per-server tool lists (keyed by "name::connector" for user
+		// servers and "<plugin>::<connector>" for plugin-provided ones) plus the
+		// shared hover popover state.
+		const [globalToolData, setGlobalToolData] = useState({});
+		const [globalExpanded, setGlobalExpanded] = useState({});
+		const [globalHoveredTool, setGlobalHoveredTool] = useState(null);
+		const globalHoverTimerRef = useRef(null);
 
 		const refreshMcps = useCallback(async () => {
 			try {
@@ -5527,6 +5551,208 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		useEffect(() => {
 			refreshMcps();
 		}, [refreshMcps]);
+
+		// MCP servers contributed by installed plugins, flattened for the MCP
+		// page's "来自插件" group. `owner` is the plugin name used by the
+		// connector APIs; `user-mcp` is the pseudo-owner for user-added servers.
+		const pluginMcpRows = useMemo(() => (state.plugins || []).flatMap((rec) =>
+			(Array.isArray(rec.connectors) ? rec.connectors : []).map((c) => {
+				const obj = typeof c === "object" && c ? c : { name: String(c) };
+				return {
+					owner: rec.name,
+					record: rec,
+					name: obj.name,
+					type: obj.type || (obj.url ? "http" : "stdio"),
+					connected: obj.connected === true,
+					needsAuth: obj.needsAuth === true,
+					authenticated: obj.authenticated !== false,
+				};
+			})
+		), [state.plugins]);
+
+		const loadGlobalTools = useCallback(async (owner, connectorName) => {
+			const key = `${owner}::${connectorName}`;
+			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
+			const hasCachedTools = Array.isArray(cached?.tools) && cached.tools.length > 0;
+			if (!hasCachedTools) {
+				setGlobalToolData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), loading: true, error: null } }));
+			}
+			try {
+				const url = owner === "user-mcp"
+					? `/mcps/${encodeURIComponent(connectorName)}/tools`
+					: `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(connectorName)}/tools`;
+				const res = await api(url);
+				const tools = Array.isArray(res.tools) ? res.tools : [];
+				const disabledTools = Array.isArray(res.disabledTools) ? res.disabledTools : [];
+				if (tools.length > 0) saveMcpToolsCache(key, { tools, disabledTools });
+				setGlobalToolData((prev) => ({
+					...prev,
+					[key]: {
+						loading: false,
+						error: res.ok ? null : (res.message || "获取能力列表失败"),
+						tools: tools.length > 0 ? tools : (prev[key]?.tools || []),
+						disabledTools,
+					},
+				}));
+			} catch (e) {
+				if (!hasCachedTools) {
+					setGlobalToolData((prev) => ({ ...prev, [key]: { loading: false, error: e.message, tools: [], disabledTools: [] } }));
+				}
+			}
+		}, []);
+
+		const toggleGlobalExpand = useCallback((owner, connectorName) => {
+			const key = `${owner}::${connectorName}`;
+			setGlobalExpanded((prev) => {
+				const next = !prev[key];
+				const curr = globalToolData[key];
+				if (next && (!curr || !curr.tools || curr.tools.length === 0)) loadGlobalTools(owner, connectorName);
+				return { ...prev, [key]: next };
+			});
+		}, [globalToolData, loadGlobalTools]);
+
+		const toggleGlobalTool = useCallback(async (owner, connectorName, toolName) => {
+			const key = `${owner}::${connectorName}`;
+			const cached = GLOBAL_MCP_TOOLS_CACHE[key] || {};
+			const currTools = globalToolData[key]?.tools || cached.tools || [];
+			const currDisabled = globalToolData[key]?.disabledTools || cached.disabledTools || [];
+			const willBeEnabled = currDisabled.includes(toolName);
+			const nextDisabled = willBeEnabled
+				? currDisabled.filter((t) => t !== toolName)
+				: Array.from(new Set([...currDisabled, toolName]));
+
+			saveMcpToolsCache(key, { tools: currTools, disabledTools: nextDisabled });
+			setGlobalToolData((prev) => ({
+				...prev,
+				[key]: { ...(prev[key] || {}), tools: prev[key]?.tools || currTools, disabledTools: nextDisabled },
+			}));
+
+			try {
+				const url = owner === "user-mcp"
+					? `/mcps/${encodeURIComponent(connectorName)}/tools/toggle`
+					: `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(connectorName)}/tools/toggle`;
+				const res = await api(url, { method: "POST", body: JSON.stringify({ toolName, enabled: willBeEnabled }) });
+				if (res && Array.isArray(res.disabledTools)) {
+					saveMcpToolsCache(key, { tools: currTools, disabledTools: res.disabledTools });
+					setGlobalToolData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), disabledTools: res.disabledTools } }));
+				}
+			} catch (e) {
+				showToast("操作失败", cleanError(e), { restart: false });
+				loadGlobalTools(owner, connectorName);
+			}
+		}, [globalToolData, loadGlobalTools, showToast]);
+
+		const renderMcpServerRow = (opts) => {
+			const { owner, name, transport, connected, canEdit, record, first } = opts;
+			const key = `${owner}::${name}`;
+			const isExpanded = !!globalExpanded[key];
+			const info = globalToolData[key];
+			const toolsList = info?.tools || [];
+			const disabledTools = info?.disabledTools || [];
+			const activeCount = toolsList.filter((t) => !disabledTools.includes(typeof t === "string" ? t : t.name)).length;
+
+			const onToggleServer = async () => {
+				try {
+					const url = canEdit
+						? "/mcps/toggle"
+						: `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(name)}/toggle`;
+					const payload = canEdit ? { name, enabled: !connected } : { enabled: !connected };
+					const res = await api(url, { method: "POST", body: JSON.stringify(payload) });
+					if (res && res.ok === false) {
+						showToast("操作失败", res.error || "请稍后重试", { restart: false });
+						return;
+					}
+					if (canEdit) await refreshMcps();
+					else await refreshState();
+				} catch (err) {
+					showToast("操作失败", cleanError(err), { restart: false });
+				}
+			};
+
+			const onGear = () => {
+				if (canEdit) {
+					setEditMcp(opts.row);
+					setMcpDialog(true);
+				} else if (record) {
+					setMcpsOpen(false);
+					openManage(record, { type: "browse", sourceId: activeSourceId }, "connectors");
+				}
+			};
+
+			return h("div", {
+				key,
+				style: { display: "flex", flexDirection: "column", padding: "12px 18px", borderTop: first ? "none" : "1px solid var(--cpm-border)" },
+			},
+				h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+					h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+						h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--cpm-text)" } }, name),
+						h("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, transport === "stdio" ? "stdio" : "http"),
+						connected && toolsList.length > 0 && h("button", {
+							type: "button",
+							className: "cpm-mcp-expand",
+							onClick: () => toggleGlobalExpand(owner, name),
+						},
+							h("span", null, `${activeCount} tools enabled${disabledTools.length > 0 ? ` (${disabledTools.length} disabled)` : ""}`),
+							h("span", { className: "cpm-connector-collapse-btn" + (isExpanded ? " is-expanded" : "") }, h(IconArrow, { size: 10 })),
+						),
+					),
+					h("button", {
+						type: "button",
+						title: canEdit ? "编辑" : "打开插件的 MCP 页",
+						style: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 8, border: "none", background: "transparent", color: "var(--cpm-muted)", cursor: "pointer", padding: 0, flexShrink: 0 },
+						onClick: onGear,
+					}, h(IconSettings, { size: 15 })),
+					h("button", {
+						type: "button",
+						className: "cpm-toggle" + (connected ? " on" : ""),
+						"aria-label": connected ? "停用" : "启用",
+						onClick: onToggleServer,
+					}),
+				),
+				isExpanded && h("div", { className: "cpm-mcp-tools-panel" },
+					info?.loading && h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0", color: "var(--cpm-muted)", fontSize: 12 } },
+						h("span", { className: "cpm-spin-ring", style: { width: 13, height: 13, borderWidth: 1.5 } }),
+						"正在解析工具列表…",
+					),
+					!info?.loading && info?.error && h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "#ef4444", fontSize: 12 } },
+						h("span", null, `获取能力失败: ${info.error}`),
+						h("button", { type: "button", className: "cpm-btn-ghost", style: { height: 24, padding: "0 8px", fontSize: 11 }, onClick: () => loadGlobalTools(owner, name) }, "重试"),
+					),
+					!info?.loading && !info?.error && toolsList.length === 0 && h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "var(--cpm-muted)", fontSize: 12, padding: "4px 0" } },
+						h("span", null, "该 MCP 服务暂未暴露可用工具能力 (tools)"),
+						h("button", { type: "button", className: "cpm-btn-ghost", style: { height: 24, padding: "0 8px", fontSize: 11 }, onClick: () => loadGlobalTools(owner, name) }, "重新检测能力"),
+					),
+					!info?.loading && !info?.error && toolsList.length > 0 && h("div", { className: "cpm-mcp-tools-grid" },
+						toolsList.map((t) => {
+							const tName = typeof t === "string" ? t : t.name;
+							const isDisabled = disabledTools.includes(tName);
+							return h("div", { key: tName, className: "cpm-mcp-tool-pill-wrap" },
+								h("button", {
+									type: "button",
+									className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
+									onMouseEnter: (e) => {
+										if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
+										const rect = e.currentTarget.getBoundingClientRect();
+										globalHoverTimerRef.current = setTimeout(() => {
+											setGlobalHoveredTool({ owner, connectorName: name, tool: t, rect });
+										}, 200);
+									},
+									onMouseLeave: () => {
+										if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
+										setGlobalHoveredTool(null);
+									},
+									onClick: (e) => { e.stopPropagation(); toggleGlobalTool(owner, name, tName); },
+								},
+									h("span", { className: "cpm-mcp-tool-dot" }),
+									tName,
+								),
+							);
+						}),
+					),
+				),
+			);
+		};
+
 		const [confirmRemoveSource, setConfirmRemoveSource] = useState(null);
 		const [installFor, setInstallFor] = useState(null);
 		const [hoveredPreview, setHoveredPreview] = useState(null);
@@ -7076,51 +7302,47 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				className: "cpm-grid-container" + gridMaskClass,
 			},
 				h("div", { style: { maxWidth: 1000, margin: "0 auto", width: "100%" } },
-					mcps.length === 0 && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
+					mcps.length === 0 && pluginMcpRows.length === 0 && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
 					mcps.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
 					mcps.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
-					mcps.map((m, i) => h("div", {
-						key: m.name,
-						style: { display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderTop: i > 0 ? "1px solid var(--cpm-border)" : "none" },
-					},
-						h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 } },
-							h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--cpm-text)" } }, m.name),
-							h("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, m.transport === "stdio" ? "stdio" : "http"),
-						),
-						h("button", {
-							type: "button",
-							title: "编辑",
-							style: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 8, border: "none", background: "transparent", color: "var(--cpm-muted)", cursor: "pointer", padding: 0, flexShrink: 0 },
-							onClick: () => { setEditMcp(m); setMcpDialog(true); },
-						},
-							h("svg", { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-								h("path", { d: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" }),
-								h("circle", { cx: "12", cy: "12", r: "3" })
-							)
-						),
-						h("button", {
-							type: "button",
-							"aria-label": m.enabled ? "停用" : "启用",
-							style: { position: "relative", width: 38, height: 21, borderRadius: 999, border: "none", background: m.enabled ? "#3b82f6" : "rgba(128,128,128,0.35)", cursor: "pointer", flexShrink: 0, transition: "background .15s ease", padding: 0 },
-							onClick: async () => {
-								try {
-									const res = await api("/mcps/toggle", { method: "POST", body: JSON.stringify({ name: m.name, enabled: !m.enabled }) });
-									if (res && res.ok === false) {
-										showToast("操作失败", res.error || "请稍后重试", { restart: false });
-										return;
-									}
-									await refreshMcps();
-								} catch (err) {
-									showToast("操作失败", cleanError(err), { restart: false });
-								}
-							},
-						},
-							h("span", { style: { position: "absolute", top: 2.5, left: m.enabled ? 19 : 3, width: 16, height: 16, borderRadius: "50%", background: "#ffffff", transition: "left .15s ease", boxShadow: "0 1px 2px rgba(0,0,0,0.3)" } }),
-						),
-						)),
+						mcps.map((m, i) => renderMcpServerRow({
+							owner: "user-mcp",
+							row: m,
+							name: m.name,
+							transport: m.transport,
+							connected: m.enabled === true,
+							canEdit: true,
+							first: i === 0,
+						})),
+					),
+					pluginMcpRows.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "22px 4px 12px" } }, "来自插件"),
+					pluginMcpRows.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
+						pluginMcpRows.map((r, i) => renderMcpServerRow({
+							owner: r.owner,
+							record: r.record,
+							name: r.name,
+							transport: r.type,
+							connected: r.connected,
+							canEdit: false,
+							first: i === 0,
+						})),
 					),
 				),
 			),
+
+			globalHoveredTool && isBrowse && mcpsOpen && h(McpToolPopover, {
+				hovered: globalHoveredTool,
+				isDisabled: (() => {
+					const key = `${globalHoveredTool.owner}::${globalHoveredTool.connectorName}`;
+					const tName = typeof globalHoveredTool.tool === "string" ? globalHoveredTool.tool : globalHoveredTool.tool?.name;
+					return (globalToolData[key]?.disabledTools || []).includes(tName);
+				})(),
+				onToggle: () => toggleGlobalTool(
+					globalHoveredTool.owner,
+					globalHoveredTool.connectorName,
+					typeof globalHoveredTool.tool === "string" ? globalHoveredTool.tool : globalHoveredTool.tool?.name,
+				),
+			}),
 
 			hoveredPreview && isBrowse && h(PluginPreviewPopover, {
 				preview: hoveredPreview,
@@ -8622,8 +8844,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Manage Page ──────────────────────────────
-	function ManagePage({ record, state, rows, refreshState, showToast, onBack, onClose }) {
-		const [tab, setTab] = useState("skills");
+	function ManagePage({ record, state, rows, refreshState, showToast, onBack, onClose, initialTab }) {
+		const [tab, setTab] = useState(initialTab || "skills");
 		const [searchOpen, setSearchOpen] = useState(false);
 		const [tabQuery, setTabQuery] = useState("");
 		const searchInputRef = useRef(null);
