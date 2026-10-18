@@ -143,7 +143,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	content: "";
 	display: block;
 	width: 100%;
-	max-width: 1210px;
+	max-width: 1010px;
 	border-bottom: 1px solid var(--cpm-border);
 	margin-top: 2px;
 }
@@ -151,7 +151,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: flex;
 	align-items: center;
 	width: 100%;
-	max-width: 1200px;
+	max-width: 1000px;
 }
 .cpm-search {
 	flex: 1;
@@ -189,7 +189,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: space-between;
 	gap: 10px;
 	width: 100%;
-	max-width: 1200px;
+	max-width: 1000px;
 	position: relative;
 	z-index: 10;
 }
@@ -546,7 +546,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 576px));
+	grid-template-columns: repeat(2, minmax(0, 476px));
 	justify-content: center;
 	gap: 10px 48px;
 	align-content: start;
@@ -561,13 +561,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-grid-installed {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 576px));
+	grid-template-columns: repeat(2, minmax(0, 476px));
 	justify-content: center;
 	gap: 10px 48px;
 	align-content: start;
 }
 .cpm-installed-group {
-	max-width: 1200px;
+	max-width: 1000px;
 	margin: 0 auto 22px auto;
 }
 .cpm-installed-group:last-child {
@@ -774,7 +774,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-detail > * {
 	width: 100%;
-	max-width: 1200px;
+	max-width: 1000px;
 }
 .cpm-detail.mask-bottom {
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
@@ -1001,7 +1001,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-manage > * {
 	width: 100%;
-	max-width: 1200px;
+	max-width: 1000px;
 }
 .cpm-manage.mask-bottom {
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
@@ -7075,7 +7075,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			isBrowse && mcpsOpen && h("div", {
 				className: "cpm-grid-container" + gridMaskClass,
 			},
-				h("div", { style: { maxWidth: 1200, margin: "0 auto", width: "100%" } },
+				h("div", { style: { maxWidth: 1000, margin: "0 auto", width: "100%" } },
 					mcps.length === 0 && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
 					mcps.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
 					mcps.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
