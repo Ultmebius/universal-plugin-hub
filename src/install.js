@@ -573,9 +573,12 @@ export async function installProfilePackages(packageNames) {
 
   let main = findDshMainNodeModules()
   if (!main) {
-    const activeNm = join(dshHome(), 'profiles', resolveActiveProfileName(), 'node_modules')
     const sharedNm = join(dshHome(), 'profiles', 'node_modules')
-    main = existsSync(activeNm) ? activeNm : sharedNm
+    const activeNm = join(dshHome(), 'profiles', resolveActiveProfileName(), 'node_modules')
+    // The shared tree is the loader's primary runtime directory; prefer it
+    // whenever it exists. `findDshMainNodeModules` can miss it when its
+    // dsh-app-boot probe is a dangling symlink (e.g. left by an npx cache wipe).
+    main = existsSync(sharedNm) ? sharedNm : activeNm
     try { mkdirSync(main, { recursive: true }) } catch {}
   }
 
