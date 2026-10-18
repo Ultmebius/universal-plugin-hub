@@ -2221,7 +2221,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-mcp-expand:hover {
 	color: var(--cpm-text);
-	background: var(--cpm-tab-hover);
 }
 
 .cpm-mcp-tools-panel {
