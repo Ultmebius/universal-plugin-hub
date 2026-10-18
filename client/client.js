@@ -2411,13 +2411,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	cursor: pointer;
+	cursor: default;
 	transition: all 0.15s ease;
 	user-select: none;
-}
-.cpm-mcp-tool-popover-badge:hover {
-	opacity: 0.82;
-	transform: scale(1.02);
 }
 .cpm-mcp-tool-popover-badge.is-enabled {
 	background: rgba(16, 185, 129, 0.12);
@@ -4771,6 +4767,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		state: loadCachedState(),
 		scrollTops: {},
 		scrollTop: 0,
+		// Survives the BrowseView unmount caused by opening the manage page, so
+		// returning from a plugin's MCP page lands back on the MCP tab.
+		mcpsOpen: false,
 		// Per-source "installed-first" sort snapshots. Kept on SESSION_STORE
 		// (module-level, not a component ref) so they survive the BrowseView
 		// unmount that happens when the manage page opens — returning from
@@ -5028,6 +5027,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				// re-evaluates the "installed-first" default sort from the
 				// current plugin list.
 				if (SESSION_STORE.installedSnapshots) SESSION_STORE.installedSnapshots = {};
+				// Closing the panel is a fresh start: reopen on the plugin list,
+				// not on whichever MCP tab happened to be active.
+				SESSION_STORE.mcpsOpen = false;
 			};
 		}, []);
 
@@ -5531,12 +5533,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [showAddMenu, setShowAddMenu] = useState(false);
 		const [mcpDialog, setMcpDialog] = useState(false);
 		const [mcps, setMcps] = useState([]);
-		const [mcpsOpen, setMcpsOpen] = useState(false);
+		const [mcpsOpen, setMcpsOpenRaw] = useState(() => !!SESSION_STORE.mcpsOpen);
+		const setMcpsOpen = useCallback((v) => {
+			SESSION_STORE.mcpsOpen = v;
+			setMcpsOpenRaw(v);
+		}, []);
 		const [editMcp, setEditMcp] = useState(null);
 		// MCP page: per-server tool lists (keyed by "name::connector" for user
 		// servers and "<plugin>::<connector>" for plugin-provided ones) plus the
 		// shared hover popover state.
-		const [globalToolData, setGlobalToolData] = useState({});
+		const [globalToolData, setGlobalToolData] = useState(() => {
+			// Seed from the shared cache so a second visit shows counts instantly.
+			const initial = {};
+			for (const [key, v] of Object.entries(GLOBAL_MCP_TOOLS_CACHE)) {
+				initial[key] = { loading: false, error: null, tools: v.tools || [], disabledTools: v.disabledTools || [] };
+			}
+			return initial;
+		});
 		const [globalExpanded, setGlobalExpanded] = useState({});
 		const [globalHoveredTool, setGlobalHoveredTool] = useState(null);
 		const globalHoverTimerRef = useRef(null);
@@ -5564,8 +5577,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					name: obj.name,
 					type: obj.type || (obj.url ? "http" : "stdio"),
 					connected: obj.connected === true,
-					needsAuth: obj.needsAuth === true,
-					authenticated: obj.authenticated !== false,
 				};
 			})
 		), [state.plugins]);
@@ -5603,13 +5614,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const toggleGlobalExpand = useCallback((owner, connectorName) => {
 			const key = `${owner}::${connectorName}`;
-			setGlobalExpanded((prev) => {
-				const next = !prev[key];
-				const curr = globalToolData[key];
-				if (next && (!curr || !curr.tools || curr.tools.length === 0)) loadGlobalTools(owner, connectorName);
-				return { ...prev, [key]: next };
-			});
-		}, [globalToolData, loadGlobalTools]);
+			const willExpand = !globalExpanded[key];
+			setGlobalExpanded((prev) => ({ ...prev, [key]: willExpand }));
+			// Load outside the updater: React may replay updaters, and this one
+			// spawns a local MCP server.
+			if (willExpand && (!globalToolData[key] || !globalToolData[key].tools || globalToolData[key].tools.length === 0)) {
+				loadGlobalTools(owner, connectorName);
+			}
+		}, [globalExpanded, globalToolData, loadGlobalTools]);
 
 		const toggleGlobalTool = useCallback(async (owner, connectorName, toolName) => {
 			const key = `${owner}::${connectorName}`;
@@ -5674,7 +5686,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					setEditMcp(opts.row);
 					setMcpDialog(true);
 				} else if (record) {
-					setMcpsOpen(false);
+					// Leave mcpsOpen set: it persists across the BrowseView unmount,
+					// so Back from the manage page returns to the MCP tab.
 					openManage(record, { type: "browse", sourceId: activeSourceId }, "connectors");
 				}
 			};
@@ -5687,12 +5700,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
 						h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--cpm-text)" } }, name),
 						h("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, transport === "stdio" ? "stdio" : "http"),
-						connected && toolsList.length > 0 && h("button", {
+						// Must render before the tool list is fetched: this button is
+						// what triggers the fetch.
+						connected && h("button", {
 							type: "button",
 							className: "cpm-mcp-expand",
 							onClick: () => toggleGlobalExpand(owner, name),
 						},
-							h("span", null, `${activeCount} tools enabled${disabledTools.length > 0 ? ` (${disabledTools.length} disabled)` : ""}`),
+							h("span", null, toolsList.length > 0
+								? `${activeCount} tools enabled${disabledTools.length > 0 ? ` (${disabledTools.length} disabled)` : ""}`
+								: "Tools"),
 							h("span", { className: "cpm-connector-collapse-btn" + (isExpanded ? " is-expanded" : "") }, h(IconArrow, { size: 10 })),
 						),
 					),
@@ -5709,47 +5726,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						onClick: onToggleServer,
 					}),
 				),
-				isExpanded && h("div", { className: "cpm-mcp-tools-panel" },
-					info?.loading && h("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0", color: "var(--cpm-muted)", fontSize: 12 } },
-						h("span", { className: "cpm-spin-ring", style: { width: 13, height: 13, borderWidth: 1.5 } }),
-						"正在解析工具列表…",
-					),
-					!info?.loading && info?.error && h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "#ef4444", fontSize: 12 } },
-						h("span", null, `获取能力失败: ${info.error}`),
-						h("button", { type: "button", className: "cpm-btn-ghost", style: { height: 24, padding: "0 8px", fontSize: 11 }, onClick: () => loadGlobalTools(owner, name) }, "重试"),
-					),
-					!info?.loading && !info?.error && toolsList.length === 0 && h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "var(--cpm-muted)", fontSize: 12, padding: "4px 0" } },
-						h("span", null, "该 MCP 服务暂未暴露可用工具能力 (tools)"),
-						h("button", { type: "button", className: "cpm-btn-ghost", style: { height: 24, padding: "0 8px", fontSize: 11 }, onClick: () => loadGlobalTools(owner, name) }, "重新检测能力"),
-					),
-					!info?.loading && !info?.error && toolsList.length > 0 && h("div", { className: "cpm-mcp-tools-grid" },
-						toolsList.map((t) => {
-							const tName = typeof t === "string" ? t : t.name;
-							const isDisabled = disabledTools.includes(tName);
-							return h("div", { key: tName, className: "cpm-mcp-tool-pill-wrap" },
-								h("button", {
-									type: "button",
-									className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
-									onMouseEnter: (e) => {
-										if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
-										const rect = e.currentTarget.getBoundingClientRect();
-										globalHoverTimerRef.current = setTimeout(() => {
-											setGlobalHoveredTool({ owner, connectorName: name, tool: t, rect });
-										}, 200);
-									},
-									onMouseLeave: () => {
-										if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
-										setGlobalHoveredTool(null);
-									},
-									onClick: (e) => { e.stopPropagation(); toggleGlobalTool(owner, name, tName); },
-								},
-									h("span", { className: "cpm-mcp-tool-dot" }),
-									tName,
-								),
-							);
-						}),
-					),
-				),
+				isExpanded && connected && h(McpToolsPanel, {
+					loading: info?.loading,
+					error: info?.error,
+					tools: toolsList,
+					disabledTools,
+					onRetry: () => loadGlobalTools(owner, name),
+					onHoverTool: (tool, rect) => {
+						if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
+						globalHoverTimerRef.current = setTimeout(() => {
+							setGlobalHoveredTool({ owner, connectorName: name, tool, rect });
+						}, 200);
+					},
+					onHoverEnd: () => {
+						if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
+						setGlobalHoveredTool(null);
+					},
+					onToggleTool: (toolName) => toggleGlobalTool(owner, name, toolName),
+				}),
 			);
 		};
 
@@ -7337,11 +7331,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const tName = typeof globalHoveredTool.tool === "string" ? globalHoveredTool.tool : globalHoveredTool.tool?.name;
 					return (globalToolData[key]?.disabledTools || []).includes(tName);
 				})(),
-				onToggle: () => toggleGlobalTool(
-					globalHoveredTool.owner,
-					globalHoveredTool.connectorName,
-					typeof globalHoveredTool.tool === "string" ? globalHoveredTool.tool : globalHoveredTool.tool?.name,
-				),
 			}),
 
 			hoveredPreview && isBrowse && h(PluginPreviewPopover, {
@@ -8726,8 +8715,64 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		} catch {}
 	}
 
+	// Shared tool grid for the MCP page and the plugin manage page: the
+	// loading/error/empty branches and the hoverable pill grid are identical
+	// there, and keeping one copy is what stops the two views drifting apart.
+	function McpToolsPanel({ loading, error, tools, disabledTools, loadingText, onRetry, onHoverTool, onHoverEnd, onToggleTool }) {
+		const list = tools || [];
+		const disabled = disabledTools || [];
+		return h("div", { className: "cpm-mcp-tools-panel" },
+			loading && h("div", {
+				style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0", color: "var(--cpm-muted)", fontSize: 12 },
+			},
+				h("span", { className: "cpm-spin-ring", style: { width: 13, height: 13, borderWidth: 1.5 } }),
+				loadingText || "正在解析工具列表…",
+			),
+			!loading && error && h("div", {
+				style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "#ef4444", fontSize: 12 },
+			},
+				h("span", null, `获取能力失败: ${error}`),
+				h("button", {
+					type: "button",
+					className: "cpm-btn-ghost",
+					style: { height: 24, padding: "0 8px", fontSize: 11 },
+					onClick: onRetry,
+				}, "重试"),
+			),
+			!loading && !error && list.length === 0 && h("div", {
+				style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "var(--cpm-muted)", fontSize: 12, padding: "4px 0" },
+			},
+				h("span", null, "该 MCP 服务暂未暴露可用工具能力 (tools)"),
+				h("button", {
+					type: "button",
+					className: "cpm-btn-ghost",
+					style: { height: 24, padding: "0 8px", fontSize: 11 },
+					onClick: onRetry,
+				}, "重新检测能力"),
+			),
+			!loading && !error && list.length > 0 && h("div", { className: "cpm-mcp-tools-grid" },
+				list.map((t) => {
+					const tName = typeof t === "string" ? t : t.name;
+					const isDisabled = disabled.includes(tName);
+					return h("div", { key: tName, className: "cpm-mcp-tool-pill-wrap" },
+						h("button", {
+							type: "button",
+							className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
+							onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect()),
+							onMouseLeave: onHoverEnd,
+							onClick: (e) => { e.stopPropagation(); onToggleTool(tName); },
+						},
+							h("span", { className: "cpm-mcp-tool-dot" }),
+							tName,
+						),
+					);
+				}),
+			),
+		);
+	}
+
 	// ────────────────────────── Floating MCP Tool Detail Popover ──────────────────────────
-	function McpToolPopover({ hovered, isDisabled: propIsDisabled, onToggle }) {
+	function McpToolPopover({ hovered, isDisabled: propIsDisabled }) {
 		if (!hovered || !hovered.tool || !hovered.rect) return null;
 		const t = hovered.tool;
 		const rect = hovered.rect;
@@ -8810,14 +8855,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			// Sticky Top Header (outside scrolling area)
 			h("div", { className: "cpm-mcp-tool-popover-header" },
 				h("div", { className: "cpm-mcp-tool-popover-title" }, title),
+				// Informational only: the pill itself toggles the tool. The popover
+				// closes as soon as the pointer leaves the pill, so a control here
+				// could never be clicked.
 				h("span", {
 					className: "cpm-mcp-tool-popover-badge " + (isDisabled ? "is-disabled" : "is-enabled"),
-					onClick: (e) => {
-						if (onToggle) {
-							e.stopPropagation();
-							onToggle();
-						}
-					},
 				}, isDisabled ? "已禁用" : "已启用"),
 			),
 
@@ -8879,11 +8921,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		});
 		const [hoveredTool, setHoveredTool] = useState(null);
 		const hoverTimerRef = useRef(null);
-
-		const formatToolTitle = (rawName) => {
-			if (!rawName) return "";
-			return rawName.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-		};
 
 		const loadConnectorTools = useCallback(async (connectorName) => {
 			const key = `${record.name}::${connectorName}`;
@@ -9735,83 +9772,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						),
 
 						// Figure 1 & Figure 3: Expandable Capabilities Panel
-						isConnected && isAuthenticated && isExpanded && h("div", {
-							className: "cpm-mcp-tools-panel",
-						},
-							toolsInfo?.loading && h("div", {
-								style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", color: "var(--cpm-muted)", fontSize: 12 },
+						isConnected && isAuthenticated && isExpanded && h(McpToolsPanel, {
+							loading: toolsInfo?.loading,
+							error: toolsInfo?.error,
+							tools: toolsList,
+							disabledTools,
+							loadingText: "正在启动本地 MCP 服务并解析工具列表（首次启动可能需要下载组件）…",
+							onRetry: () => loadConnectorTools(cName),
+							onHoverTool: (tool, rect) => {
+								if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+								hoverTimerRef.current = setTimeout(() => {
+									setHoveredTool({ connectorName: cName, tool, rect });
+								}, 200);
 							},
-								h("span", { className: "cpm-spin-ring", style: { width: 13, height: 13, borderWidth: 1.5 } }),
-								"正在启动本地 MCP 服务并解析工具列表（首次启动可能需要下载组件）…",
-							),
-
-							!toolsInfo?.loading && toolsInfo?.error && h("div", {
-								style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "#ef4444", fontSize: 12 },
+							onHoverEnd: () => {
+								if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+								setHoveredTool(null);
 							},
-								h("span", null, `获取能力失败: ${toolsInfo.error}`),
-								h("button", {
-									type: "button",
-									className: "cpm-btn-ghost",
-									style: { height: 24, padding: "0 8px", fontSize: 11 },
-									onClick: () => loadConnectorTools(cName),
-								}, "重试"),
-							),
-
-							!toolsInfo?.loading && !toolsInfo?.error && toolsList.length === 0 && h("div", {
-								style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "var(--cpm-muted)", fontSize: 12, padding: "4px 0" },
-							},
-								h("span", null, "该 MCP 服务暂未暴露可用工具能力 (tools)"),
-								h("button", {
-									type: "button",
-									className: "cpm-btn-ghost",
-									style: { height: 24, padding: "0 8px", fontSize: 11 },
-									onClick: () => loadConnectorTools(cName),
-								}, "重新检测能力"),
-							),
-
-							!toolsInfo?.loading && !toolsInfo?.error && toolsList.length > 0 && h("div", { className: "cpm-mcp-tools-grid" },
-								toolsList.map((t) => {
-									const tName = typeof t === "string" ? t : t.name;
-									const isDisabled = disabledTools.includes(tName);
-									const toolKey = `${cName}::${tName}`;
-									const isHovered = hoveredTool?.key === toolKey;
-									const title = t.annotations?.title || formatToolTitle(tName);
-									const desc = t.description || "No description provided for this MCP tool.";
-									const props = t.inputSchema?.properties ? Object.keys(t.inputSchema.properties) : [];
-									const requiredProps = Array.isArray(t.inputSchema?.required) ? t.inputSchema.required : [];
-
-									return h("div", {
-										key: tName,
-										className: "cpm-mcp-tool-pill-wrap",
-									},
-										h("button", {
-											type: "button",
-											className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
-											onMouseEnter: (e) => {
-												if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-												const rect = e.currentTarget.getBoundingClientRect();
-												hoverTimerRef.current = setTimeout(() => {
-													setHoveredTool({ connectorName: cName, tool: t, rect });
-												}, 200);
-											},
-											onMouseLeave: () => {
-												// Pure hover tooltip: leaving the pill closes it right
-												// away, even if the pointer lands on the popover.
-												if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-												setHoveredTool(null);
-											},
-											onClick: (e) => {
-												e.stopPropagation();
-												toggleTool(cName, tName);
-											},
-										},
-											h("span", { className: "cpm-mcp-tool-dot" }),
-											tName,
-										),
-									);
-								}),
-							),
-						),
+							onToggleTool: (toolName) => toggleTool(cName, toolName),
+						}),
 					);
 				}),
 			),
@@ -10250,7 +10229,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				return h(McpToolPopover, {
 					hovered: hoveredTool,
 					isDisabled: isCurrentlyDisabled,
-					onToggle: () => toggleTool(hoveredTool.connectorName, toolName),
 				});
 			})()
 		);
