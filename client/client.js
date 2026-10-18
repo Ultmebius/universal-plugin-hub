@@ -9116,7 +9116,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			h("div", {
 				ref: manageRef,
 				className: "cpm-manage" + manageMaskClass,
-				onScroll: updateManageMask,
+				onScroll: () => { updateManageMask(); if (hoveredTool) setHoveredTool(null); },
 			},
 				h("div", { className: "cpm-manage-head" },
 					h("button", { className: "cpm-back", style: { padding: 0 }, onClick: onBack }, h(IconChevronLeft), "Back"),
@@ -9568,20 +9568,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 											className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
 											onMouseEnter: (e) => {
 												if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+												if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 												const rect = e.currentTarget.getBoundingClientRect();
-												const nextHover = {
-													connectorName: cName,
-													tool: t,
-													rect,
-												};
-												if (hoveredTool) {
-													if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-													hoverTimerRef.current = setTimeout(() => {
-														setHoveredTool(nextHover);
-													}, 75);
-												} else {
-													setHoveredTool(nextHover);
-												}
+												hoverTimerRef.current = setTimeout(() => {
+													setHoveredTool({ connectorName: cName, tool: t, rect });
+												}, 200);
 											},
 											onMouseLeave: () => {
 												if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
