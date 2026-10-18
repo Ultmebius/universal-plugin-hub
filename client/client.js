@@ -6786,6 +6786,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						className: "cpm-topbar-left" + (dragState?.active ? " is-dragging-mode" : "") + tabsMaskClass,
 						onScroll: updateTabsMask,
 					},
+						// MCP is a fixed entry pinned ahead of the source tabs; it has no
+						// drag handlers, so it can never be reordered.
+						mcps.length > 0 && h("button", {
+							key: "__mcps",
+							className: "cpm-tab" + (mcpsOpen ? " active" : ""),
+							onClick: () => { setMcpsOpen(true); refreshMcps(); setView({ type: "browse", sourceId: activeSourceId }); },
+						}, h("span", null, "MCP")),
 						state.sources.map((s, idx) => {
 							const isAnthropic = idx === 0 || s.builtin || (s.id && s.id.toLowerCase() === "anthropic");
 							const isBeingDragged = dragState?.active && dragState.sourceId === s.id;
@@ -6859,11 +6866,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								),
 							);
 						}),
-						mcps.length > 0 && h("button", {
-							key: "__mcps",
-							className: "cpm-tab" + (mcpsOpen ? " active" : ""),
-							onClick: () => { setMcpsOpen(true); refreshMcps(); setView({ type: "browse", sourceId: activeSourceId }); },
-						}, h("span", null, "MCP")),
 					),
 					h("div", { className: "cpm-topbar-right" },
 						h("button", { className: "cpm-icon-btn" + (isRefreshing ? " is-refreshing" : ""), onClick: refresh, disabled: isRefreshing }, h(IconRefresh)),
@@ -7073,7 +7075,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			isBrowse && mcpsOpen && h("div", {
 				className: "cpm-grid-container" + gridMaskClass,
 			},
-				h("div", { style: { maxWidth: 900, margin: "0 auto", width: "100%" } },
+				h("div", { style: { maxWidth: 1200, margin: "0 auto", width: "100%" } },
 					mcps.length === 0 && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
 					mcps.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
 					mcps.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
