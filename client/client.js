@@ -8505,7 +8505,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────── Floating MCP Tool Detail Popover ──────────────────────────
-	function McpToolPopover({ hovered, isDisabled: propIsDisabled, onToggle, onMouseEnter, onMouseLeave }) {
+	function McpToolPopover({ hovered, isDisabled: propIsDisabled, onToggle }) {
 		if (!hovered || !hovered.tool || !hovered.rect) return null;
 		const t = hovered.tool;
 		const rect = hovered.rect;
@@ -8583,8 +8583,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				left: `${left}px`,
 				top: `${top}px`,
 			},
-			onMouseEnter,
-			onMouseLeave,
 			onWheel: (e) => e.stopPropagation(),
 		},
 			// Sticky Top Header (outside scrolling area)
@@ -8659,7 +8657,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		});
 		const [hoveredTool, setHoveredTool] = useState(null);
 		const hoverTimerRef = useRef(null);
-		const leaveTimerRef = useRef(null);
 
 		const formatToolTitle = (rawName) => {
 			if (!rawName) return "";
@@ -9569,7 +9566,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 											type: "button",
 											className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
 											onMouseEnter: (e) => {
-												if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
 												if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 												const rect = e.currentTarget.getBoundingClientRect();
 												hoverTimerRef.current = setTimeout(() => {
@@ -9577,10 +9573,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												}, 200);
 											},
 											onMouseLeave: () => {
+												// Pure hover tooltip: leaving the pill closes it right
+												// away, even if the pointer lands on the popover.
 												if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-												leaveTimerRef.current = setTimeout(() => {
-													setHoveredTool(null);
-												}, 140);
+												setHoveredTool(null);
 											},
 											onClick: (e) => {
 												e.stopPropagation();
@@ -10033,15 +10029,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					hovered: hoveredTool,
 					isDisabled: isCurrentlyDisabled,
 					onToggle: () => toggleTool(hoveredTool.connectorName, toolName),
-					onMouseEnter: () => {
-						if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-						if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
-					},
-					onMouseLeave: () => {
-						leaveTimerRef.current = setTimeout(() => {
-							setHoveredTool(null);
-						}, 140);
-					},
 				});
 			})()
 		);
