@@ -125,7 +125,7 @@ export async function pullSource(sourceId) {
  * Returns { dir } of a materialized checkout for the plugin, or throws with
  * a user-facing message.
  */
-export async function materializePlugin(sourceId, pluginName, source) {
+export async function materializePlugin(sourceId, pluginName, source, { refresh = false } = {}) {
   safeSegment(sourceId, 'source id')
   safeSegment(pluginName, 'plugin name')
 
@@ -160,6 +160,13 @@ export async function materializePlugin(sourceId, pluginName, source) {
           if (source.ref) args.push('--branch', String(source.ref))
           args.push(source.url, checkout)
           await runGit(args)
+        } else if (refresh) {
+          // The cached checkout is otherwise reused forever, so updates would
+          // reinstall the first clone's commit. Re-fetch the tracked ref.
+          const args = ['fetch', '--depth', '1', 'origin']
+          if (source.ref) args.push(String(source.ref))
+          await runGit(args, checkout)
+          await runGit(['reset', '--hard', 'FETCH_HEAD'], checkout)
         }
       })
       const dir = source.path ? join(checkout, String(source.path)) : checkout

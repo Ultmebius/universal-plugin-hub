@@ -15,7 +15,7 @@ import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
 import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 
 /** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
@@ -579,9 +579,25 @@ export async function installProfilePackages(packageNames) {
     try { mkdirSync(main, { recursive: true }) } catch {}
   }
 
+  // A host package from a different major.minor line than the running DSH
+  // release is stale: skipping it because the directory exists left the hooks
+  // and LSP bridges pinned to whatever line was current at first provision.
+  const dshLine = versionLine(findDshVersion())
   const need = []
   for (const name of names) {
-    if (!existsSync(join(main, name, 'package.json'))) need.push(name)
+    const installedManifest = join(main, name, 'package.json')
+    if (!existsSync(installedManifest)) {
+      need.push(name)
+      continue
+    }
+    if (!dshLine) continue
+    try {
+      const present = JSON.parse(readFileSync(installedManifest, 'utf8')).version
+      if (typeof present !== 'string' || versionLine(present) === dshLine) continue
+      // Re-provision only when a build for the running line actually exists;
+      // otherwise the same mismatched version would be reinstalled every start.
+      if (versionLine(await matchingPublishedVersion(name)) === dshLine) need.push(name)
+    } catch {}
   }
   if (need.length === 0) return { ok: true, installed: [] }
 
@@ -617,15 +633,25 @@ export async function installProfilePackages(packageNames) {
       const buffer = Buffer.from(await res.arrayBuffer())
       const dest = join(main, name)
       mkdirSync(dirname(dest), { recursive: true })
-      safeRmDir(dest)
-      untarStripFirst(buffer, dest)
+      // Extract beside the target and swap only once the tarball is verified:
+      // replacing a stale version must not destroy the working one on failure.
+      const staging = `${dest}.staging-${process.pid}-${Date.now()}`
+      safeRmDir(staging)
+      untarStripFirst(buffer, staging)
       // Verify the tarball actually unpacked a usable package — `untarStripFirst`
       // walks the UStar header stream and silently exits on any malformed input
       // (e.g. a 404 HTML page mistakenly returned as a gzipped stream), which
       // would leave the package directory empty and downstream gates blind.
-      if (!existsSync(join(dest, 'package.json'))) {
-        safeRmDir(dest)
+      if (!existsSync(join(staging, 'package.json'))) {
+        safeRmDir(staging)
         return { ok: false, error: `${name} 解包后缺少 package.json（tarball 可能不完整）`, installed }
+      }
+      safeRmDir(dest)
+      try {
+        renameSync(staging, dest)
+      } catch {
+        copyDir(staging, dest)
+        safeRmDir(staging)
       }
       installed.push(name)
     } catch (error) {
@@ -821,7 +847,12 @@ export function getHookBridgeId(pluginName) {
 export async function registerPluginHooks(pluginName) {
   const target = installedDir(pluginName)
   const configPath = resolveHookConfigPath(target)
-  if (!configPath) return { ok: true, registered: [] }
+  // A version that dropped its hooks must also lose the previous bridge entry,
+  // otherwise the old hooks keep firing after reinstall.
+  if (!configPath) {
+    unregisterPluginHooks(pluginName)
+    return { ok: true, registered: [] }
+  }
 
   const patch = readCordisPatch()
   const id = getHookBridgeId(pluginName)
@@ -1402,7 +1433,7 @@ export function syncAllInstalledSkillsToDsh() {
  * Install a plugin from the marketplace into the installed tree.
  * Returns a result summary for the UI.
  */
-export async function installPlugin({ sourceId, pluginName }) {
+export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
@@ -1410,8 +1441,13 @@ export async function installPlugin({ sourceId, pluginName }) {
   const row = await findMarketRow(sourceId, pluginName)
   if (!row) throw new Error(`plugin not found in marketplace: ${pluginName}`)
 
-  const { dir } = await materializePlugin(sourceId, pluginName, row.source)
+  const { dir } = await materializePlugin(sourceId, pluginName, row.source, { refresh })
   const target = installedDir(pluginName)
+
+  // Reinstalling must not inherit the previous copy's registrations: skills it
+  // no longer ships and MCP servers it dropped would otherwise stay visible.
+  const prevConnectors = existsSync(target) ? getPluginConnectors(target).map((c) => c.name) : []
+  if (existsSync(target)) removePluginSkillsFromDsh(pluginName)
 
   // Idempotent reinstall: clear the previous copy first.
   safeRmDir(target)
@@ -1558,6 +1594,9 @@ export async function installPlugin({ sourceId, pluginName }) {
 
   // Auto-register and connect any MCP connectors defined in the plugin that do NOT require auth and have valid URLs/commands.
   const pluginConnectors = getPluginConnectors(target)
+  for (const name of prevConnectors) {
+    if (!pluginConnectors.some((c) => c.name === name)) unregisterConnector(pluginName, name)
+  }
   for (const c of pluginConnectors) {
     if (!connectorRequiresAuth(c)) {
       const isHttp = (c.type === 'http' || c.type === 'sse' || (!c.command && (!!c.url || !c.args?.length)))
@@ -1573,6 +1612,9 @@ export async function installPlugin({ sourceId, pluginName }) {
   // hub's `apply()` at DSH startup — this step is a single, race-free
   // patch write. `lspErrors` still surface other failures (the user-installed
   // language server binary not on PATH, missing extensionToLanguage, etc.).
+  // Drop the previous version's server entries; the loop re-adds the ones this
+  // version still declares, so removed servers stop loading.
+  unregisterPluginLsp(pluginName)
   const lspServers = listLspServers(target)
   const lspErrors = []
   for (const r of registerPluginLsp(pluginName)) {
@@ -1751,8 +1793,12 @@ export async function updatePlugin(pluginName) {
     }
   }
 
+  // The marketplace rows are cached for 30s; without this the install below
+  // re-reads the pre-pull catalog and installs the old revision.
+  invalidateMarketplaceCache(rec.sourceId)
+
   // Freshly materialized install (re-copies, re-registers, re-converts).
-  return installPlugin({ sourceId: rec.sourceId, pluginName })
+  return installPlugin({ sourceId: rec.sourceId, pluginName, refresh: true })
 }
 
 /** Find one marketplace row by name. */

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync, cpSync, mkdirSync, writeFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { sourceCacheDir, readState, writeState, safeRmDir } from './store.js'
@@ -153,6 +153,9 @@ export async function importLocalPlugin({ path: rawPath, overwrite = false, sour
   const destDir = join(localDir, cleanPluginName)
 
   try {
+    // A merge-copy keeps files the new version deleted, so the imported copy
+    // would drift from the source forever. Replace it instead.
+    if (resolve(destDir) !== resolve(effectiveDir)) safeRmDir(destDir)
     cpSync(effectiveDir, destDir, { recursive: true, force: true })
   } finally {
     if (tempExtractDir) safeRmDir(tempExtractDir)
