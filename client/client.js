@@ -5546,6 +5546,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			setMcpsOpenRaw(v);
 		}, []);
 		const [editMcp, setEditMcp] = useState(null);
+		// Plugin name when the editor was opened from a plugin-provided server;
+		// null means the editor targets a user-added MCP.
+		const [editMcpOwner, setEditMcpOwner] = useState(null);
 		// MCP page: per-server tool lists (keyed by "name::connector" for user
 		// servers and "<plugin>::<connector>" for plugin-provided ones) plus the
 		// shared hover popover state.
@@ -5585,6 +5588,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					name: obj.name,
 					type: obj.type || (obj.url ? "http" : "stdio"),
 					connected: obj.connected === true,
+					// Full declaration, so the gear can open the same editor the
+					// user-added servers use, pre-filled.
+					conn: obj,
 				};
 			})
 		), [state.plugins]);
@@ -5663,7 +5669,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [globalToolData, loadGlobalTools, showToast]);
 
 		const renderMcpServerRow = (opts) => {
-			const { owner, name, transport, connected, canEdit, record, first } = opts;
+			const { owner, name, transport, connected, canEdit, record, first, conn } = opts;
 			const key = `${owner}::${name}`;
 			const isExpanded = !!globalExpanded[key];
 			const info = globalToolData[key];
@@ -5689,17 +5695,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 			};
 
+			// Both kinds open the editor directly; plugin-owned connectors save
+			// through the connector auth route instead of the user-MCP route.
 			const onGear = () => {
 				if (canEdit) {
 					setEditMcp(opts.row);
-					setMcpDialog(true);
-				} else if (record) {
-					// Same destination the manage page's own gear opens: the
-					// connector's auth/config dialog, not the plugin page.
-					// Leave mcpsOpen set: it persists across the BrowseView unmount,
-					// so Back from the manage page returns to the MCP tab.
-					openManage(record, { type: "browse", sourceId: activeSourceId }, "connectors", name);
+					setEditMcpOwner(null);
+				} else {
+					setEditMcp({ ...(conn || {}), name, transport: transport || "stdio" });
+					setEditMcpOwner(owner);
 				}
+				setMcpDialog(true);
 			};
 
 			// Blank area of a plugin row opens the plugin's connectors page.
@@ -5737,8 +5743,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					),
 					h("button", {
 						type: "button",
-						title: canEdit ? "编辑" : "打开插件的 MCP 页",
-						style: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 8, border: "none", background: "transparent", color: "var(--cpm-muted)", cursor: "pointer", padding: 0, flexShrink: 0 },
+						className: "cpm-icon-btn",
+						title: "编辑 MCP 配置",
+						style: { width: 30, height: 30, borderRadius: 10 },
 						onClick: onGear,
 					}, h(IconSettings, { size: 15 })),
 					h("button", {
@@ -7340,6 +7347,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							name: r.name,
 							transport: r.type,
 							connected: r.connected,
+							conn: r.conn,
 							canEdit: false,
 							first: i === 0,
 						})),
@@ -7383,8 +7391,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			mcpDialog && h(AddMcpDialog, {
 				initial: editMcp,
-				onCancel: () => { setMcpDialog(false); setEditMcp(null); },
-				onSaved: async () => { await refreshMcps(); setMcpsOpen(true); setMcpDialog(false); setEditMcp(null); },
+				owner: editMcpOwner,
+				onCancel: () => { setMcpDialog(false); setEditMcp(null); setEditMcpOwner(null); },
+				onSaved: async () => {
+					await refreshMcps();
+					await refreshState();
+					setMcpsOpen(true);
+					setMcpDialog(false);
+					setEditMcp(null);
+					setEditMcpOwner(null);
+				},
 				showToast,
 			}),
 
@@ -8029,7 +8045,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Add MCP Dialog ──────────────────────────────
-	function AddMcpDialog({ onCancel, onSaved, showToast, initial }) {
+	function AddMcpDialog({ onCancel, onSaved, showToast, initial, owner }) {
 		const [form, setForm] = useState(() => initial ? {
 			name: initial.name || "",
 			transport: initial.transport === "http" ? "http" : "stdio",
@@ -8103,7 +8119,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 			setTesting(true);
 			try {
-				const res = await api("/mcps/verify", { method: "POST", body: JSON.stringify(buildPayload()) });
+				const verifyUrl = owner
+					? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify`
+					: "/mcps/verify";
+				const res = await api(verifyUrl, { method: "POST", body: JSON.stringify(buildPayload()) });
 				showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false });
 			} catch (err) {
 				showToast("验证失败", cleanMcpError(err), { restart: false });
@@ -8127,7 +8146,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 			setSaving(true);
 			try {
-				const res = await api(initial ? "/mcps/update" : "/mcps", { method: "POST", body: JSON.stringify(buildPayload()) });
+				const saveUrl = owner
+					? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/auth`
+					: (initial ? "/mcps/update" : "/mcps");
+				const res = await api(saveUrl, { method: "POST", body: JSON.stringify(buildPayload()) });
 				if (res && res.ok === false) {
 					showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
 					setSaving(false);
