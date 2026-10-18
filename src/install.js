@@ -1150,44 +1150,81 @@ export function setToolDisabled(pluginName, connectorName, toolName, disabled) {
   return state[key].disabledTools
 }
 
+/**
+ * Package-manager shims are the only commands that need a shell (Windows
+ * resolves npx.cmd/npm.cmd through cmd.exe). Running everything through a
+ * shell split unquoted paths at their spaces — "G:\...\computer use\server.js"
+ * arrived at node as "G:\...\computer" — so the probe always failed.
+ */
+const SHELL_COMMANDS = /^(npx|npm|pnpm|pnpx|yarn|yarnpkg|bunx?|corepack)(\.cmd|\.bat)?$/i
+
+function quoteArgForShell(value) {
+  const s = String(value)
+  return /[\s"&|<>^]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s
+}
+
+/**
+ * Query an MCP stdio server for its tool list.
+ * Resolves { tools, error } — error stays null when the server answered with
+ * an (possibly empty) tool list, so callers can tell "no tools" from "the
+ * probe never reached the server".
+ */
 function queryStdioToolsList(cmd, args, extraEnv = {}) {
   return new Promise((resolve) => {
+    const argv = Array.isArray(args) ? args : []
+    const useShell = SHELL_COMMANDS.test(String(cmd).trim())
     let cp
     try {
-      cp = spawn(cmd, args, {
-        shell: true,
-        env: { ...process.env, ...extraEnv },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-    } catch {
-      return resolve([])
+      cp = useShell
+        ? spawn([cmd, ...argv].map(quoteArgForShell).join(' '), {
+          shell: true,
+          env: { ...process.env, ...extraEnv },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        : spawn(cmd, argv, {
+          shell: false,
+          env: { ...process.env, ...extraEnv },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+    } catch (err) {
+      return resolve({ tools: [], error: `无法启动 ${cmd}: ${err.message}` })
     }
 
     let output = ''
-    let resolved = false
+    let stderr = ''
+    let answered = false
+    let settled = false
 
-    const cleanup = () => {
-      if (!resolved) {
-        resolved = true
-        try {
-          cp.kill()
-        } catch {}
-      }
+    const finish = (tools, error) => {
+      if (settled) return
+      settled = true
+      try { cp.kill() } catch {}
+      resolve({ tools: tools || [], error: tools ? null : error })
     }
+
+    cp.stderr.on('data', (d) => { stderr += d.toString() })
 
     cp.stdout.on('data', (d) => {
       output += d.toString()
-      const lines = output.split('\n')
-      for (const line of lines) {
+      for (const line of output.split('\n')) {
         if (!line.trim()) continue
         try {
           const json = JSON.parse(line.trim())
           if (json.id === 1 && Array.isArray(json.result?.tools)) {
-            resolved = true
-            cleanup()
-            return resolve(json.result.tools)
+            answered = true
+            finish(json.result.tools, null)
+            return
           }
         } catch {}
+      }
+    })
+
+    cp.on('error', (err) => finish([], `无法启动 ${cmd}: ${err.message}`))
+
+    cp.on('close', (code) => {
+      if (!answered) {
+        const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
+        finish([], detail || `MCP 服务提前退出（exit ${code}）`)
       }
     })
 
@@ -1208,7 +1245,7 @@ function queryStdioToolsList(cmd, args, extraEnv = {}) {
     try {
       cp.stdin.write(initReq)
       setTimeout(() => {
-        if (!resolved) {
+        if (!settled) {
           try {
             cp.stdin.write(toolsReq)
           } catch {}
@@ -1217,9 +1254,9 @@ function queryStdioToolsList(cmd, args, extraEnv = {}) {
     } catch {}
 
     setTimeout(() => {
-      if (!resolved) {
-        cleanup()
-        resolve([])
+      if (!settled) {
+        const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
+        finish([], detail || 'MCP 服务在 25 秒内没有返回工具列表')
       }
     }, 25000)
   })
@@ -1254,6 +1291,13 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
   const transport = entryCfg.transport === 'stdio' ? 'stdio' : (found?.type === 'stdio' ? 'stdio' : 'http')
   const url = entryCfg.url || found?.url
   const headers = entryCfg.headers || found?.headers || {}
+
+  // Nothing to connect to (unknown server, or a config with neither URL nor
+  // command) must read as an error, not as "this server exposes no tools".
+  let probeError = null
+  if (transport !== 'stdio' && !url) {
+    probeError = `未找到 MCP 服务 ${connectorName} 的连接配置`
+  }
 
   // 1. HTTP / SSE fetch
   if (transport !== 'stdio' && url) {
@@ -1297,8 +1341,12 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
           writeMcpToolsState(state)
           return { ok: true, tools, disabledTools }
         }
+      } else {
+        probeError = `MCP 服务返回 HTTP ${res.status}`
       }
-    } catch {}
+    } catch (err) {
+      probeError = `连接 MCP 服务失败: ${err.message}`
+    }
   }
 
   // 2. Stdio fetch
@@ -1307,20 +1355,31 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
     const args = entryCfg.args || found?.args || []
     if (cmd) {
       try {
-        const tools = await queryStdioToolsList(cmd, args, entryCfg.env || found?.env || {})
-        if (tools.length > 0) {
+        const probe = await queryStdioToolsList(cmd, args, entryCfg.env || found?.env || {})
+        if (probe.tools.length > 0) {
           if (!state[key]) state[key] = { disabledTools, cachedTools: [] }
-          state[key].cachedTools = tools
+          state[key].cachedTools = probe.tools
           writeMcpToolsState(state)
-          return { ok: true, tools, disabledTools }
+          return { ok: true, tools: probe.tools, disabledTools }
         }
-      } catch {}
+        probeError = probe.error
+      } catch (err) {
+        probeError = err.message
+      }
+    } else {
+      probeError = '该 MCP 服务没有配置启动命令'
     }
   }
 
   // 3. Return cached fallback
   if (cached.length > 0) {
     return { ok: true, tools: cached, disabledTools }
+  }
+
+  // A probe that never reached the server is an error, not an empty tool list;
+  // reporting ok:true here made the UI claim the server exposes no tools.
+  if (probeError) {
+    return { ok: false, tools: [], disabledTools, message: probeError }
   }
 
   return { ok: true, tools: [], disabledTools }
