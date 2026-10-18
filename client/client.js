@@ -4770,6 +4770,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// Survives the BrowseView unmount caused by opening the manage page, so
 		// returning from a plugin's MCP page lands back on the MCP tab.
 		mcpsOpen: false,
+		// Same reason: the MCP tab only renders when `mcps.length > 0`, so an
+		// empty first render after Back dropped it for a frame and Anthropic
+		// took the leftmost slot, producing a visible tab-bar jump.
+		mcps: null,
 		// Per-source "installed-first" sort snapshots. Kept on SESSION_STORE
 		// (module-level, not a component ref) so they survive the BrowseView
 		// unmount that happens when the manage page opens — returning from
@@ -4789,6 +4793,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [view, setViewRaw] = useState(() => SESSION_STORE.view);
 		const [manageFor, setManageForRaw] = useState(() => SESSION_STORE.manageFor);
 		const [manageTab, setManageTab] = useState(null);
+		const [manageConnector, setManageConnector] = useState(null);
 		const [prevView, setPrevViewRaw] = useState(() => SESSION_STORE.prevView);
 
 		// Persistent browse state across views and sidebar tab switching
@@ -5033,9 +5038,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			};
 		}, []);
 
-		const openManage = useCallback((record, fromView, tab) => {
+		const openManage = useCallback((record, fromView, tab, connector) => {
 			setManageFor(record ? record.name : null);
 			setManageTab(tab || null);
+			setManageConnector(connector || null);
 			setPrevView(fromView || view || { type: "browse" });
 		}, [view, setManageFor, setPrevView]);
 
@@ -5083,6 +5089,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				refreshState,
 				showToast,
 				initialTab: manageTab,
+				initialConnector: manageConnector,
 				onBack: closeManage,
 				onClose: closeManage,
 			}),
@@ -5532,7 +5539,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [addDialog, setAddDialog] = useState(false);
 		const [showAddMenu, setShowAddMenu] = useState(false);
 		const [mcpDialog, setMcpDialog] = useState(false);
-		const [mcps, setMcps] = useState([]);
+		const [mcps, setMcps] = useState(() => SESSION_STORE.mcps || []);
 		const [mcpsOpen, setMcpsOpenRaw] = useState(() => !!SESSION_STORE.mcpsOpen);
 		const setMcpsOpen = useCallback((v) => {
 			SESSION_STORE.mcpsOpen = v;
@@ -5557,7 +5564,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const refreshMcps = useCallback(async () => {
 			try {
 				const res = await api("/mcps");
-				setMcps(res.mcps || []);
+				SESSION_STORE.mcps = res.mcps || [];
+				setMcps(SESSION_STORE.mcps);
 			} catch {}
 		}, []);
 
@@ -5686,15 +5694,29 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					setEditMcp(opts.row);
 					setMcpDialog(true);
 				} else if (record) {
+					// Same destination the manage page's own gear opens: the
+					// connector's auth/config dialog, not the plugin page.
 					// Leave mcpsOpen set: it persists across the BrowseView unmount,
 					// so Back from the manage page returns to the MCP tab.
-					openManage(record, { type: "browse", sourceId: activeSourceId }, "connectors");
+					openManage(record, { type: "browse", sourceId: activeSourceId }, "connectors", name);
 				}
+			};
+
+			// Blank area of a plugin row opens the plugin's connectors page.
+			// Buttons inside the row keep their own handlers.
+			const onRowClick = canEdit ? undefined : (e) => {
+				if (e.target.closest("button, .cpm-mcp-tools-panel")) return;
+				if (record) openManage(record, { type: "browse", sourceId: activeSourceId }, "connectors");
 			};
 
 			return h("div", {
 				key,
-				style: { display: "flex", flexDirection: "column", padding: "12px 18px", borderTop: first ? "none" : "1px solid var(--cpm-border)" },
+				onClick: onRowClick,
+				style: {
+					display: "flex", flexDirection: "column", padding: "12px 18px",
+					borderTop: first ? "none" : "1px solid var(--cpm-border)",
+					cursor: canEdit ? undefined : "pointer",
+				},
 			},
 				h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
 					h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
@@ -7007,8 +7029,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						onScroll: updateTabsMask,
 					},
 						// MCP is a fixed entry pinned ahead of the source tabs; it has no
-						// drag handlers, so it can never be reordered.
-						mcps.length > 0 && h("button", {
+						// drag handlers, so it can never be reordered. It must also show
+						// when only plugin-provided servers exist — the page lists both.
+						(mcps.length > 0 || pluginMcpRows.length > 0) && h("button", {
 							key: "__mcps",
 							className: "cpm-tab" + (mcpsOpen ? " active" : ""),
 							onClick: () => { setMcpsOpen(true); refreshMcps(); setView({ type: "browse", sourceId: activeSourceId }); },
@@ -8886,7 +8909,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Manage Page ──────────────────────────────
-	function ManagePage({ record, state, rows, refreshState, showToast, onBack, onClose, initialTab }) {
+	function ManagePage({ record, state, rows, refreshState, showToast, onBack, onClose, initialTab, initialConnector }) {
 		const [tab, setTab] = useState(initialTab || "skills");
 		const [searchOpen, setSearchOpen] = useState(false);
 		const [tabQuery, setTabQuery] = useState("");
@@ -9357,6 +9380,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				lastResult: null,
 			});
 		};
+
+		// Opened from the MCP page's gear: land directly on that connector's
+		// auth/config dialog instead of making the user find the row again.
+		// The ref guard keeps it to once per mount, and leaves it retryable if
+		// the connector list has not arrived from the market yet.
+		const openedInitialConnectorRef = useRef(false);
+		useEffect(() => {
+			if (openedInitialConnectorRef.current || !initialConnector || !record) return;
+			const found = connectors.find((c) => (typeof c === "string" ? c : c.name) === initialConnector);
+			if (!found) return;
+			openedInitialConnectorRef.current = true;
+			openAuthDialog(initialConnector, found);
+		}, [record, connectors, initialConnector]);
 
 		useEffect(() => {
 			if (!authDialog && !confirmRemove) return;
