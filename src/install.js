@@ -14,9 +14,10 @@ import { gunzipSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
 import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir } from './store.js'
-import { materializePlugin, pullSource } from './market.js'
+import { materializePlugin, pullSource, pluginPath } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
+import { buildPluginIcons } from './icons.js'
 
 /** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
 export function resolveActiveProfileName() {
@@ -1538,6 +1539,22 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   const skillsDir = join(target, 'skills')
   mkdirSync(skillsDir, { recursive: true })
 
+  // Codex manifests may point at a skills collection outside the default skills/.
+  const declaredSkills = readPluginManifest(target)?.skills
+  const skillPaths = typeof declaredSkills === 'string' ? [declaredSkills] : (Array.isArray(declaredSkills) ? declaredSkills.filter((p) => typeof p === 'string' && p.startsWith('./')) : [])
+  for (const path of skillPaths) {
+    let root = pluginPath(target, path)
+    if (!existsSync(root) || resolve(root) === resolve(skillsDir)) continue
+    if (statSync(root).isFile()) root = dirname(root)
+    const dirs = existsSync(join(root, 'SKILL.md')) || existsSync(join(root, 'skill.md')) ? [root] : readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(root, e.name))
+    for (const dir of dirs) {
+      if (resolve(dir) === resolve(target)) continue // handled as a root skill below
+      if (!existsSync(join(dir, 'SKILL.md')) && !existsSync(join(dir, 'skill.md'))) continue
+      const dest = join(skillsDir, basename(dir))
+      if (resolve(dest) !== resolve(dir)) copyDir(dir, dest)
+    }
+  }
+
   // 1. If the plugin uses commands/ (Claude Code slash commands), mirror them into skills/
   const commandsDir = join(target, 'commands')
   if (existsSync(commandsDir)) {
@@ -1558,11 +1575,16 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   }
 
   // 2. If the plugin has a root SKILL.md, mirror it into skills/<pluginName>/SKILL.md
-  const rootSkillMd = join(target, 'SKILL.md')
-  if (existsSync(rootSkillMd)) {
+  const rootSkillMd = ['SKILL.md', 'skill.md'].map((f) => join(target, f)).find(existsSync)
+  if (rootSkillMd) {
     const rootSkillDir = join(skillsDir, pluginName)
     if (!existsSync(rootSkillDir)) {
       mkdirSync(rootSkillDir, { recursive: true })
+      // Keep relative scripts/references/assets usable when DSH copies the skill.
+      for (const entry of readdirSync(target, { withFileTypes: true })) {
+        if (entry.isDirectory() && !['skills', '.git', 'node_modules'].includes(entry.name)) copyDir(join(target, entry.name), join(rootSkillDir, entry.name))
+        else if (entry.isFile()) copyFileSync(join(target, entry.name), join(rootSkillDir, entry.name))
+      }
       const rawContent = readFileSync(rootSkillMd, 'utf8')
       const formatted = ensureSkillFrontmatter(rawContent, pluginName)
       writeFileSync(join(rootSkillDir, 'SKILL.md'), formatted, 'utf8')
@@ -1631,6 +1653,8 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
       const skillFile = join(skillsDir, entry.name, 'SKILL.md')
+      const altSkillFile = join(skillsDir, entry.name, 'skill.md')
+      if (!existsSync(skillFile) && existsSync(altSkillFile)) copyFileSync(altSkillFile, skillFile)
       if (existsSync(skillFile)) {
         const raw = readFileSync(skillFile, 'utf8')
         const fixed = ensureSkillFrontmatter(raw, entry.name)
@@ -1969,6 +1993,7 @@ export function installedDetails() {
       return { ...s, active, missingCommand }
     })
     const detail = existsSync(target) ? {
+      icons: buildPluginIcons(readPluginManifest(target), { sourceId: rec.sourceId, name: rec.name, dir: target }),
       skills: listSkills(target),
       agents: listAgents(target),
       prompts: listPrompts(target),

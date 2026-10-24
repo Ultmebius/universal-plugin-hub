@@ -9,11 +9,12 @@
  * 5. Single-plugin Standalone Repositories (root SKILL.md, plugin.json, skills/, commands/, agents/, .cursorrules)
  */
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from 'node:fs'
-import { join, basename, isAbsolute } from 'node:path'
+import { join, basename, dirname, isAbsolute } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, installedDir } from './store.js'
-import { safeSegment } from './market.js'
+import { safeSegment, pluginPath } from './market.js'
 import { parseAgentDefinition } from './agents-map.js'
+import { buildPluginIcons } from './icons.js'
 
 const DIR_PARSER_CACHE = new Map()
 const DIR_PARSER_CACHE_TTL = 20000 // 20s TTL for file scanning
@@ -65,7 +66,7 @@ function extractMdDescription(text) {
   return ''
 }
 
-function normalizeRow(row, sourceId) {
+function normalizeRow(row, sourceId, dir) {
   if (!row) return null
   const name = typeof row.name === 'string' ? row.name : (typeof row.identifier === 'string' ? row.identifier : '')
   if (!name || !/^[a-z0-9][a-z0-9._-]*$/i.test(name)) return null
@@ -76,12 +77,13 @@ function normalizeRow(row, sourceId) {
     : (typeof row.author === 'string' ? row.author : undefined)
 
   const meta = row.meta || {}
-  const displayName = row.displayName || meta.title || formatDisplayName(name)
+  const displayName = row.displayName || row.interface?.displayName || meta.title || formatDisplayName(name)
   const description = typeof row.description === 'string'
     ? row.description
-    : (typeof meta.description === 'string' ? meta.description : '')
+    : (row.interface?.shortDescription || meta.description || '')
 
-  const source = row.source || './'
+  const source = row.source?.source === 'local' ? row.source.path : (row.source || './')
+  if (row.source?.source === 'local' && (typeof source !== 'string' || !source.startsWith('./'))) return null
 
   return {
     id: `${sourceId}/${cleanName}`,
@@ -96,6 +98,7 @@ function normalizeRow(row, sourceId) {
     source,
     local: typeof source === 'string' && (source === './' || source.startsWith('./')),
     lspServers: row.lspServers || undefined,
+    icons: buildPluginIcons(row, { sourceId, name: cleanName, dir, source }),
   }
 }
 
@@ -133,7 +136,7 @@ export function readMarketplace(sourceId) {
 export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
   const rootSkill = existsSync(join(entryDir, 'SKILL.md')) || existsSync(join(entryDir, 'skill.md'))
   const hasSkill = rootSkill || existsSync(join(entryDir, 'skills')) || existsSync(join(entryDir, 'commands'))
-  const hasManifest = existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
+  const hasManifest = existsSync(join(entryDir, '.codex-plugin', 'plugin.json')) || existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
   const hasMcp = existsSync(join(entryDir, 'mcp.json')) || existsSync(join(entryDir, '.mcp.json')) || existsSync(join(entryDir, 'server.json'))
   const hasAgents = existsSync(join(entryDir, 'agents'))
   if (!hasSkill && !hasManifest && !hasMcp && !hasAgents) return null
@@ -144,34 +147,41 @@ export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
   let author = undefined
   let name = fallbackName
 
-  const manifest = readPluginManifest(entryDir)
+  const manifest = readPluginManifest(entryDir, false)
   if (manifest) {
     if (manifest.name) name = manifest.name
-    if (manifest.displayName) displayName = manifest.displayName
+    displayName = manifest.displayName || formatDisplayName(name)
     if (manifest.description) description = manifest.description
     if (manifest.version) version = manifest.version
     if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author?.name
-  } else if (existsSync(join(entryDir, 'SKILL.md'))) {
-    try { description = extractMdDescription(readFileSync(join(entryDir, 'SKILL.md'), 'utf8')) } catch {}
-  } else if (existsSync(join(entryDir, 'skill.md'))) {
-    try { description = extractMdDescription(readFileSync(join(entryDir, 'skill.md'), 'utf8')) } catch {}
+  } else if (rootSkill) {
+    try {
+      const raw = readFileSync(join(entryDir, existsSync(join(entryDir, 'SKILL.md')) ? 'SKILL.md' : 'skill.md'), 'utf8')
+      const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+      const meta = match ? parseYaml(match[1]) : null
+      if (typeof meta?.name === 'string') name = meta.name
+      displayName = formatDisplayName(name)
+      description = extractMdDescription(raw)
+    } catch {}
   } else if (existsSync(join(entryDir, 'README.md'))) {
     try { description = extractMdDescription(readFileSync(join(entryDir, 'README.md'), 'utf8')) } catch {}
   }
 
   return normalizeRow({
+    ...manifest,
     name,
     displayName,
     description,
     version,
     author,
     source: `./${fallbackName}`,
-  }, sourceId)
+  }, sourceId, entryDir)
 }
 
-function parseMarketplaceFromDisk(sourceId, cache) {
+export function parseMarketplaceFromDisk(sourceId, cache) {
   // 1. Check Multi-Plugin Manifest Candidates
   const manifestCandidates = [
+    join(cache, '.agents', 'plugins', 'marketplace.json'),
     join(cache, '.claude-plugin', 'marketplace.json'),
     join(cache, 'marketplace.json'),
     join(cache, 'claude-plugins.json'),
@@ -191,7 +201,21 @@ function parseMarketplaceFromDisk(sourceId, cache) {
         const content = JSON.parse(readFileSync(manifestPath, 'utf8'))
         // Case A: Claude / standard manifest with plugins array
         if (Array.isArray(content.plugins)) {
-          const rows = content.plugins.map((r) => normalizeRow(r, sourceId)).filter(Boolean)
+          const rows = content.plugins.map((r) => {
+            const source = r.source?.source === 'local' ? r.source.path : r.source
+            let manifest = null
+            let dir = null
+            if (typeof source === 'string' && source.startsWith('./')) {
+              dir = pluginPath(cache, source)
+            } else if (source && typeof source === 'object' && r.name) {
+              dir = pluginContentDir(sourceId, r.name, source, false)
+            }
+            if (dir) manifest = readPluginManifest(dir, false)
+            return normalizeRow({ ...manifest, ...r,
+              displayName: r.displayName || r.interface?.displayName || manifest?.displayName,
+              description: r.description || r.interface?.shortDescription || manifest?.description,
+            }, sourceId, dir)
+          }).filter(Boolean)
           if (rows.length > 0) return rows
         }
         // Case B: Direct array of plugin descriptors
@@ -239,6 +263,16 @@ function parseMarketplaceFromDisk(sourceId, cache) {
     return localRows
   }
 
+  // Explicit plugin manifests describe the whole package, including its skills.
+  if (existsSync(join(cache, '.codex-plugin', 'plugin.json')) || existsSync(join(cache, '.claude-plugin', 'plugin.json'))) {
+    const row = parsePluginRowFromDir(cache, sourceId, sourceId)
+    if (row) return [{ ...row, source: './' }]
+  }
+  if (existsSync(join(cache, 'SKILL.md')) || existsSync(join(cache, 'skill.md'))) {
+    const row = parsePluginRowFromDir(cache, sourceId, sourceId)
+    if (row) return [{ ...row, source: './' }]
+  }
+
   // 3. Monorepo subdirectories auto-discovery (plugins/*, skills/*, packages/*, tools/*, extensions/*)
   const monoDirs = ['plugins', 'skills', 'packages', 'tools', 'extensions']
   const monoRows = []
@@ -270,6 +304,7 @@ function parseMarketplaceFromDisk(sourceId, cache) {
   const rootDotMcp = join(cache, '.mcp.json')
   const rootServerJson = join(cache, 'server.json')
   const rootPluginJson = join(cache, '.claude-plugin', 'plugin.json')
+  const rootCodexPluginJson = join(cache, '.codex-plugin', 'plugin.json')
   const rootDirectPluginJson = join(cache, 'plugin.json')
   const rootCursorRules = join(cache, '.cursor', 'rules')
   const rootCursorRulesFile = join(cache, '.cursorrules')
@@ -284,6 +319,7 @@ function parseMarketplaceFromDisk(sourceId, cache) {
     || existsSync(rootDotMcp)
     || existsSync(rootServerJson)
     || existsSync(rootPluginJson)
+    || existsSync(rootCodexPluginJson)
     || existsSync(rootDirectPluginJson)
     || existsSync(rootCursorRules)
     || existsSync(rootCursorRulesFile)
@@ -314,26 +350,27 @@ function parseMarketplaceFromDisk(sourceId, cache) {
     }
 
     return [normalizeRow({
+      ...manifest,
       name,
       displayName,
       description,
       version,
       author,
       source: './',
-    }, sourceId)].filter(Boolean)
+    }, sourceId, cache)].filter(Boolean)
   }
 
   return []
 }
 
 /** Resolve the directory that holds a plugin's content (cache or remote checkout). */
-function pluginContentDir(sourceId, pluginName, source) {
+export function pluginContentDir(sourceId, pluginName, source, preferInstalled = true) {
   safeSegment(sourceId, 'source id')
   safeSegment(pluginName, 'plugin name')
 
   // Check if already installed (installed/ tree, not the market/ cache)
   const installed = installedDir(pluginName)
-  if (existsSync(installed)) return installed
+  if (preferInstalled && existsSync(installed)) return installed
 
   // Check if in local source cache (root or subdir)
   if (typeof source === 'string' && (source === './' || source === '.' || source === '')) {
@@ -342,7 +379,7 @@ function pluginContentDir(sourceId, pluginName, source) {
   }
   if (typeof source === 'string' && source.startsWith('./')) {
     const rel = source.replace(/^\.\//, '')
-    const dir = join(sourceCacheDir(sourceId), rel)
+    const dir = pluginPath(sourceCacheDir(sourceId), `./${rel}`)
     return existsSync(dir) ? dir : null
   }
 
@@ -352,7 +389,7 @@ function pluginContentDir(sourceId, pluginName, source) {
       const clean = String(source.url).replace(/^https?:\/\//, '').replace(/\.git$/, '')
       const remoteKey = clean.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'repo'
       const checkout = join(sourceCacheDir('remote'), remoteKey)
-      const dir = source.path ? join(checkout, String(source.path)) : checkout
+      const dir = source.path ? pluginPath(checkout, source.path) : checkout
       return existsSync(dir) ? dir : null
     }
   }
@@ -363,18 +400,26 @@ function pluginContentDir(sourceId, pluginName, source) {
 }
 
 /** Read manifest descriptor from candidate paths in a plugin directory. */
-export function readPluginManifest(dir) {
+export function readPluginManifest(dir, includeParent = true) {
+  const rootManifest = join(dir, 'plugin.json')
+  let portable = false
+  try {
+    const root = JSON.parse(readFileSync(rootManifest, 'utf8'))
+    portable = /^https:\/\/agent-plugins\.org\//.test(root.$schema || '') || Boolean(root.extensions?.['com.openai'])
+  } catch {}
   const candidates = [
+    ...(portable ? [rootManifest] : []),
+    join(dir, '.codex-plugin', 'plugin.json'),
     join(dir, '.claude-plugin', 'plugin.json'),
     join(dir, '.claude-plugin', 'marketplace.json'),
-    join(dir, 'plugin.json'),
+    rootManifest,
     join(dir, 'manifest.json'),
     join(dir, 'server.json'),
     join(dir, 'package.json'),
-    join(dir, '..', '.claude-plugin', 'plugin.json'),
+    ...(includeParent ? [join(dir, '..', '.claude-plugin', 'plugin.json'),
     join(dir, '..', '.claude-plugin', 'marketplace.json'),
     join(dir, '..', 'plugin.json'),
-    join(dir, '..', 'manifest.json'),
+    join(dir, '..', 'manifest.json')] : []),
   ]
 
   for (const p of candidates) {
@@ -408,7 +453,18 @@ export function readPluginManifest(dir) {
             lspServers: matched.lspServers,
           }
         }
-        return raw
+        const openai = raw.extensions?.['com.openai']
+        const settings = openai && typeof openai === 'object' ? openai : raw
+        return {
+          ...raw,
+          ...settings,
+          name: raw.name,
+          version: raw.version,
+          displayName: raw.displayName || settings.interface?.displayName,
+          description: raw.description || settings.interface?.shortDescription || settings.interface?.longDescription || '',
+          author: raw.author || settings.interface?.developerName,
+          homepage: raw.homepage || settings.interface?.websiteURL,
+        }
       } catch {}
     }
   }
@@ -433,10 +489,18 @@ export function listSkills(dir) {
   }
 
   // 1. Check skills/ subdirectory
-  const candidateSkillRoots = [join(dir, 'skills'), join(dir, '..', 'skills')]
+  const manifest = readPluginManifest(dir)
+  const declaredSkills = typeof manifest?.skills === 'string' ? [manifest.skills] : (Array.isArray(manifest?.skills) ? manifest.skills.filter((s) => typeof s === 'string' && s.startsWith('./')) : [])
+  const candidateSkillRoots = [...declaredSkills.map((p) => pluginPath(dir, p)), join(dir, 'skills'), join(dir, '..', 'skills')]
   for (const sRoot of candidateSkillRoots) {
     if (existsSync(sRoot)) {
       try {
+        if (statSync(sRoot).isFile()) {
+          if (/^skill\.md$/i.test(basename(sRoot))) addSkill(basename(dirname(sRoot)), sRoot)
+          continue
+        }
+        const rootMd = ['SKILL.md', 'skill.md'].map((f) => join(sRoot, f)).find(existsSync)
+        if (rootMd) addSkill(basename(sRoot), rootMd)
         for (const entry of readdirSync(sRoot, { withFileTypes: true })) {
           if (entry.isDirectory()) {
             if (['node_modules', '.git', '.agents', 'agents', 'commands', 'prompts', 'hooks', '.cursor', 'docs', 'assets', 'eval', 'staging', 'walkthroughs'].includes(entry.name)) continue
@@ -486,8 +550,8 @@ export function listSkills(dir) {
 
   // 4. Single-skill repository fallback: if no skills/ or commands/ exist, check root SKILL.md
   if (out.length === 0) {
-    const rootSkillMd = join(dir, 'SKILL.md')
-    if (existsSync(rootSkillMd)) {
+    const rootSkillMd = ['SKILL.md', 'skill.md'].map((f) => join(dir, f)).find(existsSync)
+    if (rootSkillMd) {
       let skillName = basename(dir)
       try {
         const raw = readFileSync(rootSkillMd, 'utf8')
@@ -499,7 +563,6 @@ export function listSkills(dir) {
   }
 
   // 5. Check manifest (plugin.json / package.json / marketplace.json "skills" / "commands")
-  const manifest = readPluginManifest(dir)
   if (manifest && out.length === 0) {
     if (Array.isArray(manifest.skills)) {
       for (const item of manifest.skills) {
@@ -941,6 +1004,7 @@ export function pluginDetail(sourceId, pluginName, source, rowFallback) {
     description: manifest?.description || '',
     author: manifest?.author?.name || (typeof manifest?.author === 'string' ? manifest.author : undefined),
     version: manifest?.version,
+    icons: buildPluginIcons(manifest, { sourceId, name: pluginName, dir, source }),
     skills: listSkills(dir),
     agents: listAgents(dir).map((a) => ({
       file: a.file,

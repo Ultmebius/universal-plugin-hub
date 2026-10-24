@@ -7,7 +7,7 @@
  */
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, relative, isAbsolute } from 'node:path'
 import { sourceCacheDir, safeRmDir } from './store.js'
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i
@@ -31,6 +31,15 @@ export function safeSegment(value, label) {
     throw new Error(`invalid ${label}: ${JSON.stringify(value)}`)
   }
   return value
+}
+
+/** Resolve a marketplace-relative path while keeping it inside its repository. */
+export function pluginPath(root, path) {
+  if (typeof path !== 'string' || !path || isAbsolute(path) || /^[a-z]:|^\\/i.test(path)) throw new Error(`unsafe plugin path: ${path}`)
+  const dir = resolve(root, path)
+  const rel = relative(resolve(root), dir)
+  if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) throw new Error(`unsafe plugin path: ${path}`)
+  return dir
 }
 
 function formatGitError(stderr, errorMsg) {
@@ -138,8 +147,7 @@ export async function materializePlugin(sourceId, pluginName, source, { refresh 
   if (typeof source === 'string' && (source === './' || source === '.' || source === '' || source.startsWith('./'))) {
     const cache = sourceCacheDir(sourceId)
     const rel = source.replace(/^\.\/?/, '')
-    if (rel && !/^[a-z0-9][a-z0-9/_-]*$/.test(rel)) throw new Error(`unsafe plugin path: ${source}`)
-    const dir = rel ? join(cache, rel) : cache
+    const dir = pluginPath(cache, source)
     if (!existsSync(dir)) throw new Error(`plugin ${pluginName} not found in cache (${rel || 'root'})`)
     return { dir }
   }
@@ -169,7 +177,7 @@ export async function materializePlugin(sourceId, pluginName, source, { refresh 
           await runGit(['reset', '--hard', 'FETCH_HEAD'], checkout)
         }
       })
-      const dir = source.path ? join(checkout, String(source.path)) : checkout
+      const dir = source.path ? pluginPath(checkout, source.path) : checkout
       if (!existsSync(dir)) throw new Error(`plugin ${pluginName}: path ${source.path} not found in remote repo`)
       return { dir }
     }

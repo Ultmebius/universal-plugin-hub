@@ -3,15 +3,15 @@
  * This layer only parses requests, calls service modules, and serializes.
  * Mutations are same-origin only.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
 import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
-  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, marketRoot,
+  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir,
 } from './store.js'
 import { ensureSourceCloned, pullSource, safeSegment } from './market.js'
-import { readMarketplace, pluginDetail, invalidateMarketplaceCache } from './parser.js'
+import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceCache } from './parser.js'
+import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
@@ -20,101 +20,6 @@ import {
 import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
 
 const API_PREFIX = '/universal-plugin-hub/api'
-
-function iconCacheDir() {
-  const dir = join(marketRoot(), 'icons')
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-  }
-  return dir
-}
-
-function hashUrl(url) {
-  return createHash('md5').update(String(url)).digest('hex')
-}
-
-const ICON_MEMORY_CACHE = new Map()
-const MAX_ICON_MEMORY_ENTRIES = 200
-
-function detectContentType(buffer, fallback) {
-  if (!buffer || buffer.length < 4) return fallback || 'image/png'
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png'
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg'
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif'
-  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return 'image/webp'
-  const head = buffer.slice(0, 100).toString('utf8').trim()
-  if (head.startsWith('<svg') || head.startsWith('<?xml')) return 'image/svg+xml'
-  return fallback || 'image/png'
-}
-
-async function getOrFetchIcon(url) {
-  if (!url || !/^https?:\/\//i.test(url)) {
-    throw new Error('Invalid icon URL')
-  }
-
-  const memCached = ICON_MEMORY_CACHE.get(url)
-  if (memCached) {
-    return memCached
-  }
-
-  const filename = `icon_${hashUrl(url)}.bin`
-  const filepath = join(iconCacheDir(), filename)
-
-  if (existsSync(filepath)) {
-    try {
-      const buffer = readFileSync(filepath)
-      if (buffer && buffer.length > 0) {
-        const item = { buffer, contentType: detectContentType(buffer, 'image/png') }
-        if (ICON_MEMORY_CACHE.size >= MAX_ICON_MEMORY_ENTRIES) {
-          const firstKey = ICON_MEMORY_CACHE.keys().next().value
-          ICON_MEMORY_CACHE.delete(firstKey)
-        }
-        ICON_MEMORY_CACHE.set(url, item)
-        return item
-      }
-    } catch {
-      // re-fetch on read error
-    }
-  }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 6000)
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      },
-    })
-
-    if (!res.ok) {
-      throw new Error(`Failed to fetch icon: ${res.status} ${res.statusText}`)
-    }
-
-    const arrayBuffer = await res.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    const contentType = detectContentType(buffer, res.headers.get('content-type') || 'image/png')
-
-    try {
-      writeFileSync(filepath, buffer)
-    } catch (e) {
-      console.warn('[universal-plugin-hub] Failed to save icon cache to disk:', e.message)
-    }
-
-    const item = { buffer, contentType }
-    if (ICON_MEMORY_CACHE.size >= MAX_ICON_MEMORY_ENTRIES) {
-      const firstKey = ICON_MEMORY_CACHE.keys().next().value
-      ICON_MEMORY_CACHE.delete(firstKey)
-    }
-    ICON_MEMORY_CACHE.set(url, item)
-
-    return item
-  } finally {
-    clearTimeout(timeout)
-  }
-}
 
 export function mountRoutes(webServer) {
   const r = webServer.register({
@@ -158,11 +63,29 @@ async function handle(req, res, prefix = API_PREFIX) {
         const { buffer, contentType } = await getOrFetchIcon(targetUrl)
         res.writeHead(200, {
           'Content-Type': contentType || 'image/png',
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': 'public, max-age=604800',
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
         })
         return res.end(buffer)
       } catch (err) {
         return sendJson(res, 502, { error: err.message })
+      }
+    }
+
+    if (method === 'GET' && path === '/plugin-icon') {
+      try {
+        const sourceId = safeSegment(url.searchParams.get('sourceId'), 'source id')
+        const name = safeSegment(url.searchParams.get('name'), 'plugin name')
+        const record = readState().plugins.find((p) => p.name === name && p.sourceId === sourceId)
+        const row = readMarketplace(sourceId).find((p) => p.name === name)
+        const dir = record && existsSync(installedDir(name)) ? installedDir(name) : (row ? pluginContentDir(sourceId, name, row.source, false) : null)
+        if (!dir) return sendJson(res, 404, { error: 'Plugin icon not found' })
+        const { buffer, contentType } = readLocalIcon(dir, url.searchParams.get('path'))
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=604800', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox" })
+        return res.end(buffer)
+      } catch {
+        return sendJson(res, 404, { error: 'Plugin icon not found' })
       }
     }
 

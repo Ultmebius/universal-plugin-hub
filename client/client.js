@@ -657,6 +657,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
+.cpm-icon-underlay > .cpm-card-icon {
+	width: 100%; height: 100%; margin: 0; border: 0; border-radius: inherit; box-shadow: none;
+}
 .cpm-card-icon img {
 	width: 100%;
 	height: 100%;
@@ -3009,7 +3012,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	"fiori": "data:image/png;base64,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",
 	"hana": "data:image/png;base64,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",
 	"microsoft": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYAAACOEfKtAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABTklEQVR42u3aMUoDURSF4RMRy4CdZXAZYqs2Ii7AnaQQGzei9rZKkKzAItgIYpUiRVCwsFSLiThGUil4le+v3pDmcvjfnAzcBMAfptN+eNpf7yXZKDLbVff8fpIkh5fpJtktMtfoaDs37w/Lcz9uJjkpMuhWksnsvJbkrMhc/eQjwCWX8HsI8IcDfBEJA381QIG6wgxkIAOhhV1hV5iBYKAScYUZCO9ABgpQiYCBSoSBAoQSYaASYSAEqEQYqESQ5OuG6iDNZmgFrlvncaG57miDOnza0s/pYzfNQncFxjlYfU6S14usJOkVmWva2cnDonfgXmpt6Q9m516S2yJz9ZMca13/A32JMBC+RBgoQCUiQCgRBgpQgEqEgUqEgQKEEmGgEmEgBKhEGKhEwEABKhEGQokwUIBKBAuY31AdpdnArEB7G35aaK4hbYB/wxsO4jG9a3r5rAAAAABJRU5ErkJggg==",
-	"playwright": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYAAACOEfKtAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABTklEQVR42u3aMUoDURSF4RMRy4CdZXAZYqs2Ii7AnaQQGzei9rZKkKzAItgIYpUiRVCwsFSLiThGUil4le+v3pDmcvjfnAzcBMAfptN+eNpf7yXZKDLbVff8fpIkh5fpJtktMtfoaDs37w/Lcz9uJjkpMuhWksnsvJbkrMhc/eQjwCWX8HsI8IcDfBEJA381QIG6wgxkIAOhhV1hV5iBYKAScYUZCO9ABgpQiYCBSoSBAoQSYaASYSAEqEQYqESQ5OuG6iDNZmgFrlvncaG57miDOnza0s/pYzfNQncFxjlYfU6S14usJOkVmWva2cnDonfgXmpt6Q9m516S2yJz9ZMca13/A32JMBC+RBgoQCUiQCgRBgpQgEqEgUqEgQKEEmGgEmEgBKhEGKhEwEABKhEGQokwUIBKBAuY31AdpdnArEB7G35aaK4hbYB/wxsO4jG9a3r5rAAAAABJRU5ErkJggg==",
+	"playwright": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgdmlld0JveD0iMCAwIDQwMCA0MDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xMzYuNDQ0IDIyMS41NTZDMTIzLjU1OCAyMjUuMjEzIDExNS4xMDQgMjMxLjYyNSAxMDkuNTM1IDIzOC4wMzJDMTE0Ljg2OSAyMzMuMzY0IDEyMi4wMTQgMjI5LjA4IDEzMS42NTIgMjI2LjM0OEMxNDEuNTEgMjIzLjU1NCAxNDkuOTIgMjIzLjU3NCAxNTYuODY5IDIyNC45MTVWMjE5LjQ4MUMxNTAuOTQxIDIxOC45MzkgMTQ0LjE0NSAyMTkuMzcxIDEzNi40NDQgMjIxLjU1NlpNMTA4Ljk0NiAxNzUuODc2TDYxLjA4OTUgMTg4LjQ4NEM2MS4wODk1IDE4OC40ODQgNjEuOTYxNyAxODkuNzE2IDYzLjU3NjcgMTkxLjM2TDEwNC4xNTMgMTgwLjY2OEMxMDQuMTUzIDE4MC42NjggMTAzLjU3OCAxODguMDc3IDk4LjU4NDcgMTk0LjcwNUMxMDguMDMgMTg3LjU1OSAxMDguOTQ2IDE3NS44NzYgMTA4Ljk0NiAxNzUuODc2Wk0xNDkuMDA1IDI4OC4zNDdDODEuNjU4MiAzMDYuNDg2IDQ2LjAyNzIgMjI4LjQzOCAzNS4yMzk2IDE4Ny45MjhDMzAuMjU1NiAxNjkuMjI5IDI4LjA3OTkgMTU1LjA2NyAyNy41IDE0NS45MjhDMjcuNDM3NyAxNDQuOTc5IDI3LjQ2NjUgMTQ0LjE3OSAyNy41MzM2IDE0My40NDZDMjQuMDQgMTQzLjY1NyAyMi4zNjc0IDE0NS40NzMgMjIuNzA3NyAxNTAuNzIxQzIzLjI4NzYgMTU5Ljg1NSAyNS40NjMzIDE3NC4wMTYgMzAuNDQ3MyAxOTIuNzIxQzQxLjIzMDEgMjMzLjIyNSA3Ni44NjU5IDMxMS4yNzMgMTQ0LjIxMyAyOTMuMTM0QzE1OC44NzIgMjg5LjE4NSAxNjkuODg1IDI4MS45OTIgMTc4LjE1MiAyNzIuODFDMTcwLjUzMiAyNzkuNjkyIDE2MC45OTUgMjg1LjExMiAxNDkuMDA1IDI4OC4zNDdaTTE2MS42NjEgMTI4LjExVjEzMi45MDNIMTg4LjA3N0MxODcuNTM1IDEzMS4yMDYgMTg2Ljk4OSAxMjkuNjc3IDE4Ni40NDcgMTI4LjExSDE2MS42NjFaIiBmaWxsPSIjMkQ0NTUyIi8+CjxwYXRoIGQ9Ik0xOTMuOTgxIDE2Ny41ODRDMjA1Ljg2MSAxNzAuOTU4IDIxMi4xNDQgMTc5LjI4NyAyMTUuNDY1IDE4Ni42NThMMjI4LjcxMSAxOTAuNDJDMjI4LjcxMSAxOTAuNDIgMjI2LjkwNCAxNjQuNjIzIDIwMy41NyAxNTcuOTk1QzE4MS43NDEgMTUxLjc5MyAxNjguMzA4IDE3MC4xMjQgMTY2LjY3NCAxNzIuNDk2QzE3My4wMjQgMTY3Ljk3MiAxODIuMjk3IDE2NC4yNjggMTkzLjk4MSAxNjcuNTg0Wk0yOTkuNDIyIDE4Ni43NzdDMjc3LjU3MyAxODAuNTQ3IDI2NC4xNDUgMTk4LjkxNiAyNjIuNTM1IDIwMS4yNTVDMjY4Ljg5IDE5Ni43MzYgMjc4LjE1OCAxOTMuMDMxIDI4OS44MzcgMTk2LjM2MkMzMDEuNjk4IDE5OS43NDEgMzA3Ljk3NiAyMDguMDYgMzExLjMwNyAyMTUuNDM2TDMyNC41NzIgMjE5LjIxMkMzMjQuNTcyIDIxOS4yMTIgMzIyLjczNiAxOTMuNDEgMjk5LjQyMiAxODYuNzc3Wk0yODYuMjYyIDI1NC43OTVMMTc2LjA3MiAyMjMuOTlDMTc2LjA3MiAyMjMuOTkgMTc3LjI2NSAyMzAuMDM4IDE4MS44NDIgMjM3Ljg2OUwyNzQuNjE3IDI2My44MDVDMjgyLjI1NSAyNTkuMzg2IDI4Ni4yNjIgMjU0Ljc5NSAyODYuMjYyIDI1NC43OTVaTTIwOS44NjcgMzIxLjEwMkMxMjIuNjE4IDI5Ny43MSAxMzMuMTY2IDE4Ni41NDMgMTQ3LjI4NCAxMzMuODY1QzE1My4wOTcgMTEyLjE1NiAxNTkuMDczIDk2LjAyMDMgMTY0LjAyOSA4NS4yMDRDMTYxLjA3MiA4NC41OTUzIDE1OC42MjMgODYuMTUyOSAxNTYuMjAzIDkxLjA3NDZDMTUwLjk0MSAxMDEuNzQ3IDE0NC4yMTIgMTE5LjEyNCAxMzcuNyAxNDMuNDVDMTIzLjU4NiAxOTYuMTI3IDExMy4wMzggMzA3LjI5IDIwMC4yODMgMzMwLjY4MkMyNDEuNDA2IDM0MS42OTkgMjczLjQ0MiAzMjQuOTU1IDI5Ny4zMjMgMjk4LjY1OUMyNzQuNjU1IDMxOS4xOSAyNDUuNzE0IDMzMC43MDEgMjA5Ljg2NyAzMjEuMTAyWiIgZmlsbD0iIzJENDU1MiIvPgo8cGF0aCBkPSJNMTYxLjY2MSAyNjIuMjk2VjIzOS44NjNMOTkuMzMyNCAyNTcuNTM3Qzk5LjMzMjQgMjU3LjUzNyAxMDMuOTM4IDIzMC43NzcgMTM2LjQ0NCAyMjEuNTU2QzE0Ni4zMDIgMjE4Ljc2MiAxNTQuNzEzIDIxOC43ODEgMTYxLjY2MSAyMjAuMTIzVjEyOC4xMUgxOTIuODY5QzE4OS40NzEgMTE3LjYxIDE4Ni4xODQgMTA5LjUyNiAxODMuNDIzIDEwMy45MDlDMTc4Ljg1NiA5NC42MTIgMTc0LjE3NCAxMDAuNzc1IDE2My41NDUgMTA5LjY2NUMxNTYuMDU5IDExNS45MTkgMTM3LjEzOSAxMjkuMjYxIDEwOC42NjggMTM2LjkzM0M4MC4xOTY2IDE0NC42MSA1Ny4xNzkgMTQyLjU3NCA0Ny41NzUyIDE0MC45MTFDMzMuOTYwMSAxMzguNTYyIDI2LjgzODcgMTM1LjU3MiAyNy41MDQ5IDE0NS45MjhDMjguMDg0NyAxNTUuMDYyIDMwLjI2MDUgMTY5LjIyNCAzNS4yNDQ1IDE4Ny45MjhDNDYuMDI3MiAyMjguNDMzIDgxLjY2MyAzMDYuNDgxIDE0OS4wMSAyODguMzQyQzE2Ni42MDIgMjgzLjYwMiAxNzkuMDE5IDI3NC4yMzMgMTg3LjYyNiAyNjIuMjkxSDE2MS42NjFWMjYyLjI5NlpNNjEuMDg0OCAxODguNDg0TDEwOC45NDYgMTc1Ljg3NkMxMDguOTQ2IDE3NS44NzYgMTA3LjU1MSAxOTQuMjg4IDg5LjYwODcgMTk5LjAxOEM3MS42NjE0IDIwMy43NDMgNjEuMDg0OCAxODguNDg0IDYxLjA4NDggMTg4LjQ4NFoiIGZpbGw9IiNFMjU3NEMiLz4KPHBhdGggZD0iTTM0MS43ODYgMTI5LjE3NEMzMjkuMzQ1IDEzMS4zNTUgMjk5LjQ5OCAxMzQuMDcyIDI2Mi42MTIgMTI0LjE4NUMyMjUuNzE2IDExNC4zMDQgMjAxLjIzNiA5Ny4wMjI0IDE5MS41MzcgODguODk5NEMxNzcuNzg4IDc3LjM4MzQgMTcxLjc0IDY5LjM4MDIgMTY1Ljc4OCA4MS40ODU3QzE2MC41MjYgOTIuMTYzIDE1My43OTcgMTA5LjU0IDE0Ny4yODQgMTMzLjg2NkMxMzMuMTcxIDE4Ni41NDMgMTIyLjYyMyAyOTcuNzA2IDIwOS44NjcgMzIxLjA5OEMyOTcuMDkzIDM0NC40NyAzNDMuNTMgMjQyLjkyIDM1Ny42NDQgMTkwLjIzOEMzNjQuMTU3IDE2NS45MTcgMzY3LjAxMyAxNDcuNSAzNjcuNzk5IDEzNS42MjVDMzY4LjY5NSAxMjIuMTczIDM1OS40NTUgMTI2LjA3OCAzNDEuNzg2IDEyOS4xNzRaTTE2Ni40OTcgMTcyLjc1NkMxNjYuNDk3IDE3Mi43NTYgMTgwLjI0NiAxNTEuMzcyIDIwMy41NjUgMTU4QzIyNi44OTkgMTY0LjYyOCAyMjguNzA2IDE5MC40MjUgMjI4LjcwNiAxOTAuNDI1TDE2Ni40OTcgMTcyLjc1NlpNMjIzLjQyIDI2OC43MTNDMTgyLjQwMyAyNTYuNjk4IDE3Ni4wNzcgMjIzLjk5IDE3Ni4wNzcgMjIzLjk5TDI4Ni4yNjIgMjU0Ljc5NkMyODYuMjYyIDI1NC43OTEgMjY0LjAyMSAyODAuNTc4IDIyMy40MiAyNjguNzEzWk0yNjIuMzc3IDIwMS40OTVDMjYyLjM3NyAyMDEuNDk1IDI3Ni4xMDcgMTgwLjEyNiAyOTkuNDIyIDE4Ni43NzNDMzIyLjczNiAxOTMuNDExIDMyNC41NzIgMjE5LjIwOCAzMjQuNTcyIDIxOS4yMDhMMjYyLjM3NyAyMDEuNDk1WiIgZmlsbD0iIzJFQUQzMyIvPgo8cGF0aCBkPSJNMTM5Ljg4IDI0Ni4wNEw5OS4zMzI0IDI1Ny41MzJDOTkuMzMyNCAyNTcuNTMyIDEwMy43MzcgMjMyLjQ0IDEzMy42MDcgMjIyLjQ5NkwxMTAuNjQ3IDEzNi4zM0wxMDguNjYzIDEzNi45MzNDODAuMTkxOCAxNDQuNjExIDU3LjE3NDIgMTQyLjU3NCA0Ny41NzA0IDE0MC45MTFDMzMuOTU1NCAxMzguNTYzIDI2LjgzNCAxMzUuNTcyIDI3LjUwMDEgMTQ1LjkyOUMyOC4wOCAxNTUuMDYzIDMwLjI1NTcgMTY5LjIyNCAzNS4yMzk3IDE4Ny45MjlDNDYuMDIyNSAyMjguNDMzIDgxLjY1ODMgMzA2LjQ4MSAxNDkuMDA1IDI4OC4zNDJMMTUwLjk4OSAyODcuNzE5TDEzOS44OCAyNDYuMDRaTTYxLjA4NDggMTg4LjQ4NUwxMDguOTQ2IDE3NS44NzZDMTA4Ljk0NiAxNzUuODc2IDEwNy41NTEgMTk0LjI4OCA4OS42MDg3IDE5OS4wMThDNzEuNjYxNSAyMDMuNzQzIDYxLjA4NDggMTg4LjQ4NSA2MS4wODQ4IDE4OC40ODVaIiBmaWxsPSIjRDY1MzQ4Ii8+CjxwYXRoIGQ9Ik0yMjUuMjcgMjY5LjE2M0wyMjMuNDE1IDI2OC43MTJDMTgyLjM5OCAyNTYuNjk4IDE3Ni4wNzIgMjIzLjk5IDE3Ni4wNzIgMjIzLjk5TDIzMi44OSAyMzkuODcyTDI2Mi45NzEgMTI0LjI4MUwyNjIuNjA3IDEyNC4xODVDMjI1LjcxMSAxMTQuMzA0IDIwMS4yMzIgOTcuMDIyNCAxOTEuNTMyIDg4Ljg5OTRDMTc3Ljc4MyA3Ny4zODM0IDE3MS43MzUgNjkuMzgwMiAxNjUuNzgzIDgxLjQ4NTdDMTYwLjUyNiA5Mi4xNjMgMTUzLjc5NyAxMDkuNTQgMTQ3LjI4NCAxMzMuODY2QzEzMy4xNzEgMTg2LjU0MyAxMjIuNjIzIDI5Ny43MDYgMjA5Ljg2NyAzMjEuMDk3TDIxMS42NTUgMzIxLjVMMjI1LjI3IDI2OS4xNjNaTTE2Ni40OTcgMTcyLjc1NkMxNjYuNDk3IDE3Mi43NTYgMTgwLjI0NiAxNTEuMzcyIDIwMy41NjUgMTU4QzIyNi44OTkgMTY0LjYyOCAyMjguNzA2IDE5MC40MjUgMjI4LjcwNiAxOTAuNDI1TDE2Ni40OTcgMTcyLjc1NloiIGZpbGw9IiMxRDhEMjIiLz4KPHBhdGggZD0iTTE0MS45NDYgMjQ1LjQ1MUwxMzEuMDcyIDI0OC41MzdDMTMzLjY0MSAyNjMuMDE5IDEzOC4xNjkgMjc2LjkxNyAxNDUuMjc2IDI4OS4xOTVDMTQ2LjUxMyAyODguOTIyIDE0Ny43NCAyODguNjg3IDE0OSAyODguMzQyQzE1Mi4zMDIgMjg3LjQ1MSAxNTUuMzY0IDI4Ni4zNDggMTU4LjMxMiAyODUuMTQ1QzE1MC4zNzEgMjczLjM2MSAxNDUuMTE4IDI1OS43ODkgMTQxLjk0NiAyNDUuNDUxWk0xMzcuNyAxNDMuNDUxQzEzMi4xMTIgMTY0LjMwNyAxMjcuMTEzIDE5NC4zMjYgMTI4LjQ4OSAyMjQuNDM2QzEzMC45NTIgMjIzLjM2NyAxMzMuNTU0IDIyMi4zNzEgMTM2LjQ0NCAyMjEuNTUxTDEzOC40NTcgMjIxLjEwMUMxMzYuMDAzIDE4OC45MzkgMTQxLjMwOCAxNTYuMTY1IDE0Ny4yODQgMTMzLjg2NkMxNDguNzk5IDEyOC4yMjUgMTUwLjMxOCAxMjIuOTc4IDE1MS44MzIgMTE4LjA4NUMxNDkuMzkzIDExOS42MzcgMTQ2Ljc2NyAxMjEuMjI4IDE0My43NzYgMTIyLjg2N0MxNDEuNzU5IDEyOS4wOTMgMTM5LjcyMiAxMzUuODk4IDEzNy43IDE0My40NTFaIiBmaWxsPSIjQzA0QjQxIi8+Cjwvc3ZnPgo=",
 	"pyright": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYAAACOEfKtAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABTklEQVR42u3aMUoDURSF4RMRy4CdZXAZYqs2Ii7AnaQQGzei9rZKkKzAItgIYpUiRVCwsFSLiThGUil4le+v3pDmcvjfnAzcBMAfptN+eNpf7yXZKDLbVff8fpIkh5fpJtktMtfoaDs37w/Lcz9uJjkpMuhWksnsvJbkrMhc/eQjwCWX8HsI8IcDfBEJA381QIG6wgxkIAOhhV1hV5iBYKAScYUZCO9ABgpQiYCBSoSBAoQSYaASYSAEqEQYqESQ5OuG6iDNZmgFrlvncaG57miDOnza0s/pYzfNQncFxjlYfU6S14usJOkVmWva2cnDonfgXmpt6Q9m516S2yJz9ZMca13/A32JMBC+RBgoQCUiQCgRBgpQgEqEgUqEgQKEEmGgEmEgBKhEGKhEwEABKhEGQokwUIBKBAuY31AdpdnArEB7G35aaK4hbYB/wxsO4jG9a3r5rAAAAABJRU5ErkJggg==",
 	"typescript": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYAAACOEfKtAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABTklEQVR42u3aMUoDURSF4RMRy4CdZXAZYqs2Ii7AnaQQGzei9rZKkKzAItgIYpUiRVCwsFSLiThGUil4le+v3pDmcvjfnAzcBMAfptN+eNpf7yXZKDLbVff8fpIkh5fpJtktMtfoaDs37w/Lcz9uJjkpMuhWksnsvJbkrMhc/eQjwCWX8HsI8IcDfBEJA381QIG6wgxkIAOhhV1hV5iBYKAScYUZCO9ABgpQiYCBSoSBAoQSYaASYSAEqEQYqESQ5OuG6iDNZmgFrlvncaG57miDOnza0s/pYzfNQncFxjlYfU6S14usJOkVmWva2cnDonfgXmpt6Q9m516S2yJz9ZMca13/A32JMBC+RBgoQCUiQCgRBgpQgEqEgUqEgQKEEmGgEmEgBKhEGKhEwEABKhEGQokwUIBKBAuY31AdpdnArEB7G35aaK4hbYB/wxsO4jG9a3r5rAAAAABJRU5ErkJggg==",
 	"github": "data:image/png;base64,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",
@@ -3153,13 +3156,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	function getGithubAvatarUrl(plugin) {
 		if (!plugin) return null;
-		const name = (plugin.name || "").toLowerCase();
 		const author = (typeof plugin.author === "string" ? plugin.author : (plugin.author && plugin.author.name) || "").trim().toLowerCase();
-
-		// 1. Direct local brand mapping by plugin name or author key (Instant 0ms)
-		for (const [k, url] of Object.entries(BRAND_ICONS)) {
-			if (name.includes(k) || author.includes(k)) return url;
-		}
 
 		let rawUrl = null;
 
@@ -3167,7 +3164,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		if (plugin.source && typeof plugin.source === "object" && typeof plugin.source.url === "string") {
 			const m = plugin.source.url.match(/github\.com\/([^/]+)/i);
 			if (m && m[1] && !m[1].toLowerCase().includes("anthropics")) {
-				rawUrl = `https://github.com/${m[1]}.png?size=80`;
+					rawUrl = `https://avatars.githubusercontent.com/${encodeURIComponent(m[1])}?s=80&v=4`;
 			}
 		}
 
@@ -3175,13 +3172,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		if (!rawUrl && typeof plugin.homepage === "string") {
 			const m = plugin.homepage.match(/github\.com\/([^/]+)/i);
 			if (m && m[1] && !m[1].toLowerCase().includes("anthropics")) {
-				rawUrl = `https://github.com/${m[1]}.png?size=80`;
+					rawUrl = `https://avatars.githubusercontent.com/${encodeURIComponent(m[1])}?s=80&v=4`;
 			}
 		}
 
 		// 4. Default author handle
 		if (!rawUrl && author && /^[a-z0-9_-]+$/i.test(author) && author !== "anthropic") {
-			rawUrl = `https://github.com/${author}.png?size=80`;
+				rawUrl = `https://avatars.githubusercontent.com/${encodeURIComponent(author)}?s=80&v=4`;
 		}
 
 		if (rawUrl) {
@@ -3190,6 +3187,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		return null;
 	}
+
+		const BRAND_ICON_KEYS = Object.keys(BRAND_ICONS).sort((a, b) => b.length - a.length).map((key) => ({ key, token: ` ${key.replace(/[^a-z0-9]+/g, " ")} ` }));
+		function getPluginIconCandidates(plugin, isDark) {
+			const declared = plugin?.icons?.[isDark ? "dark" : "light"] || [];
+			const name = String(plugin?.name || "").toLowerCase();
+			const author = String(typeof plugin?.author === "string" ? plugin.author : plugin?.author?.name || "").toLowerCase();
+			const nameText = ` ${name.replace(/[^a-z0-9]+/g, " ")} `;
+			const authorText = ` ${author.replace(/[^a-z0-9]+/g, " ")} `;
+			// Prefer the plugin's identity over its publisher (e.g. Playwright/Microsoft).
+			const brand = BRAND_ICON_KEYS.find((k) => nameText.includes(k.token)) || BRAND_ICON_KEYS.find((k) => authorText.includes(k.token));
+			let favicon = null;
+			try {
+				const home = new URL(plugin?.homepage);
+				if (/^https?:$/.test(home.protocol) && !/(^|\.)github\.com$/i.test(home.hostname)) favicon = `/universal-plugin-hub/api/icon?u=${encodeURIComponent(home.origin + "/favicon.ico")}`;
+			} catch {}
+			return [...new Set([...declared, brand ? BRAND_ICONS[brand.key] : null, getGithubAvatarUrl(plugin), favicon].filter((url) => typeof url === "string" && (url.startsWith("/universal-plugin-hub/api/") || url.startsWith("data:image/"))))];
+		}
 
 	function AnthropicIcon({ isDark }) {
 		return h("div", {
@@ -4157,13 +4171,41 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	const LOADED_AVATARS = new Set();
+		const FAILED_ICON_URLS = new Map();
 	function trackLoadedAvatar(url) {
 		if (!url || url.startsWith("data:")) return;
 		if (LOADED_AVATARS.size > 300) LOADED_AVATARS.clear();
 		LOADED_AVATARS.add(url);
 	}
 
-	function PluginIcon({ plugin, isDark }) {
+		function PluginIcon({ plugin, isDark, eager = false }) {
+			const candidates = useMemo(() => getPluginIconCandidates(plugin, isDark), [plugin, isDark]);
+			const embedded = candidates.find((url) => url.startsWith("data:image/"));
+			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark });
+			return candidates.length ? h(PluginIconImage, { key: candidates.join("|"), candidates, plugin, fallback, eager }) : fallback;
+		}
+
+		function PluginIconImage({ candidates, plugin, fallback, eager }) {
+			const [index, setIndex] = useState(0);
+			const [loaded, setLoaded] = useState("");
+			const avatarUrl = candidates.slice(index).find((url) => !(FAILED_ICON_URLS.get(url) > Date.now()));
+			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || LOADED_AVATARS.has(avatarUrl) || loaded === avatarUrl);
+			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
+				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, fallback),
+				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: "async", loading: eager ? "eager" : "lazy",
+					style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", borderRadius: "inherit", opacity: imgLoaded ? 1 : 0 },
+					onLoad: () => { trackLoadedAvatar(avatarUrl); setLoaded(avatarUrl); },
+					onError: () => {
+						if (FAILED_ICON_URLS.size >= 512) FAILED_ICON_URLS.delete(FAILED_ICON_URLS.keys().next().value);
+						FAILED_ICON_URLS.set(avatarUrl, Date.now() + 60_000);
+						setLoaded("");
+						setIndex(candidates.indexOf(avatarUrl) + 1);
+					},
+				}),
+			);
+		}
+
+		function PluginIconFallback({ plugin, isDark }) {
 		const name = (plugin?.name || "").toLowerCase();
 		const author = (typeof plugin?.author === "string" ? plugin.author : (plugin?.author && plugin.author.name) || "").trim().toLowerCase();
 		const badge = getPluginBadge(plugin || {});
@@ -4171,51 +4213,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// 1. Context7 official icon
 		if (name.includes("context7")) {
 			return h(Context7Icon, { isDark });
-		}
-
-		// 2. Brand or GitHub repo avatar with instant underlay placeholder (Check first!)
-		const avatarUrl = useMemo(() => getGithubAvatarUrl(plugin), [plugin]);
-		const isDataUri = avatarUrl && avatarUrl.startsWith("data:");
-		const isPreloaded = avatarUrl && (isDataUri || LOADED_AVATARS.has(avatarUrl));
-		const [imgFailed, setImgFailed] = useState(false);
-		const [imgLoaded, setImgLoaded] = useState(isPreloaded);
-
-		useEffect(() => {
-			setImgFailed(false);
-			setImgLoaded(avatarUrl ? (avatarUrl.startsWith("data:") || LOADED_AVATARS.has(avatarUrl)) : false);
-		}, [avatarUrl]);
-
-		if (avatarUrl && !imgFailed) {
-			return h("div", {
-				className: "cpm-card-icon",
-				style: {
-					position: "relative",
-					overflow: "hidden",
-				},
-			},
-				// Avatar image overlay
-				h("img", {
-					src: avatarUrl,
-					alt: plugin.displayName || plugin.name,
-					decoding: "async",
-					loading: "lazy",
-					style: {
-						position: "absolute",
-						inset: 0,
-						width: "100%",
-						height: "100%",
-						objectFit: "cover",
-						borderRadius: 9,
-						opacity: imgLoaded ? 1 : 0,
-						transition: "opacity 0.15s ease",
-					},
-					onLoad: () => {
-						trackLoadedAvatar(avatarUrl);
-						setImgLoaded(true);
-					},
-					onError: () => setImgFailed(true),
-				})
-			);
 		}
 
 		// 3. Anthropic official plugins (when no specific third-party brand was matched)
@@ -4270,6 +4267,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	function PluginCard({
 		plugin,
 		installed,
+			eagerIcon = false,
 		isDark,
 		onMouseEnter,
 		onMouseLeave,
@@ -4283,7 +4281,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			onMouseLeave,
 			onClick,
 		},
-			h(PluginIcon, { plugin, isDark }),
+				h(PluginIcon, { plugin, isDark, eager: eagerIcon }),
 			h("div", { className: "cpm-card-body" },
 				h("div", { className: "cpm-card-name" },
 					h("span", { className: "cpm-card-name-text" }, plugin.displayName || plugin.name),
@@ -7196,7 +7194,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							),
 							showAddMenu && h("div", { className: "cpm-menu-pop", style: { top: 34, right: 0, minWidth: 150 } },
 								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setAddDialog({ initialPhase: "url" }); } }, "添加插件市场"),
-								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setAddDialog({ initialPhase: "upload" }); } }, "上传插件"),
+								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setAddDialog({ initialPhase: "upload" }); } }, "上传插件 / Skills"),
 								h("div", { className: "cpm-menu-item", onClick: () => { setShowAddMenu(false); setEditMcp(null); setMcpDialog(true); } }, "添加 MCP"),
 							),
 						),
@@ -7292,11 +7290,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				visible.length === 0 && h("div", { className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: "30px" } },
 					loadingSourceId === activeSourceId ? "正在加载插件…" : (query.trim() ? "没有找到匹配的插件" : "该插件源暂无插件")
 				),
-				visible.map((p) => {
+				visible.map((p, index) => {
 					const installed = currentSourceInstalledNames.has(p.name);
 					return h(PluginCard, {
 						key: p.id,
 						plugin: p,
+						eagerIcon: index < 12,
 						installed,
 						isDark,
 						onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget),
@@ -7523,7 +7522,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const customInputRef = useRef(null);
 		const uploadInputRef = useRef(null);
 
-		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.zip$/i.test(String(str || "").trim());
+		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.(zip|tgz|tar\.gz)$/i.test(String(str || "").trim().replace(/^["']|["']$/g, ""));
 
 		const handleInspectLocal = async (rawPath) => {
 			if (busy) {
@@ -7540,14 +7539,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					body: JSON.stringify(payload)
 				});
 				if (!res.ok) {
-					showToast("不符合规范，不可以上传", res.error || "最低限度规范：根目录下需存在 skill.md 或有效插件配置", { restart: false });
+					showToast("无法解析导入内容", res.error || "请选择含 SKILL.md 的技能、Claude/Codex 插件或插件市场", { restart: false });
 					return;
 				}
 				if (res.exists) {
-					setLocalDuplicate({ plugin: res.plugin, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
+					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
 					setPhase("local-duplicate");
 				} else {
-					setLocalPreview({ plugin: res.plugin, payload });
+					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload });
 					setPhase("local-preview");
 				}
 			} catch (e) {
@@ -7572,6 +7571,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast("正在解析中", "请等待当前解析完成后再操作", { restart: false });
 				return;
 			}
+			if (!/\.(zip|tgz|tar\.gz)$/i.test(file.name) && !/^skill\.md$/i.test(file.name)) {
+				showToast("不支持的文件格式", "请选择 .zip、.tgz、.tar.gz 或 SKILL.md", { restart: false });
+				return;
+			}
 			if (file.size > 22 * 1024 * 1024) {
 				showToast("压缩包过大", "本地压缩包上限 22MB，请解压后改用文件夹路径导入", { restart: false });
 				return;
@@ -7585,14 +7588,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					body: JSON.stringify(payload)
 				});
 				if (!res.ok) {
-					showToast("不符合规范，不可以上传", res.error || "最低限度规范：根目录下需存在 skill.md 或有效插件配置", { restart: false });
+					showToast("无法解析导入内容", res.error || "请选择含 SKILL.md 的技能、Claude/Codex 插件或插件市场", { restart: false });
 					return;
 				}
 				if (res.exists) {
-					setLocalDuplicate({ plugin: res.plugin, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
+					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
 					setPhase("local-duplicate");
 				} else {
-					setLocalPreview({ plugin: res.plugin, payload });
+					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload });
 					setPhase("local-preview");
 				}
 			} catch (e) {
@@ -7609,7 +7612,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					method: "POST",
 					body: JSON.stringify({ ...payload, overwrite, sourceName })
 				});
-				showToast("本地插件已添加", `成功导入「${res.plugin.displayName || res.plugin.name}」`, { restart: false });
+				showToast("导入成功", res.plugins?.length > 1 ? `成功导入 ${res.plugins.length} 项插件 / Skills` : `成功导入「${res.plugin.displayName || res.plugin.name}」`, { restart: false });
 				await onAdded("local", true);
 				setUrl("");
 				setPhase(initialPhase || "url");
@@ -7700,10 +7703,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return msg;
 		};
 
-		const ensure = async () => {
-			const raw = url.trim();
+		const ensure = async (input) => {
+			if (busy) return;
+			const raw = (typeof input === "string" ? input : url).trim();
 			if (!raw) {
-				showToast("请输入地址或拖入插件", "支持 Git 仓库、本地插件文件夹或 .zip 压缩包", { restart: false });
+				showToast("请输入地址或上传文件", "支持 Claude / Codex 仓库、插件 / Skills 文件夹及压缩包", { restart: false });
 				return;
 			}
 			if (isLocalPath(raw)) {
@@ -7767,15 +7771,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const file = e.dataTransfer?.files?.[0];
 					const text = e.dataTransfer?.getData("text/plain")?.trim();
 					const dropPath = file?.path || text;
-					if (!dropPath && file && /\.(zip|tgz|tar\.gz)$/i.test(file.name)) {
+					if (!dropPath && file && (/\.(zip|tgz|tar\.gz)$/i.test(file.name) || /^skill\.md$/i.test(file.name))) {
 						// Web drop: no filesystem path available — upload the zip content instead.
-						setUrl(file.name);
+						setUrl("");
 						handleInspectLocalUpload(file);
 					} else if (!dropPath && file) {
 						showToast("无法读取拖入内容", "浏览器环境拿不到文件夹路径，请将路径粘贴到输入框，或改为拖入 .zip 压缩包", { restart: false });
 					} else if (dropPath) {
 						setUrl(dropPath);
-						handleInspectLocal(dropPath);
+						if (/^https?:\/\//i.test(dropPath)) ensure(dropPath); else handleInspectLocal(dropPath);
 					}
 				},
 			},
@@ -7785,11 +7789,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("polyline", { points: "17 8 12 3 7 8" }),
 						h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
 					),
-					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14 } }, "释放以上传并解析插件"),
-					h("div", { className: "cpm-dropzone-sub" }, "支持文件夹或 .tar.gz、.tgz、.zip")
+					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14 } }, "释放以解析插件 / Skills"),
+					h("div", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件、市场、Skills 和 SKILL.md")
 				),
 				phase === "upload" && [
-					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "上传插件"),
+					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "上传插件 / Skills"),
 					h("div", {
 						className: "cpm-dropzone",
 						key: "dz",
@@ -7797,14 +7801,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						onClick: () => uploadInputRef.current && uploadInputRef.current.click(),
 					},
 						h("div", { className: "cpm-dropzone-icon" }, h(UploadDropIcon)),
-						h("div", { className: "cpm-dropzone-title" }, "将插件拖放到此处，或点击上传"),
-						h("div", { className: "cpm-dropzone-sub" }, "支持文件夹或 .tar.gz、.tgz、.zip，大小上限 22MB"),
+						h("div", { className: "cpm-dropzone-title" }, "拖入插件 / Skills，或点击上传"),
+						h("div", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件及市场、Skills；.zip / .tgz / .tar.gz / SKILL.md，上限 22MB"),
 					),
 					h("input", {
 						key: "file",
 						ref: uploadInputRef,
 						type: "file",
-						accept: ".zip,.tgz,.tar.gz",
+						accept: ".zip,.tgz,.tar.gz,.md",
+						"aria-label": "选择插件、市场或 Skills 文件",
 						style: { display: "none" },
 						onChange: (e) => {
 							const f = e.target.files && e.target.files[0];
@@ -7812,17 +7817,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							e.target.value = "";
 						},
 					}),
+					h("div", { className: "cpm-field", key: "path" },
+						h("label", { htmlFor: "cpm-upload-path" }, "本地路径或 Git 仓库地址"),
+						h("input", { id: "cpm-upload-path", className: "cpm-input", value: url, autoComplete: "off", autoCorrect: "off", autoCapitalize: "none", spellCheck: false,
+							placeholder: "粘贴插件 / Skills 文件夹路径或仓库地址", onChange: (e) => setUrl(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && !busy && url.trim()) ensure(); } }),
+					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => uploadInputRef.current && uploadInputRef.current.click() }, busy ? "解析中…" : "添加插件"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => url.trim() ? ensure() : uploadInputRef.current && uploadInputRef.current.click() }, busy ? "解析中…" : "解析并添加"),
 					),
 				],
 				phase === "url" && [
 					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "添加插件市场"),
 					h("div", { className: "cpm-field", key: "f" },
-						h("label", { style: { marginBottom: 6, display: "block" } }, "Git 仓库地址"),
+						h("label", { htmlFor: "cpm-source-url", style: { marginBottom: 6, display: "block" } }, "Git 仓库地址（Claude / Codex 市场或插件）"),
 						h("div", { className: "cpm-input-wrap" },
 							h("input", {
+								id: "cpm-source-url",
 								className: "cpm-input",
 								type: "text",
 								autoComplete: "off",
@@ -7845,7 +7856,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				],
 				phase === "local-preview" && localPreview && [
 					h("div", { className: "cpm-source-header", key: "header" },
-						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, "发现本地插件"),
+						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, "发现插件 / Skills"),
 						h("div", { className: "cpm-source-meta-row" },
 							h("div", { className: "cpm-source-live-dot" }),
 							h("span", { className: "cpm-source-count-text", style: { maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
@@ -7886,6 +7897,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
 								h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.skillsCount || 0} 个技能`),
 								localPreview.plugin.agentsCount > 0 && h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.agentsCount} 个智能体`),
+							),
+							localPreview.plugins?.length > 1 && h("ul", { style: { margin: "8px 0 0", paddingLeft: 18, maxHeight: 160, overflowY: "auto", fontSize: 12 } },
+								localPreview.plugins.map((p) => h("li", { key: p.name }, p.displayName || p.name)),
 							),
 						),
 					),
@@ -7928,13 +7942,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						)
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase("url"); } }, "返回"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
 						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => handleImportLocal(localPreview.payload, false, localName) }, busy ? "正在导入…" : "确认添加"),
 					),
 				],
 				phase === "local-duplicate" && localDuplicate && [
 					h("div", { className: "cpm-source-header", key: "header" },
-						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title", style: { color: "#d97706" } }, "已存在同名插件"),
+						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title", style: { color: "#d97706" } }, "存在同名插件 / Skills"),
 						h("div", { className: "cpm-source-meta-row" },
 							h("span", { className: "cpm-source-repo-text" }, localDuplicate.plugin.name),
 							h("span", { className: "cpm-source-meta-sep" }, "·"),
@@ -7961,10 +7975,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, "准备覆盖"),
 							),
 						),
-						h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)", lineHeight: 1.4 } }, "覆盖更新将用新版本文件替换现有本地插件，是否确认继续？"),
+						h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)", lineHeight: 1.4 } }, "覆盖更新将替换本次导入中所有同名插件 / Skills 的文件。"),
+						localDuplicate.plugins?.length > 1 && h("ul", { style: { maxHeight: 160, overflowY: "auto", fontSize: 12 } }, localDuplicate.plugins.map((p) => h("li", { key: p.name }, p.displayName || p.name))),
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalDuplicate(null); setPhase("url"); } }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalDuplicate(null); setPhase(initialPhase || "url"); } }, "取消"),
 						h("button", {
 							className: "cpm-btn cpm-btn-warning",
 							disabled: busy,
