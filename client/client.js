@@ -7411,7 +7411,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			confirmRemoveSource && h("div", { className: "cpm-dialog", onClick: () => setConfirmRemoveSource(null) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
-					h("div", { className: "cpm-dialog-title" }, `删除插件源「${confirmRemoveSource.name}」？`),
+					h("div", { className: "cpm-dialog-title" }, `删除插件源「${confirmRemoveSource.name}」`),
 					h("div", { className: "cpm-field", style: { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" } },
 						"将从插件市场中移除该源及其分类标签。如需再次使用，可随时通过右上角「+」重新添加。",
 					),
