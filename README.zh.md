@@ -74,6 +74,8 @@ dsh plugin add universal-plugin-hub
 | Codex 插件 | `.codex-plugin/plugin.json` |
 | Agent Skills | `SKILL.md` 文件、技能目录或多个技能目录组成的集合 |
 
+同一插件或插件市场同时包含 Claude 与 Codex 描述文件时，优先按 Claude 规范解析。
+
 文件上传支持 `.zip`、`.tgz`、`.tar.gz` 和 `SKILL.md`，单次上传上限为 22 MB。较大的压缩包可以解压后通过目录路径导入。含脚本或其他资源的技能请导入完整目录或压缩包，以保留可用的相对路径。
 
 ## 本地数据与目录结构

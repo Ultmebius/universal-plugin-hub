@@ -74,6 +74,8 @@ After installing a plugin with Skills or Commands, find its skills in the DSH co
 | Codex plugin | `.codex-plugin/plugin.json` |
 | Agent Skills | A `SKILL.md` file, a skill directory, or a collection of skill directories |
 
+When a plugin or marketplace includes both Claude and Codex descriptors, the Claude format takes precedence.
+
 File uploads accept `.zip`, `.tgz`, `.tar.gz`, and `SKILL.md`, up to 22 MB per upload. Larger archives can be extracted and imported through a directory path. Import the complete directory or archive for skills with scripts or other resources so relative paths remain usable.
 
 ## Data and directory layout

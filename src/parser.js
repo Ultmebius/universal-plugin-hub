@@ -181,8 +181,8 @@ export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
 export function parseMarketplaceFromDisk(sourceId, cache) {
   // 1. Check Multi-Plugin Manifest Candidates
   const manifestCandidates = [
-    join(cache, '.agents', 'plugins', 'marketplace.json'),
     join(cache, '.claude-plugin', 'marketplace.json'),
+    join(cache, '.agents', 'plugins', 'marketplace.json'),
     join(cache, 'marketplace.json'),
     join(cache, 'claude-plugins.json'),
     join(cache, 'registry.json'),
@@ -401,7 +401,7 @@ export function pluginContentDir(sourceId, pluginName, source, preferInstalled =
   return existsSync(fallback) ? fallback : null
 }
 
-/** Read manifest descriptor from candidate paths in a plugin directory. */
+/** Read plugin metadata with Claude precedence when multiple formats coexist. */
 export function readPluginManifest(dir, includeParent = true) {
   const rootManifest = join(dir, 'plugin.json')
   let portable = false
@@ -410,9 +410,9 @@ export function readPluginManifest(dir, includeParent = true) {
     portable = /^https:\/\/agent-plugins\.org\//.test(root.$schema || '') || Boolean(root.extensions?.['com.openai'])
   } catch {}
   const candidates = [
+    join(dir, '.claude-plugin', 'plugin.json'),
     ...(portable ? [rootManifest] : []),
     join(dir, '.codex-plugin', 'plugin.json'),
-    join(dir, '.claude-plugin', 'plugin.json'),
     join(dir, '.claude-plugin', 'marketplace.json'),
     rootManifest,
     join(dir, 'manifest.json'),
