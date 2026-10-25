@@ -6,7 +6,7 @@
  * user-facing message; network/git failures are retryable at the UI level.
  */
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import { sourceCacheDir, safeRmDir } from './store.js'
 
@@ -40,6 +40,31 @@ export function pluginPath(root, path) {
   const rel = relative(resolve(root), dir)
   if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) throw new Error(`unsafe plugin path: ${path}`)
   return dir
+}
+
+/** A marketplace can point back to its own checkout (including a subdirectory). */
+export function sourceRepositoryDir(cache, source) {
+  if (!source || !['url', 'git-subdir'].includes(source.source) || typeof source.url !== 'string') return null
+  const repoKey = (value) => {
+    try {
+      const url = new URL(value)
+      return `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase()}`
+    } catch { return null }
+  }
+  try {
+    const config = readFileSync(join(cache, '.git', 'config'), 'utf8')
+    const origin = config.match(/\[remote "origin"\]([^\[]*)/)?.[1].match(/^\s*url\s*=\s*(.+)$/m)?.[1].trim()
+    if (!origin || !repoKey(source.url) || repoKey(origin) !== repoKey(source.url)) return null
+    const head = readFileSync(join(cache, '.git', 'HEAD'), 'utf8').trim()
+    // Reuse only the requested revision; another branch is a different plugin snapshot.
+    if (source.ref && head !== `ref: refs/heads/${source.ref}` && head !== source.ref) return null
+    if (source.sha) {
+      const commit = head.startsWith('ref: ') ? readFileSync(join(cache, '.git', head.slice(5)), 'utf8').trim() : head
+      if (commit !== source.sha) return null
+    }
+    const dir = source.path ? pluginPath(cache, source.path) : cache
+    return existsSync(dir) ? dir : null
+  } catch { return null }
 }
 
 function formatGitError(stderr, errorMsg) {

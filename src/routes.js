@@ -9,7 +9,7 @@ import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
   readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir,
 } from './store.js'
-import { ensureSourceCloned, pullSource, safeSegment } from './market.js'
+import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from './market.js'
 import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceCache } from './parser.js'
 import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
@@ -94,7 +94,7 @@ async function handle(req, res, prefix = API_PREFIX) {
       const state = readState()
       const details = installedDetails()
       return sendJson(res, 200, {
-        sources: state.sources,
+        sources: state.sources.map((source) => source.id === 'local' ? { ...source, pluginCount: readMarketplace('local').length } : source),
         plugins: details.map((p) => ({
           ...p,
           skillsEnabled: isScanDirRegistered(join(installedDir(p.name), 'skills')),
@@ -424,6 +424,14 @@ async function handle(req, res, prefix = API_PREFIX) {
       const rows = readMarketplace(sourceId)
       let row = rows.find((r) => r.name === pluginName)
       let detail = pluginDetail(sourceId, pluginName, row ? row.source : undefined, row)
+      // An external plugin may not have been installed or previewed before.
+      // Fetch its content for the preview, then enrich the sparse marketplace row.
+      if (!detail && row?.source && typeof row.source === 'object') {
+        await materializePlugin(sourceId, pluginName, row.source)
+        invalidateMarketplaceCache(sourceId)
+        row = readMarketplace(sourceId).find((r) => r.name === pluginName) || row
+        detail = pluginDetail(sourceId, pluginName, row.source, row)
+      }
       if (!detail) {
         const inst = installedDetails().find((p) => p.name === pluginName)
         if (inst) {

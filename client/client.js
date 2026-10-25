@@ -3164,7 +3164,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		if (plugin.source && typeof plugin.source === "object" && typeof plugin.source.url === "string") {
 			const m = plugin.source.url.match(/github\.com\/([^/]+)/i);
 			if (m && m[1] && !m[1].toLowerCase().includes("anthropics")) {
-					rawUrl = `https://avatars.githubusercontent.com/${encodeURIComponent(m[1])}?s=80&v=4`;
+				rawUrl = `https://github.com/${encodeURIComponent(m[1])}.png?size=80`;
 			}
 		}
 
@@ -3172,17 +3172,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		if (!rawUrl && typeof plugin.homepage === "string") {
 			const m = plugin.homepage.match(/github\.com\/([^/]+)/i);
 			if (m && m[1] && !m[1].toLowerCase().includes("anthropics")) {
-					rawUrl = `https://avatars.githubusercontent.com/${encodeURIComponent(m[1])}?s=80&v=4`;
+				rawUrl = `https://github.com/${encodeURIComponent(m[1])}.png?size=80`;
 			}
 		}
 
 		// 4. Default author handle
 		if (!rawUrl && author && /^[a-z0-9_-]+$/i.test(author) && author !== "anthropic") {
-				rawUrl = `https://avatars.githubusercontent.com/${encodeURIComponent(author)}?s=80&v=4`;
+				rawUrl = `https://github.com/${encodeURIComponent(author)}.png?size=80`;
 		}
 
 		if (rawUrl) {
-			return `/universal-plugin-hub/api/icon?u=${encodeURIComponent(rawUrl)}`;
+			return `/universal-plugin-hub/api/icon?v=2&u=${encodeURIComponent(rawUrl)}`;
 		}
 
 		return null;
@@ -3196,7 +3196,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const nameText = ` ${name.replace(/[^a-z0-9]+/g, " ")} `;
 			const authorText = ` ${author.replace(/[^a-z0-9]+/g, " ")} `;
 			// Prefer the plugin's identity over its publisher (e.g. Playwright/Microsoft).
-			const brand = BRAND_ICON_KEYS.find((k) => nameText.includes(k.token)) || BRAND_ICON_KEYS.find((k) => authorText.includes(k.token));
+			const brand = BRAND_ICON_KEYS.find((k) => nameText.includes(k.token)) || BRAND_ICON_KEYS.find((k) => authorText.includes(k.token) || author.replace(/[^a-z0-9]/g, "") === k.key.replace(/[^a-z0-9]/g, ""));
 			let favicon = null;
 			try {
 				const home = new URL(plugin?.homepage);
@@ -4983,21 +4983,21 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			refreshState();
 		}, [refreshState]);
 
-		// Auto-refresh marketplace sources (pull latest catalog) in background on launch.
-		// Keyed by the actual source-id set so a stale cached state (localStorage)
-		// cannot lock the refresh out once the real sources load from the server.
-		const autoRefreshedRef = useRef(null);
+		// Read cached catalogs immediately, then update Git sources in the background.
+		const sourceIdsKey = (state.sources || []).map((s) => s.id).sort().join(",");
 		useEffect(() => {
 			if (!state.sources || state.sources.length === 0) return;
-			// Sort the ids: a tab-bar reorder changes the ORDER but not the SET of
-			// sources. Keying by the unordered join means reorders don't re-run the
-			// whole market refresh (which was also spamming /market/refresh failures).
-			const sourceKey = state.sources.map((s) => s.id).sort().join(",");
-			if (autoRefreshedRef.current === sourceKey) return;
-			autoRefreshedRef.current = sourceKey;
 			let isMounted = true;
 			(async () => {
+				await Promise.allSettled(state.sources.map(async (s) => {
+					try {
+						const res = await api("/market?sourceId=" + encodeURIComponent(s.id));
+						if (isMounted && Array.isArray(res?.plugins)) setRows((prev) => ({ ...(prev || {}), [s.id]: res.plugins }));
+					} catch {}
+				}));
 				for (const s of state.sources) {
+					if (!isMounted) break;
+					if (s.id === "local") continue;
 					try {
 						const res = await api("/market/refresh", {
 							method: "POST",
@@ -5009,14 +5009,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					} catch {}
 				}
 			})();
-			return () => {
-				// Deliberately do NOT touch toastTimerRef here. Clearing the toast
-				// timer on every state.sources change cancelled the `setToast(null)`
-				// timeout that showToast had just armed, so the reorder toast stayed
-				// visible forever.
-				isMounted = false;
-			};
-		}, [state.sources]);
+			return () => { isMounted = false; };
+		}, [sourceIdsKey]);
 
 		const onInstalled = useCallback(() => {
 			refreshState();
@@ -5512,6 +5506,43 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Browse & Detail Container ──────────────────────────────
+	function McpOverview({ serverRows, expandedServerRows, pluginRows }) {
+		const rootRef = useRef(null);
+		const measureRef = useRef(null);
+		const [reservedHeight, setReservedHeight] = useState(0);
+		const reserveSpace = serverRows.length > 0 && pluginRows.length > 0;
+		useSafeLayoutEffect(() => {
+			const viewport = rootRef.current?.parentElement;
+			if (!viewport || !reserveSpace) { setReservedHeight(0); return; }
+			const measure = () => {
+				const style = getComputedStyle(viewport);
+				const available = viewport.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+				const next = Math.max(0, Math.round(available / 2), measureRef.current?.offsetHeight || 0);
+				setReservedHeight((prev) => prev === next ? prev : next);
+			};
+			measure();
+			const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+			observer?.observe(viewport);
+			if (measureRef.current) observer?.observe(measureRef.current);
+			window.addEventListener("resize", measure);
+			return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+		}, [reserveSpace]);
+		return h("div", { ref: rootRef, className: "cpm-mcp-overview", style: { position: "relative", maxWidth: 1000, margin: "0 auto", width: "100%" } },
+			reserveSpace && h("div", { ref: measureRef, "aria-hidden": true, style: { position: "absolute", top: 0, left: 0, width: "100%", visibility: "hidden", pointerEvents: "none", display: "flow-root" } },
+				h("div", { style: { fontSize: 14, fontWeight: 700, margin: "8px 4px 12px" } }, "服务器"),
+				h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", overflow: "hidden" } }, expandedServerRows),
+			),
+			serverRows.length > 0 && h("section", { className: "cpm-mcp-user-section", style: { display: "flow-root", minHeight: reserveSpace ? reservedHeight : undefined } },
+				h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
+				h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } }, serverRows),
+			),
+			pluginRows.length > 0 && h("section", { className: "cpm-mcp-plugin-section", style: { display: "flow-root" } },
+				h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "22px 4px 12px" } }, "来自插件"),
+				h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } }, pluginRows),
+			),
+		);
+	}
+
 	function BrowseView({
 		view,
 		setView,
@@ -5541,6 +5572,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [loadingSourceId, setLoadingSourceId] = useState(null);
 		const [addDialog, setAddDialog] = useState(false);
 		const [showAddMenu, setShowAddMenu] = useState(false);
+		const localSource = state.sources.find((s) => s.id === "local");
+		const hasLocalPlugins = typeof localSource?.pluginCount === "number" ? localSource.pluginCount > 0 : (rows?.local?.length || 0) > 0;
+		useEffect(() => {
+			if (activeSourceId === "local" && !hasLocalPlugins) {
+				const next = state.sources.find((s) => s.id !== "local");
+				if (next) setActiveSourceId(next.id);
+			}
+		}, [hasLocalPlugins, activeSourceId, state.sources, setActiveSourceId]);
 		const [mcpDialog, setMcpDialog] = useState(false);
 		const [mcps, setMcps] = useState(() => SESSION_STORE.mcps || []);
 		const [mcpsOpen, setMcpsOpenRaw] = useState(() => !!SESSION_STORE.mcpsOpen);
@@ -5595,8 +5634,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					// user-added servers use, pre-filled.
 					conn: obj,
 				};
-			})
+			}).filter((c) => typeof c.name === "string" && c.name.trim())
 		), [state.plugins]);
+		const hasMcps = mcps.some((m) => m?.name) || pluginMcpRows.length > 0;
 
 		const loadGlobalTools = useCallback(async (owner, connectorName) => {
 			const key = `${owner}::${connectorName}`;
@@ -5674,7 +5714,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const renderMcpServerRow = (opts) => {
 			const { owner, name, transport, connected, canEdit, record, first, conn } = opts;
 			const key = `${owner}::${name}`;
-			const isExpanded = !!globalExpanded[key];
+			const isExpanded = opts.measureExpanded || !!globalExpanded[key];
 			const info = globalToolData[key];
 			const toolsList = info?.tools || [];
 			const disabledTools = info?.disabledTools || [];
@@ -7041,12 +7081,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						// MCP is a fixed entry pinned ahead of the source tabs; it has no
 						// drag handlers, so it can never be reordered. It must also show
 						// when only plugin-provided servers exist — the page lists both.
-						(mcps.length > 0 || pluginMcpRows.length > 0) && h("button", {
+						hasMcps && h("button", {
 							key: "__mcps",
 							className: "cpm-tab" + (mcpsOpen ? " active" : ""),
 							onClick: () => { setMcpsOpen(true); refreshMcps(); setView({ type: "browse", sourceId: activeSourceId }); },
 						}, h("span", null, "MCP")),
 						state.sources.map((s, idx) => {
+							if (s.id === "local" && !hasLocalPlugins) return null;
 							const isAnthropic = idx === 0 || s.builtin || (s.id && s.id.toLowerCase() === "anthropic");
 							const isBeingDragged = dragState?.active && dragState.sourceId === s.id;
 							let tabTransform = undefined;
@@ -7329,11 +7370,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			isBrowse && mcpsOpen && h("div", {
 				className: "cpm-grid-container" + gridMaskClass,
 			},
-				h("div", { style: { maxWidth: 1000, margin: "0 auto", width: "100%" } },
-					mcps.length === 0 && pluginMcpRows.length === 0 && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
-					mcps.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
-					mcps.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
-						mcps.map((m, i) => renderMcpServerRow({
+					!hasMcps && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
+					h(McpOverview, {
+						expandedServerRows: mcps.map((m, i) => renderMcpServerRow({ owner: "user-mcp", row: m, name: m.name, transport: m.transport, connected: m.enabled === true, canEdit: true, first: i === 0, measureExpanded: true })),
+						serverRows: mcps.map((m, i) => renderMcpServerRow({
 							owner: "user-mcp",
 							row: m,
 							name: m.name,
@@ -7342,10 +7382,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							canEdit: true,
 							first: i === 0,
 						})),
-					),
-					pluginMcpRows.length > 0 && h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "22px 4px 12px" } }, "来自插件"),
-					pluginMcpRows.length > 0 && h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } },
-						pluginMcpRows.map((r, i) => renderMcpServerRow({
+						pluginRows: pluginMcpRows.map((r, i) => renderMcpServerRow({
 							owner: r.owner,
 							record: r.record,
 							name: r.name,
@@ -7355,8 +7392,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							canEdit: false,
 							first: i === 0,
 						})),
-					),
-				),
+					}),
 			),
 
 			globalHoveredTool && isBrowse && mcpsOpen && h(McpToolPopover, {
@@ -7480,7 +7516,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					h(PluginIcon, { plugin, isDark }),
 					h("div", { className: "cpm-install-dialog-header-info" },
 						h("div", { className: "cpm-install-dialog-title" }, `安装 ${plugin.displayName || plugin.name}`),
-						h("div", { className: "cpm-install-dialog-sub" }, `by ${plugin.author || "Anthropic"}`),
+						plugin.author && h("div", { className: "cpm-install-dialog-sub" }, `by ${plugin.author}`),
 					),
 				),
 				plugin.description && h("div", { className: "cpm-install-desc" }, plugin.description),
@@ -8654,7 +8690,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						}),
 					],
 				),
-				h("div", { className: "cpm-by" }, `by ${plugin.author || "Anthropic"}`),
+				(plugin.detail?.author || plugin.author) && h("div", { className: "cpm-by" }, `by ${plugin.detail?.author || plugin.author}`),
 				plugin.homepage && h("button", {
 					className: "cpm-link",
 					onClick: () => window.open(plugin.homepage, "_blank"),
@@ -9497,7 +9533,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 				h("div", null,
 					h("span", { className: "k" }, "Author"),
-					h("span", { className: "v" }, record.author || "Anthropic"),
+					h("span", { className: "v" }, record.author || "未知"),
 				),
 			),
 

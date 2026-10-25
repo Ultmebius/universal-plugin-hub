@@ -39,7 +39,7 @@ export function readLocalIcon(root, path) {
 /** Carry manifest assets through marketplace rows without exposing filesystem paths. */
 export function buildPluginIcons(meta, { sourceId, name, dir, source } = {}) {
   const ui = meta?.interface || {}
-  const proxy = (url) => `/universal-plugin-hub/api/icon?u=${encodeURIComponent(url)}`
+  const proxy = (url) => `/universal-plugin-hub/api/icon?v=2&u=${encodeURIComponent(url)}`
   const toUrl = (value) => {
     if (typeof value !== 'string' || !value.trim()) return null
     if (/^https?:\/\//i.test(value)) return proxy(value)
@@ -78,6 +78,12 @@ function remember(key, value) {
 /** Share concurrent loads, cache successful images, and briefly suppress failed URLs. */
 export async function getOrFetchIcon(url) {
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) throw new Error('Invalid icon URL')
+  // Named paths on the avatar CDN return a generic image; GitHub resolves the
+  // account name to the actual numeric avatar URL before redirecting.
+  const parsed = new URL(url)
+  if (parsed.hostname === 'avatars.githubusercontent.com' && /^\/[a-z0-9_-]+\/?$/i.test(parsed.pathname)) {
+    url = `https://github.com/${parsed.pathname.split('/')[1]}.png?size=${parsed.searchParams.get('s') || '80'}`
+  }
   const cached = memory.get(url)
   if (cached && Date.now() - cached.time < CACHE_TTL) return cached
   if (failures.get(url) > Date.now()) throw new Error('Icon temporarily unavailable')

@@ -12,7 +12,7 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSyn
 import { join, basename, dirname, isAbsolute } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, installedDir } from './store.js'
-import { safeSegment, pluginPath } from './market.js'
+import { safeSegment, pluginPath, sourceRepositoryDir } from './market.js'
 import { parseAgentDefinition } from './agents-map.js'
 import { buildPluginIcons } from './icons.js'
 
@@ -208,7 +208,7 @@ export function parseMarketplaceFromDisk(sourceId, cache) {
             if (typeof source === 'string' && source.startsWith('./')) {
               dir = pluginPath(cache, source)
             } else if (source && typeof source === 'object' && r.name) {
-              dir = pluginContentDir(sourceId, r.name, source, false)
+              dir = sourceRepositoryDir(cache, source) || pluginContentDir(sourceId, r.name, source, false)
             }
             if (dir) manifest = readPluginManifest(dir, false)
             return normalizeRow({ ...manifest, ...r,
@@ -386,6 +386,8 @@ export function pluginContentDir(sourceId, pluginName, source, preferInstalled =
   // Check if in remote git cache
   if (source && typeof source === 'object' && (source.source === 'url' || source.source === 'git-subdir')) {
     if (typeof source.url === 'string') {
+      const ownDir = sourceRepositoryDir(sourceCacheDir(sourceId), source)
+      if (ownDir) return ownDir
       const clean = String(source.url).replace(/^https?:\/\//, '').replace(/\.git$/, '')
       const remoteKey = clean.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'repo'
       const checkout = join(sourceCacheDir('remote'), remoteKey)
@@ -1000,10 +1002,10 @@ export function pluginDetail(sourceId, pluginName, source, rowFallback) {
   }
   return {
     name: pluginName,
-    displayName: manifest?.displayName || manifest?.name || formatDisplayName(pluginName),
-    description: manifest?.description || '',
-    author: manifest?.author?.name || (typeof manifest?.author === 'string' ? manifest.author : undefined),
-    version: manifest?.version,
+    displayName: manifest?.displayName || rowFallback?.displayName || formatDisplayName(pluginName),
+    description: manifest?.description || rowFallback?.description || '',
+    author: manifest?.author?.name || (typeof manifest?.author === 'string' ? manifest.author : rowFallback?.author),
+    version: manifest?.version || rowFallback?.version,
     icons: buildPluginIcons(manifest, { sourceId, name: pluginName, dir, source }),
     skills: listSkills(dir),
     agents: listAgents(dir).map((a) => ({

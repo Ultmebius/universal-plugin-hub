@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import vm from 'node:vm'
 import { buildPluginIcons, getOrFetchIcon, imageContentType, readLocalIcon } from '../src/icons.js'
-import { readMarketplace, invalidateMarketplaceCache } from '../src/parser.js'
-import { sourceCacheDir, marketRoot } from '../src/store.js'
+import { readMarketplace, invalidateMarketplaceCache, pluginDetail } from '../src/parser.js'
+import { sourceRepositoryDir } from '../src/market.js'
+import { sourceCacheDir, marketRoot, writeState } from '../src/store.js'
 import { mountRoutes } from '../src/routes.js'
 
 const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>')
@@ -51,6 +52,38 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       unsafe.searchParams.set('path', '../../../../state.json')
       assert.equal((await request(unsafe.pathname + unsafe.search)).status, 404)
       assert.throws(() => readLocalIcon(root, '../outside.svg'))
+    })
+    await t.test('self-referencing Codex catalog reads its own manifest, icon and full details before installation', async () => {
+      const dir = sourceCacheDir('self-market')
+      const source = { source: 'url', url: 'https://github.com/ExampleOrg/SelfPlugin.git', ref: 'main' }
+      write(join(dir, '.git/config'), '[remote "origin"]\n\turl = https://github.com/exampleorg/selfplugin\n')
+      write(join(dir, '.git/HEAD'), 'ref: refs/heads/main\n')
+      write(join(dir, '.agents/plugins/marketplace.json'), JSON.stringify({ plugins: [{ name: 'self-plugin', source, category: 'Productivity' }] }))
+      write(join(dir, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'self-plugin', version: '5.3.2', author: { name: 'Real Developer' }, description: 'Actual plugin description', skills: './skills', hooks: './hooks/events.json', interface: { displayName: 'Self Plugin', composerIcon: './assets/codex-icon.svg' } }))
+      write(join(dir, 'assets/codex-icon.svg'), svg)
+      write(join(dir, 'skills/review/SKILL.md'), '---\nname: review\ndescription: Review changes\n---\nReview the diff.\n')
+      write(join(dir, 'hooks/events.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo start' }] }] } }))
+      const [row] = readMarketplace('self-market')
+      assert.equal(row.author, 'Real Developer')
+      assert.equal(row.description, 'Actual plugin description')
+      assert.equal(row.version, '5.3.2')
+      assert.equal(row.displayName, 'Self Plugin')
+      assert.match(decodeURIComponent(row.icons.light[0]), /assets\/codex-icon.svg/)
+      const detail = pluginDetail('self-market', row.name, row.source, row)
+      assert.equal(detail.author, row.author)
+      assert.equal(detail.skills[0].name, 'review')
+      assert.deepEqual(detail.hooks, ['SessionStart'])
+      let handler
+      mountRoutes({ register(route) { handler = route.handler } })
+      const response = { writeHead(status) { this.status = status }, end(body) { this.body = body } }
+      await handler({ url: row.icons.light[0], method: 'GET', headers: {} }, response)
+      assert.equal(response.status, 200)
+      assert.deepEqual(response.body, svg)
+      assert.equal(sourceRepositoryDir(dir, { ...source, url: 'https://github.com/OtherOrg/SelfPlugin' }), null)
+      assert.equal(sourceRepositoryDir(dir, { ...source, ref: 'another-branch' }), null)
+      assert.equal(sourceRepositoryDir(dir, { ...source, sha: 'another-commit' }), null)
+      assert.equal(sourceRepositoryDir(dir, { ...source, path: '../outside' }), null)
+      assert.equal(sourceRepositoryDir(dir, { ...source, source: 'git-subdir', path: './skills' }), join(dir, 'skills'))
     })
     await t.test('remote relative assets honor Git subdirectory and pinned commit', () => {
       const icons = buildPluginIcons({ interface: { logo: './assets/logo.svg' } }, { sourceId: 's', name: 'n', source: { url: 'https://github.com/example/plugins.git', path: 'plugins/demo', sha: 'abc123' } })
@@ -106,9 +139,36 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       assert.equal(result[1], context.brands.playwright)
       assert.notEqual(result[1], context.brands.microsoft)
       const avatar = context.candidates({ name: 'unmapped', source: { url: 'https://github.com/ExampleOrg/repo' } }, false)[0]
-      assert.match(decodeURIComponent(avatar), /avatars.githubusercontent.com\/ExampleOrg/)
+      assert.match(decodeURIComponent(avatar), /github.com\/ExampleOrg.png\?size=80/)
+      assert.match(avatar, /[?&]v=2/)
       const home = context.candidates({ name: 'unmapped', homepage: 'https://example.com/path' }, false)[0]
       assert.match(decodeURIComponent(home), /https:\/\/example.com\/favicon.ico/)
+    })
+    await t.test('legacy named CDN avatar URLs bypass incorrect cached generic images', async () => {
+      const url = 'https://avatars.githubusercontent.com/FixtureOrganization?s=80&v=4'
+      write(join(marketRoot(), 'icons', `icon_${createHash('md5').update(url).digest('hex')}.bin`), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><title>wrong cached image</title></svg>'))
+      let requested
+      globalThis.fetch = async (target) => { requested = target; return new Response(svg) }
+      const result = await getOrFetchIcon(url)
+      assert.equal(requested, 'https://github.com/FixtureOrganization.png?size=80')
+      assert.deepEqual(result.buffer, svg)
+    })
+    await t.test('local source availability follows imported content independently of legacy MCP records', async () => {
+      writeState({ sources: [{ id: 'local', name: '本地插件', url: 'local://' }], plugins: [{ name: 'legacy-server', sourceId: 'local' }] })
+      let handler
+      mountRoutes({ register(route) { handler = route.handler } })
+      const read = async () => {
+        const response = { writeHead() {}, end(body) { this.body = JSON.parse(body) } }
+        await handler({ method: 'GET', url: '/universal-plugin-hub/api/state', headers: {} }, response)
+        return response.body
+      }
+      let state = await read()
+      assert.equal(state.sources[0].pluginCount, 0)
+      assert.equal(state.plugins.length, 1)
+      write(join(sourceCacheDir('local'), 'local-skill', 'SKILL.md'), '---\nname: local-skill\ndescription: Local skill\n---\nLocal skill.')
+      invalidateMarketplaceCache('local')
+      state = await read()
+      assert.equal(state.sources[0].pluginCount, 1)
     })
     await t.test('loading and failures keep a visible fallback and advance to the next source', () => {
       const state = []
