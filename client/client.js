@@ -434,7 +434,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 
 /* Floating Preview Popover */
-/* Pure hover tooltip: never traps the pointer; clicks pass through to the row below. */
 .cpm-preview-popover {
 	pointer-events: none;
 	position: fixed;
@@ -450,8 +449,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.04);
 	color: var(--cpm-text);
 	box-sizing: border-box;
-	pointer-events: auto;
-	animation: cpmPopIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+	display: flex;
+	flex-direction: column;
 }
 .cpm-dark .cpm-preview-popover {
 	background: rgba(55, 55, 57, 0.75);
@@ -628,13 +627,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	contain-intrinsic-size: auto 52px;
 	contain: layout style paint;
 }
-.cpm-card:hover {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-card:hover {
 	background: rgba(0, 0, 0, 0.045);
 }
-.cpm-dark .cpm-card:hover {
+.cpm-dark:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-card:hover {
 	background: rgba(255, 255, 255, 0.07);
 }
-.cpm-card:active {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-card:active {
 	transform: scale(0.995);
 }
 .cpm-card-icon {
@@ -2268,7 +2267,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	position: relative;
 	display: inline-flex;
 }
-.cpm-mcp-tool-pill-wrap:hover {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover {
 	z-index: 50;
 }
 .cpm-mcp-tool-pill {
@@ -2293,14 +2292,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: #f4f4f5;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
-.cpm-mcp-tool-pill:hover {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill:hover {
 	background: var(--cpm-tab-hover);
 	border-color: #6366f1;
 	color: var(--cpm-text);
 	transform: translateY(-1px);
 	box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
 }
-.cpm-dark .cpm-mcp-tool-pill:hover {
+.cpm-dark:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill:hover {
 	background: rgba(99, 102, 241, 0.14);
 	border-color: #818cf8;
 	box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
@@ -2318,7 +2317,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px dashed rgba(255, 255, 255, 0.12) !important;
 	color: #71717a !important;
 }
-.cpm-mcp-tool-pill.is-disabled:hover {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill.is-disabled:hover {
 	opacity: 0.68 !important;
 	background: rgba(0, 0, 0, 0.04) !important;
 	border: 1px dashed rgba(0, 0, 0, 0.24) !important;
@@ -2326,7 +2325,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow: none !important;
 	transform: none !important;
 }
-.cpm-dark .cpm-mcp-tool-pill.is-disabled:hover {
+.cpm-dark:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill.is-disabled:hover {
 	background: rgba(255, 255, 255, 0.04) !important;
 	border: 1px dashed rgba(255, 255, 255, 0.2) !important;
 	color: #a1a1aa !important;
@@ -2342,7 +2341,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow: 0 0 4px rgba(16, 185, 129, 0.4);
 	transition: all 0.15s ease;
 }
-.cpm-mcp-tool-pill:hover .cpm-mcp-tool-dot {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill:hover .cpm-mcp-tool-dot {
 	box-shadow: 0 0 7px rgba(16, 185, 129, 0.7);
 	transform: scale(1.15);
 }
@@ -2369,22 +2368,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.04);
 	padding: 12px 14px;
 	pointer-events: auto;
-	animation: cpmPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+	display: flex;
+	flex-direction: column;
 	font-family: inherit;
 	box-sizing: border-box;
 }
-.cpm-mcp-tool-popover::before {
-	content: "";
-	position: absolute;
-	top: -6px;
-	bottom: -6px;
-	left: -12px;
-	width: 14px;
-	background: transparent;
+.cpm-smart-hover { user-select: text; }
+.cpm-root:has(.cpm-smart-hover[data-pointer-inside="true"]) :is(.cpm-card, .cpm-mcp-tool-pill, .cpm-mcp-tool-dot) {
+	transition: none;
 }
-.cpm-mcp-tool-popover.is-flipped-left::before {
-	left: auto;
-	right: -12px;
+.cpm-smart-hover .cpm-preview-header,
+.cpm-smart-hover .cpm-mcp-tool-popover-header { flex-shrink: 0; }
+.cpm-smart-hover .cpm-preview-desc,
+.cpm-smart-hover .cpm-mcp-tool-popover-body {
+	min-height: 0;
+	max-height: min(400px, 60vh);
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 .cpm-dark .cpm-mcp-tool-popover {
 	background: rgba(55, 55, 57, 0.75);
@@ -5421,46 +5421,189 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
+	// Geometry is shared by plugin previews and MCP tool descriptions.
+	function hoverRectContains(rect, point, padding = 0) {
+		return point.x >= rect.left - padding && point.x <= rect.right + padding && point.y >= rect.top - padding && point.y <= rect.bottom + padding;
+	}
+	function hoverInCorridor(origin, point, rect) {
+		let a, b;
+		if (origin.x < rect.left) { a = { x: rect.left, y: rect.top - 6 }; b = { x: rect.left, y: rect.bottom + 6 }; }
+		else if (origin.x > rect.right) { a = { x: rect.right, y: rect.top - 6 }; b = { x: rect.right, y: rect.bottom + 6 }; }
+		else if (origin.y < rect.top) { a = { x: rect.left - 6, y: rect.top }; b = { x: rect.right + 6, y: rect.top }; }
+		else { a = { x: rect.left - 6, y: rect.bottom }; b = { x: rect.right + 6, y: rect.bottom }; }
+		const cross = (p, q, r) => (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y);
+		const values = [cross(point, origin, a), cross(point, a, b), cross(point, b, origin)];
+		return !(values.some((v) => v < -1) && values.some((v) => v > 1));
+	}
+	function placeHoverCard(rect, width, height, viewport) {
+		const gap = 10, margin = 12;
+		width = Math.min(width, viewport.width - margin * 2);
+		height = Math.min(height, viewport.height - margin * 2);
+		const clamp = (value, max) => Math.max(margin, Math.min(value, max));
+		return {
+			left: clamp(rect.right + gap, viewport.width - width - margin),
+			top: clamp(rect.top, viewport.height - height - margin),
+		};
+	}
+	function placePluginPreview(rect, width, height, viewport, titleRight) {
+		const margin = 12, gap = 6;
+		const left = Math.max(margin, Math.min(titleRight || rect.left + 80, viewport.width - width - margin));
+		const above = rect.bottom + gap + height > viewport.height - margin && rect.top - gap - height >= margin;
+		return { left, top: Math.max(margin, Math.min(above ? rect.top - height - gap : rect.bottom + gap, viewport.height - height - margin)) };
+	}
+	// One session owns both pending requests and the currently readable preview.
+	function createHoverSession({ onChange, initialDelay = 200, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
+		let current = null, pending = null, popup = null, phase = 'idle', point = null, origin = null;
+			const triggers = new WeakMap();
+		let openTimer, travelTimer, readTimer, dwellPoint, warmUntil = 0, scrollUntil = 0, pointerDownAt = -Infinity;
+		const inside = (element, p) => !!element?.isConnected && !!p && hoverRectContains(element.getBoundingClientRect(), p);
+		const cancelPending = () => { clearTimer(openTimer); openTimer = null; pending = null; };
+		const cancelReading = () => { clearTimer(readTimer); readTimer = null; dwellPoint = null; };
+		const setPhase = (value) => {
+			phase = value;
+			if (popup) {
+				popup.style.pointerEvents = value === 'reading' ? 'auto' : 'none';
+				popup.dataset.reading = String(value === 'reading');
+				popup.dataset.pointerInside = String(value === 'preview' || value === 'reading');
+			}
+		};
+		const dismiss = (notify = true) => {
+			const hadCurrent = !!current;
+			if (hadCurrent) warmUntil = now() + 500;
+			cancelPending(); cancelReading(); clearTimer(travelTimer); setPhase('idle'); current = null; popup = null;
+			if (notify && hadCurrent) onChange(null);
+		};
+		const openPending = () => {
+			clearTimer(openTimer); openTimer = null;
+			if (!pending) return;
+			if (!pending.anchor?.isConnected || (!pending.keyboard && !inside(pending.anchor, point))) { cancelPending(); return; }
+			if (now() < scrollUntil) { openTimer = setTimer(openPending, scrollUntil - now()); return; }
+			// Passing over a control underneath a preview is part of entering that preview.
+			// Keep the request pending until the pointer moves elsewhere or enters reading mode.
+			if (!pending.keyboard && inside(popup, point)) return;
+			const next = pending; cancelPending(); cancelReading(); clearTimer(travelTimer);
+			setPhase('trigger'); popup = null; current = next; origin = point; warmUntil = now() + 500;
+			onChange({ ...next.payload, anchor: next.anchor, rect: next.anchor.getBoundingClientRect() });
+		};
+		const enter = (payload, anchor, pointer, keyboard = false) => {
+			if (keyboard && now() - pointerDownAt < 50) return;
+			if (!anchor?.isConnected) return;
+				triggers.set(anchor, payload);
+				if (!keyboard && phase === 'reading' && (pointer?.buttons & 1)) return;
+			if (pointer) point = pointer;
+			if (current?.anchor === anchor) { cancelPending(); return; }
+				if (pending?.anchor === anchor && pending.keyboard === keyboard) return;
+			cancelPending(); pending = { payload, anchor, keyboard };
+			let delay = current || now() < warmUntil ? 0 : initialDelay;
+				// The corridor only protects travel INTO a preview. After reading it,
+				// entering an exposed trigger is an immediate handoff to that trigger.
+				if (current && popup && phase !== 'reading' && !keyboard && point && !inside(popup, point)) {
+				const r = current.anchor.getBoundingClientRect(), next = anchor.getBoundingClientRect();
+				const sameRow = next.top < r.bottom && next.bottom > r.top;
+				if (sameRow && origin && hoverInCorridor(origin, point, popup.getBoundingClientRect())) delay = 60;
+			}
+			if (delay) openTimer = setTimer(openPending, delay); else openPending();
+		};
+		const leave = (anchor) => { if (!anchor || pending?.anchor === anchor) cancelPending(); };
+		const move = (event) => {
+			if (event.pointerType === 'touch') return;
+			point = { x: event.clientX, y: event.clientY };
+				// Changing popup hit-testing can leave a trigger already hovered without
+				// another mouseenter. Reconcile the real event target on pointer movement.
+				if (event.type === 'pointermove' && !popup?.contains(event.target)) {
+					for (let target = event.target; target; target = target.parentElement) {
+						if (triggers.has(target)) {
+							enter(triggers.get(target), target, { ...point, buttons: event.buttons });
+							break;
+						}
+					}
+				}
+			if (pending && !pending.keyboard && !inside(pending.anchor, point)) cancelPending();
+			if (pending && !openTimer && !inside(popup, point)) openPending();
+			if (!current) return;
+			if (!current.anchor.isConnected) { dismiss(); return; }
+			if (phase === 'reading' && (event.buttons === 1 || event.type === 'pointerup')) return;
+			if (inside(current.anchor, point) && (phase !== 'reading' || !inside(popup, point))) {
+				origin = point; cancelReading(); clearTimer(travelTimer); setPhase('trigger'); return;
+			}
+			if (inside(popup, point)) {
+				clearTimer(travelTimer);
+				if (phase !== 'reading' && (!dwellPoint || Math.hypot(point.x - dwellPoint.x, point.y - dwellPoint.y) > 8)) {
+					cancelReading(); dwellPoint = point; setPhase('preview');
+					readTimer = setTimer(() => { if (inside(popup, point)) { cancelPending(); setPhase('reading'); } }, 140);
+				}
+				return;
+			}
+			cancelReading();
+			if (phase !== 'reading' && popup && origin && hoverInCorridor(origin, point, popup.getBoundingClientRect())) {
+				setPhase('travel'); clearTimer(travelTimer); travelTimer = setTimer(() => dismiss(), 900);
+			} else dismiss();
+		};
+		const suspend = () => { scrollUntil = now() + 220; dismiss(); };
+		const attach = (element, anchor) => {
+			if (current?.anchor !== anchor) return () => {};
+			popup = element; setPhase('trigger');
+			return () => { if (popup === element) popup = null; };
+		};
+		const bind = (doc, win) => {
+			const outside = (event) => !popup?.contains(event.target);
+			const scroll = (event) => { if (outside(event)) suspend(); };
+			const down = (event) => { pointerDownAt = now(); if (outside(event)) dismiss(); };
+			const focus = (event) => {
+				if (popup?.contains(event.target)) { cancelPending(); cancelReading(); clearTimer(travelTimer); setPhase('reading'); }
+				else if (!current?.anchor.contains(event.target) && !pending?.anchor.contains(event.target)) dismiss();
+			};
+			const key = (event) => { if (event.key === 'Escape') dismiss(); };
+			const out = (event) => { if (!event.relatedTarget) dismiss(); };
+			const close = () => dismiss();
+			const listeners = [['pointermove', move], ['pointerup', move], ['pointerdown', down], ['pointerout', out], ['focusin', focus], ['keydown', key], ['wheel', scroll], ['scroll', scroll]];
+			listeners.forEach(([type, listener]) => doc.addEventListener(type, listener, { capture: true, passive: type === 'wheel' }));
+			win.addEventListener('resize', close); win.addEventListener('blur', close);
+			return () => { listeners.forEach(([type, listener]) => doc.removeEventListener(type, listener, true)); win.removeEventListener('resize', close); win.removeEventListener('blur', close); dismiss(false); };
+		};
+		return { enter, leave, move, dismiss, suspend, attach, bind, cancelPending };
+	}
+	function useHoverPreview(initialDelay = 200) {
+		const [preview, setPreview] = useState(null);
+		const ref = useRef(null);
+		if (!ref.current) ref.current = createHoverSession({ onChange: setPreview, initialDelay });
+		const session = ref.current;
+		const close = useCallback(() => session.dismiss(), [session]);
+		useEffect(() => session.bind(document, window), [session]);
+		return [preview, close, session];
+	}
+	function SmartHoverPopover({ anchor, rect, width, className, session, placement = 'tool', titleRight, children }) {
+		const popRef = useRef(null);
+		const [position, setPosition] = useState(null);
+		useSafeLayoutEffect(() => {
+			const popup = popRef.current;
+			if (!popup) return;
+			const measure = () => {
+				const trigger = anchor?.isConnected ? anchor.getBoundingClientRect() : rect;
+				const measured = popup.getBoundingClientRect(), viewport = { width: window.innerWidth, height: window.innerHeight };
+				setPosition(placement === 'plugin' ? placePluginPreview(trigger, measured.width, measured.height, viewport, titleRight) : placeHoverCard(trigger, measured.width, measured.height, viewport));
+			};
+			measure();
+			const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+			observer?.observe(popup);
+			const detach = session.attach(popup, anchor);
+			return () => { observer?.disconnect(); detach(); };
+		}, [anchor, rect, placement, titleRight, session]);
+		return h('div', { ref: popRef, className: className + ' cpm-smart-hover', role: 'region', 'aria-label': '详情预览', tabIndex: 0, style: { width, maxHeight: 'calc(100vh - 24px)', left: position?.left || 12, top: position?.top || 12, visibility: position ? 'visible' : 'hidden', pointerEvents: 'none' }, onWheel: (e) => e.stopPropagation(), onScroll: (e) => e.stopPropagation(), onClick: (e) => e.stopPropagation() }, children);
+	}
+
 	// ────────────────────────────── Floating Plugin Preview Popover ──────────────────────────────
-	function PluginPreviewPopover({ preview, isDark }) {
+	function PluginPreviewPopover({ preview, isDark, session }) {
 		if (!preview || !preview.plugin || !preview.rect) return null;
 		const p = preview.plugin;
-		const rect = preview.rect;
-		const gridRect = preview.gridRect;
-
-		const popWidth = 380;
-		const margin = 12;
-		const vpW = (typeof window !== "undefined" ? window.innerWidth : 1000) || 1000;
-		const vpH = (typeof window !== "undefined" ? window.innerHeight : 800) || 800;
-
-		const popRef = useRef(null);
-		const [measuredH, setMeasuredH] = useState(0);
-
-		useEffect(() => {
-			if (popRef.current) {
-				const h = popRef.current.offsetHeight;
-				if (h && h !== measuredH) setMeasuredH(h);
-			}
-		}, [preview, measuredH]);
-
-		const actualHeight = measuredH || 140;
-		const isUpward = (vpH - rect.bottom - margin < actualHeight) && (rect.top - margin >= actualHeight);
-
-		let left = preview.titleRight || (rect.left + 80);
-		if (left + popWidth + margin > vpW) {
-			left = Math.max(margin, vpW - popWidth - margin);
-		}
-
-		const topStyle = isUpward ? "auto" : `${rect.bottom + 6}px`;
-		const bottomStyle = isUpward ? `${vpH - rect.top + 6}px` : "auto";
 
 		const author = p.author ? (typeof p.author === "string" ? p.author : p.author.name) : null;
 		const desc = p.description || "暂无详细功能描述";
 
-		return h("div", {
-			ref: popRef,
+		return h(SmartHoverPopover, {
+			key: p.id || p.name,
+			anchor: preview.anchor, rect: preview.rect, width: 380, session, placement: 'plugin', titleRight: preview.titleRight,
 			className: "cpm-preview-popover",
-			style: { left: `${left}px`, top: topStyle, bottom: bottomStyle },
 		},
 			h("div", { className: "cpm-preview-header" },
 				h(PluginIcon, { plugin: p, isDark }),
@@ -5603,8 +5746,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return initial;
 		});
 		const [globalExpanded, setGlobalExpanded] = useState({});
-		const [globalHoveredTool, setGlobalHoveredTool] = useState(null);
-		const globalHoverTimerRef = useRef(null);
+		const [globalHoveredTool, closeGlobalHover, globalHover] = useHoverPreview();
+		useEffect(() => { closeGlobalHover(); }, [mcpsOpen, view?.type, closeGlobalHover]);
 
 		const refreshMcps = useCallback(async () => {
 			try {
@@ -5804,16 +5947,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					tools: toolsList,
 					disabledTools,
 					onRetry: () => loadGlobalTools(owner, name),
-					onHoverTool: (tool, rect) => {
-						if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
-						globalHoverTimerRef.current = setTimeout(() => {
-							setGlobalHoveredTool({ owner, connectorName: name, tool, rect });
-						}, 200);
-					},
-					onHoverEnd: () => {
-						if (globalHoverTimerRef.current) clearTimeout(globalHoverTimerRef.current);
-						setGlobalHoveredTool(null);
-					},
+					onHoverTool: (tool, rect, anchor, pointer, keyboard) => globalHover.enter({ owner, connectorName: name, tool, rect }, anchor, pointer, keyboard),
+					onHoverEnd: (anchor) => globalHover.leave(anchor),
 					onToggleTool: (toolName) => toggleGlobalTool(owner, name, toolName),
 				}),
 			);
@@ -5821,8 +5956,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const [confirmRemoveSource, setConfirmRemoveSource] = useState(null);
 		const [installFor, setInstallFor] = useState(null);
-		const [hoveredPreview, setHoveredPreview] = useState(null);
-		const hoverTimerRef = useRef(null);
+		const [hoveredPreview, closePluginHover, pluginHover] = useHoverPreview(240);
 		const gridRef = useRef(null);
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
@@ -5955,39 +6089,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (rect.bottom >= gridRect.top + 8 && rect.top <= gridRect.bottom - 8) {
 					const textEl = el.querySelector(".cpm-card-name-text") || el.querySelector(".cpm-card-name");
 					const titleRight = textEl ? textEl.getBoundingClientRect().right : (rect.left + 80);
-					setHoveredPreview({ plugin, rect, gridRect, titleRight });
+					pluginHover.enter({ plugin, rect, gridRect, titleRight }, el, pendingHoverRef.current.point);
 					prefetchDetail(plugin.sourceId || activeSourceId, plugin.name);
 				}
 			}
-		}, [activeSourceId, prefetchDetail]);
+		}, [activeSourceId, prefetchDetail, pluginHover]);
 
-		const handleCardMouseEnter = useCallback((p, el) => {
-			pendingHoverRef.current = { plugin: p, el };
-			if (hoverTimerRef.current) {
-				clearTimeout(hoverTimerRef.current);
-				hoverTimerRef.current = null;
-			}
+		const handleCardMouseEnter = useCallback((p, el, point) => {
+			pendingHoverRef.current = { plugin: p, el, point };
 			if (isScrollingRef.current) {
 				return;
 			}
-			hoverTimerRef.current = setTimeout(() => {
-				if (isScrollingRef.current) return;
-				if (pendingHoverRef.current && pendingHoverRef.current.plugin.id === p.id) {
-					triggerPendingHover();
-				}
-			}, 240);
+			triggerPendingHover();
 		}, [triggerPendingHover]);
 
 		const handleCardMouseLeave = useCallback((p) => {
 			if (pendingHoverRef.current && (!p || pendingHoverRef.current.plugin.id === p.id)) {
 				pendingHoverRef.current = null;
 			}
-			if (hoverTimerRef.current) {
-				clearTimeout(hoverTimerRef.current);
-				hoverTimerRef.current = null;
-			}
-			setHoveredPreview(null);
-		}, []);
+			pluginHover.leave();
+		}, [pluginHover]);
 
 		const updateTabsMask = useCallback(() => {
 			const el = tabsRef.current;
@@ -6027,7 +6148,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				e.preventDefault();
 				e.stopPropagation();
 
-				if (hoveredPreview) setHoveredPreview(null);
+				if (hoveredPreview) closePluginHover();
 
 				const targetLeft = Math.max(0, Math.min(maxLeft, el.scrollLeft + delta));
 				smoothScrollTabsTo(el, targetLeft, 180, updateTabsMask);
@@ -6040,12 +6161,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [hoveredPreview, updateTabsMask, state.sources]);
 
 		useEffect(() => {
-			setHoveredPreview(null);
+			closePluginHover();
 		}, [activeSourceId, view?.type]);
 
 		useEffect(() => {
 			return () => {
-				if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 				if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
 				if (currentTabAnim) {
 					cancelAnimationFrame(currentTabAnim);
@@ -6645,12 +6765,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		// Per-source Scroll restoration and wheel scroll suppression
 		const onGridWheel = useCallback(() => {
-			if (hoverTimerRef.current) {
-				clearTimeout(hoverTimerRef.current);
-				hoverTimerRef.current = null;
-			}
+			pluginHover.suspend();
 			isScrollingRef.current = true;
-			if (hoveredPreview) setHoveredPreview(null);
+			if (hoveredPreview) closePluginHover();
 
 			if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
 			scrollTimerRef.current = setTimeout(() => {
@@ -6662,12 +6779,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [hoveredPreview, triggerPendingHover]);
 
 		const onGridScroll = useCallback((e) => {
-			if (hoverTimerRef.current) {
-				clearTimeout(hoverTimerRef.current);
-				hoverTimerRef.current = null;
-			}
+			pluginHover.suspend();
 			isScrollingRef.current = true;
-			if (hoveredPreview) setHoveredPreview(null);
+			if (hoveredPreview) closePluginHover();
 
 			if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
 			scrollTimerRef.current = setTimeout(() => {
@@ -7290,10 +7404,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									plugin: p,
 									installed: true,
 									isDark,
-									onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget),
+							onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
 									onMouseLeave: () => handleCardMouseLeave(p),
 									onClick: () => {
-										setHoveredPreview(null);
+										closePluginHover();
 										if (gridRef.current) {
 											if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 											SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
@@ -7302,7 +7416,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									},
 									onManage: (e) => {
 										e.stopPropagation();
-										setHoveredPreview(null);
+										closePluginHover();
 										if (gridRef.current) {
 											if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 											SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
@@ -7311,7 +7425,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									},
 									onInstall: (e) => {
 										e.stopPropagation();
-										setHoveredPreview(null);
+										closePluginHover();
 										setInstallFor(p);
 									},
 								});
@@ -7339,10 +7453,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						eagerIcon: index < 12,
 						installed,
 						isDark,
-						onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget),
+						onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
 						onMouseLeave: () => handleCardMouseLeave(p),
 						onClick: () => {
-							setHoveredPreview(null);
+							closePluginHover();
 							if (gridRef.current) {
 								if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 								SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
@@ -7351,7 +7465,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						},
 						onManage: (e) => {
 							e.stopPropagation();
-							setHoveredPreview(null);
+							closePluginHover();
 							if (gridRef.current) {
 								if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 								SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
@@ -7360,7 +7474,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						},
 						onInstall: (e) => {
 							e.stopPropagation();
-							setHoveredPreview(null);
+							closePluginHover();
 							setInstallFor(p);
 						},
 					});
@@ -7369,6 +7483,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			isBrowse && mcpsOpen && h("div", {
 				className: "cpm-grid-container" + gridMaskClass,
+				onWheelCapture: globalHover.suspend,
+				onScroll: globalHover.suspend,
 			},
 					!hasMcps && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
 					h(McpOverview, {
@@ -7397,6 +7513,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			globalHoveredTool && isBrowse && mcpsOpen && h(McpToolPopover, {
 				hovered: globalHoveredTool,
+				session: globalHover,
 				isDisabled: (() => {
 					const key = `${globalHoveredTool.owner}::${globalHoveredTool.connectorName}`;
 					const tName = typeof globalHoveredTool.tool === "string" ? globalHoveredTool.tool : globalHoveredTool.tool?.name;
@@ -7406,6 +7523,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			hoveredPreview && isBrowse && h(PluginPreviewPopover, {
 				preview: hoveredPreview,
+				session: pluginHover,
 				isDark,
 				installed: currentSourceInstalledNames.has(hoveredPreview.plugin.name),
 			}),
@@ -8859,8 +8977,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("button", {
 							type: "button",
 							className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
-							onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect()),
-							onMouseLeave: onHoverEnd,
+								onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
+							onMouseLeave: (e) => onHoverEnd(e.currentTarget),
+							onFocus: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget, null, true),
+							onBlur: (e) => onHoverEnd(e.currentTarget),
 							onClick: (e) => { e.stopPropagation(); onToggleTool(tName); },
 						},
 							h("span", { className: "cpm-mcp-tool-dot" }),
@@ -8873,7 +8993,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────── Floating MCP Tool Detail Popover ──────────────────────────
-	function McpToolPopover({ hovered, isDisabled: propIsDisabled }) {
+	function McpToolPopover({ hovered, isDisabled: propIsDisabled, session }) {
 		if (!hovered || !hovered.tool || !hovered.rect) return null;
 		const t = hovered.tool;
 		const rect = hovered.rect;
@@ -8915,50 +9035,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return () => clearTimeout(timer);
 		}, [updateBodyMask, desc, props]);
 
-		const popWidth = 340;
-		const popHeight = 220;
-		const gap = 4;
-		const margin = 10;
-		const vpW = (typeof window !== "undefined" ? window.innerWidth : 1000) || 1000;
-		const vpH = (typeof window !== "undefined" ? window.innerHeight : 800) || 800;
-
-		// Default: place on the RIGHT side of the hovered pill with a compact 4px gap
-		let left = rect.right + gap;
-		let top = rect.top - 4;
-		let isFlipped = false;
-
-		// Boundary check: if overflowing right, place to the LEFT of the pill
-		if (left + popWidth + margin > vpW) {
-			if (rect.left - popWidth - gap > margin) {
-				left = rect.left - popWidth - gap;
-				isFlipped = true;
-			} else {
-				left = Math.max(margin, Math.min(rect.left, vpW - popWidth - margin));
-				if (rect.bottom + popHeight + margin < vpH) {
-					top = rect.bottom + gap;
-				} else {
-					top = Math.max(margin, rect.top - popHeight - gap);
-				}
-			}
-		}
-
-		// Vertical boundary clamping: guarantee it is never clipped by screen/modal bottom
-		top = Math.max(margin, Math.min(top, vpH - popHeight - margin));
-
-		return h("div", {
-			className: "cpm-mcp-tool-popover" + (isFlipped ? " is-flipped-left" : ""),
-			style: {
-				left: `${left}px`,
-				top: `${top}px`,
-			},
-			onWheel: (e) => e.stopPropagation(),
+		return h(SmartHoverPopover, {
+			key: `${hovered.owner || ''}/${hovered.connectorName}/${tName}`,
+			anchor: hovered.anchor, rect, width: 340, session,
+			className: "cpm-mcp-tool-popover",
 		},
 			// Sticky Top Header (outside scrolling area)
 			h("div", { className: "cpm-mcp-tool-popover-header" },
 				h("div", { className: "cpm-mcp-tool-popover-title" }, title),
-				// Informational only: the pill itself toggles the tool. The popover
-				// closes as soon as the pointer leaves the pill, so a control here
-				// could never be clicked.
+				// The pill controls the tool; the hovercard reports its current state.
 				h("span", {
 					className: "cpm-mcp-tool-popover-badge " + (isDisabled ? "is-disabled" : "is-enabled"),
 				}, isDisabled ? "已禁用" : "已启用"),
@@ -9020,8 +9105,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 			return initial;
 		});
-		const [hoveredTool, setHoveredTool] = useState(null);
-		const hoverTimerRef = useRef(null);
+		const [hoveredTool, closeToolHover, toolHover] = useHoverPreview();
+		useEffect(() => { closeToolHover(); }, [record?.name, closeToolHover]);
 
 		const loadConnectorTools = useCallback(async (connectorName) => {
 			const key = `${record.name}::${connectorName}`;
@@ -9488,7 +9573,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			h("div", {
 				ref: manageRef,
 				className: "cpm-manage" + manageMaskClass,
-				onScroll: () => { updateManageMask(); if (hoveredTool) setHoveredTool(null); },
+				onWheelCapture: toolHover.suspend,
+				onScroll: () => { toolHover.suspend(); updateManageMask(); },
 			},
 				h("div", { className: "cpm-manage-head" },
 					h("button", { className: "cpm-back", style: { padding: 0 }, onClick: onBack }, h(IconChevronLeft), "Back"),
@@ -9893,16 +9979,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							disabledTools,
 							loadingText: "正在启动本地 MCP 服务并解析工具列表（首次启动可能需要下载组件）…",
 							onRetry: () => loadConnectorTools(cName),
-							onHoverTool: (tool, rect) => {
-								if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-								hoverTimerRef.current = setTimeout(() => {
-									setHoveredTool({ connectorName: cName, tool, rect });
-								}, 200);
-							},
-							onHoverEnd: () => {
-								if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-								setHoveredTool(null);
-							},
+							onHoverTool: (tool, rect, anchor, pointer, keyboard) => toolHover.enter({ connectorName: cName, tool, rect }, anchor, pointer, keyboard),
+							onHoverEnd: (anchor) => toolHover.leave(anchor),
 							onToggleTool: (toolName) => toggleTool(cName, toolName),
 						}),
 					);
@@ -10342,6 +10420,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const isCurrentlyDisabled = hoveredConnData?.disabledTools?.includes(toolName) ?? false;
 				return h(McpToolPopover, {
 					hovered: hoveredTool,
+					session: toolHover,
 					isDisabled: isCurrentlyDisabled,
 				});
 			})()
