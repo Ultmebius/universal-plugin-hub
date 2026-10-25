@@ -45,6 +45,14 @@ dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
 - **Agent integration**: Syncs commands and skills to DSH, compiles subagents into Hub skills for delegation, and registers MCP connectors and LSP services.
 - **Environment support**: Works in both DeepSeek Harness Desktop and the CLI web profile.
 
+## Usage
+
+1. **Browse and install**: Search by name or keyword, choose a source, and click **Install** on a plugin card.
+2. **Add a marketplace**: Open the **+** menu, choose **Add plugin marketplace**, and enter a Claude or Codex repository URL. Review the parsed content before adding it.
+3. **Import plugins or skills**: Choose **Upload plugin** from the **+** menu. Enter a local path or Git URL, or select a supported file, then review the preview and confirm the import.
+4. **Manage installed plugins**: Click **Manage** on an installed plugin to configure connectors, manage capabilities, update, or uninstall it.
+5. **Use MCP tools**: Open the **MCP** tab to view servers and plugin connectors. Expand a server's tools to view their descriptions and control which tools are enabled.
+
 ## Supported content
 
 | Content | Recognized structure |
@@ -56,14 +64,6 @@ dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
 | Agent Skills | A `SKILL.md` file, a skill directory, or a collection of skill directories |
 
 File uploads accept `.zip`, `.tgz`, `.tar.gz`, and `SKILL.md`, up to 22 MB per upload. Larger archives can be extracted and imported through a directory path. Import the complete directory or archive for skills with scripts or other resources so relative paths remain usable.
-
-## Usage
-
-1. **Browse and install**: Search by name or keyword, choose a source, and click **Install** on a plugin card.
-2. **Add a marketplace**: Open the **+** menu, choose **Add plugin marketplace**, and enter a Claude or Codex repository URL. Review the parsed content before adding it.
-3. **Import plugins or skills**: Choose **Upload plugin** from the **+** menu. Enter a local path or Git URL, or select a supported file, then review the preview and confirm the import.
-4. **Manage installed plugins**: Click **Manage** on an installed plugin to configure connectors, manage capabilities, update, or uninstall it.
-5. **Use MCP tools**: Open the **MCP** tab to view servers and plugin connectors. Expand a server's tools to view their descriptions and control which tools are enabled.
 
 ## Data and directory layout
 
