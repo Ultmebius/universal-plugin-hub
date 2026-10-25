@@ -13,9 +13,9 @@ import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
-import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir } from './store.js'
+import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, sourceCacheDir } from './store.js'
 import { materializePlugin, pullSource, pluginPath } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { buildPluginIcons } from './icons.js'
 
@@ -1866,7 +1866,7 @@ export async function updatePlugin(pluginName) {
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
   const source = state.sources.find((s) => s.id === rec.sourceId)
   if (source && typeof source.url === 'string') {
-    const cacheDir = join(marketRoot(), 'market', rec.sourceId)
+    const cacheDir = sourceCacheDir(rec.sourceId)
     if (existsSync(join(cacheDir, '.git'))) {
       await pullSource(rec.sourceId)
     }
@@ -1892,6 +1892,19 @@ export async function findMarketRow(sourceId, pluginName) {
   const { readMarketplace } = await import('./parser.js')
   const rows = readMarketplace(sourceId)
   return rows.find((r) => r.name === pluginName) ?? null
+}
+
+/**
+ * Author from the source's live marketplace row. Used as the last fallback for
+ * installed records written before the reader merged each plugin's own
+ * manifest (`author: null`). Returns null when the row or its author is absent.
+ */
+function findMarketRowAuthor(sourceId, pluginName) {
+  try {
+    return readMarketplace(sourceId).find((r) => r.name === pluginName)?.author ?? null
+  } catch {
+    return null
+  }
 }
 
 /** Re-exported for routes: list installed plugins with details. */
@@ -1992,8 +2005,17 @@ export function installedDetails() {
       const missingCommand = !active && !!s.command && !resolveCommandPath(s.command)
       return { ...s, active, missingCommand }
     })
+    const targetManifest = existsSync(target) ? readPluginManifest(target) : null
+    // Author: the state record is written at install time, so installs made
+    // before the marketplace reader learned to merge a plugin's own manifest
+    // carry `author: null` forever. Fall back to the installed copy's manifest,
+    // then to the live marketplace row, so those records self-heal on read.
+    const manifestAuthor = targetManifest?.author
+      ? (typeof targetManifest.author === 'string' ? targetManifest.author : targetManifest.author.name)
+      : null
+    const author = rec.author || manifestAuthor || findMarketRowAuthor(rec.sourceId, rec.name)
     const detail = existsSync(target) ? {
-      icons: buildPluginIcons(readPluginManifest(target), { sourceId: rec.sourceId, name: rec.name, dir: target }),
+      icons: buildPluginIcons(targetManifest, { sourceId: rec.sourceId, name: rec.name, dir: target }),
       skills: listSkills(target),
       agents: listAgents(target),
       prompts: listPrompts(target),
@@ -2005,6 +2027,7 @@ export function installedDetails() {
     return {
       ...rec,
       ...detail,
+      author: author || rec.author,
       skillCount: detail.skills.length,
       agentCount: detail.agents.length,
       promptCount: detail.prompts.length,
