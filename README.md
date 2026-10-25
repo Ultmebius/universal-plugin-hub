@@ -2,20 +2,39 @@
 
 English | [简体中文](README.zh.md)
 
-A plugin marketplace for DeepSeek Harness (DSH). Browse Claude and Codex plugin catalogs, import plugins and Agent Skills, and manage MCP tools, subagents, and LSP services in one place.
+Install and use plugins and skills from the Claude Code and Codex ecosystems in DeepSeek Harness (DSH).
+
+Universal Plugin Hub combines a plugin marketplace with installation and capability management. After you add a source or import a plugin, it recognizes the plugin's Skills, Commands, Agents, MCP, Hooks, and LSP configuration, then converts or registers those capabilities for use in DSH conversations and tasks.
+
+## Core features
+
+### Bring plugin capabilities into DSH
+
+| Plugin capability | How you use it in DSH |
+| --- | --- |
+| **Skills** | Synced to DSH's native skills directory and available from the composer's `/` menu, with scripts and resources in the skill directory preserved. |
+| **Commands** | Markdown commands from Claude Code plugins are converted into DSH skills so you can use their workflows. |
+| **Agents** | Subagent definitions become callable skills, with a delegation entry point that uses DSH's native `subagent` tool. |
+| **MCP** | Connect plugin-declared MCP servers, configure service addresses, authentication, headers, and environment variables, then inspect tools and control which ones are enabled. |
+| **Hooks** | Plugin hook configuration files are registered with DSH's hooks bridge and follow the plugin's enabled state. |
+| **LSP** | Plugin-declared language servers are registered with DSH when their executables are available; missing executables are reported. |
+
+### Discover, install, and manage plugins
+
+- **Browse multiple marketplaces**: Start with the official Claude catalog (`anthropics/claude-plugins-official`), then add Claude or Codex marketplaces and Git repositories containing standalone plugins.
+- **Import your plugins and skills**: Use local directories, Git URLs, archives, or a single `SKILL.md`. Skill collections can be parsed and imported as individual skills.
+- **Manage the plugin lifecycle**: Installation, updates, enabling, disabling, and removal also manage the associated skills, MCP connectors, Hooks, and LSP registrations.
+- **Manage MCP servers together**: View manually added servers and plugin connectors on one page, edit their configuration, expand tool lists, and control individual tools.
+
+## Interface preview
+
+Icon cards show plugin descriptions and installation states, with source tabs, search, filters, and sorting to help you find what you need. The interface follows DSH's light and dark themes. Hover previews let you scroll descriptions and select text, while expanded MCP tools appear as compact status pills. Catalog and icon caching help content appear quickly on return visits.
 
 ![Overview](assets/hero.png)
 
-## Interface and experience
-
-Browse plugins through a card layout with recognizable icons, concise descriptions, and clear installation states. Source tabs, search, filters, and sorting keep a growing catalog easy to explore.
-
-- **Light and dark themes**: Follows the DSH theme, with matching card surfaces, text, controls, and plugin icon variants.
-- **Details at a glance**: Hover over a plugin or tool to open its description. Move into the preview to scroll or select text, then move to another item to continue exploring.
-- **Compact tool lists**: MCP tools appear as labeled pills with status indicators. Expand a server to inspect its tools and control each tool's enabled state.
-- **Consistent management**: Plugin cards lead into a management view for connectors and capabilities; the MCP tab brings manually added servers and plugin connectors together in clearly labeled groups.
-
 ## Installation
+
+Supports DeepSeek Harness Desktop and the CLI web profile.
 
 ### DeepSeek Harness Desktop
 
@@ -35,16 +54,6 @@ Run this in your terminal:
 dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
 ```
 
-## Features
-
-- **Preloaded catalog**: Loads the official Claude plugin catalog (`anthropics/claude-plugins-official`) by default.
-- **Claude and Codex sources**: Add Git repositories containing plugin marketplaces or standalone plugins.
-- **Plugin and Skills import**: Import a local directory, an archive, a Git repository, or a `SKILL.md` file. Skill collections are recognized as individual skills.
-- **MCP management**: View manually added servers and plugin connectors in the MCP tab. Expand tool lists, toggle individual tools, and configure connections and authentication.
-- **Fast catalog browsing**: Displays cached catalogs while sources refresh in the background. Icon caching helps repeated visits load quickly.
-- **Agent integration**: Syncs commands and skills to DSH, compiles subagents into Hub skills for delegation, and registers MCP connectors and LSP services.
-- **Environment support**: Works in both DeepSeek Harness Desktop and the CLI web profile.
-
 ## Usage
 
 1. **Browse and install**: Search by name or keyword, choose a source, and click **Install** on a plugin card.
@@ -52,6 +61,8 @@ dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
 3. **Import plugins or skills**: Choose **Upload plugin** from the **+** menu. Enter a local path or Git URL, or select a supported file, then review the preview and confirm the import.
 4. **Manage installed plugins**: Click **Manage** on an installed plugin to configure connectors, manage capabilities, update, or uninstall it.
 5. **Use MCP tools**: Open the **MCP** tab to view servers and plugin connectors. Expand a server's tools to view their descriptions and control which tools are enabled.
+
+After installing a plugin with Skills or Commands, find its skills in the DSH composer's `/` menu. For a plugin with MCP connectors, open the **From plugins** group in the MCP tab to configure connections and inspect tools.
 
 ## Supported content
 
