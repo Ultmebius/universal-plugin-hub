@@ -2,9 +2,18 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness (DSH) 的插件市场。内置 Claude 官方插件源，支持一键安装 Agent 技能（Skills）、子代理、MCP 工具和 LSP 服务。
+DeepSeek Harness (DSH) 的插件市场。集中浏览 Claude 与 Codex 插件源，导入插件和 Agent Skills，并管理 MCP 工具、子代理及 LSP 服务。
 
 ![主界面预览](assets/hero.png)
+
+## 界面与体验
+
+以卡片呈现插件图标、简洁说明和安装状态，配合插件源标签、搜索、筛选与排序，轻松浏览不断扩展的插件目录。
+
+- **浅色与深色主题**：跟随 DSH 的主题设置，统一卡片、文字和控件的视觉风格，并按主题选择插件图标资源。
+- **悬停即可了解详情**：将鼠标停在插件或工具上查看说明，移入浮窗即可滚动阅读、选择文字，移向其他条目继续浏览。
+- **紧凑清晰的工具列表**：MCP 工具以带状态指示的标签呈现，展开服务器即可查看工具能力，并逐个控制启用状态。
+- **统一的管理体验**：从插件卡片进入连接器与能力管理；在 MCP 页按分组查看手动添加的服务器和插件连接器。
 
 ## 安装
 
@@ -26,31 +35,35 @@ DeepSeek Harness (DSH) 的插件市场。内置 Claude 官方插件源，支持�
 dsh plugin add https://github.com/Ultmebius/universal-plugin-hub.git
 ```
 
-### 源码安装
-
-```bash
-cd ~/.dsh/plugins
-git clone https://github.com/Ultmebius/universal-plugin-hub.git
-cd universal-plugin-hub
-npm install
-```
-
 ## 主要功能
 
 - **内置官方插件源**：默认载入 Claude 官方插件目录（`anthropics/claude-plugins-official`），开箱即用。
-- **自定义 Git 插件源**：支持添加任意 GitHub 或 Git 仓库地址作为插件源。
-- **自动接入**：
-  - Commands 和 Skills 会自动转换为 DSH Agent 可调用的技能。
-  - 子代理会自动编译为对应的 Hub 技能并支持委派。
-  - MCP 连接器自动写入配置文件，支持单个工具粒度的开关和鉴权测试。
-  - 自动注册 LSP 语言服务。
+- **Claude 与 Codex 插件源**：支持添加包含插件市场或独立插件的 Git 仓库。
+- **插件与 Skills 导入**：支持本地目录、压缩包、Git 仓库及 `SKILL.md` 文件，并将技能集合识别为独立技能。
+- **MCP 管理**：在 MCP 页统一查看手动添加的服务器和插件连接器，展开工具列表，控制单个工具的开关，并配置连接与鉴权。
+- **快速浏览目录**：先显示缓存目录，在后台刷新插件源，并通过图标缓存加快重复访问时的加载。
+- **Agent 集成**：将 Commands 和 Skills 同步至 DSH，将子代理编译为可委派的 Hub 技能，并注册 MCP 连接器和 LSP 服务。
 - **环境支持**：同时支持 DeepSeek Harness Desktop 桌面客户端与命令行 Web 模式。
+
+## 支持的内容
+
+| 内容 | 识别结构 |
+| --- | --- |
+| Claude 插件市场 | `.claude-plugin/marketplace.json` |
+| Codex 插件市场 | `.agents/plugins/marketplace.json` |
+| Claude 插件 | `.claude-plugin/plugin.json` |
+| Codex 插件 | `.codex-plugin/plugin.json` |
+| Agent Skills | `SKILL.md` 文件、技能目录或多个技能目录组成的集合 |
+
+文件上传支持 `.zip`、`.tgz`、`.tar.gz` 和 `SKILL.md`，单次上传上限为 22 MB。较大的压缩包可以解压后通过目录路径导入。含脚本或其他资源的技能请导入完整目录或压缩包，以保留可用的相对路径。
 
 ## 使用方法
 
-1. **浏览与搜索**：打开插件市场面板，输入关键词搜索插件。
-2. **一键安装**：点击插件卡片上的 **Install**，插件会自动下载并接入系统。
-3. **插件管理**：在管理面板中开启或停用插件，配置 MCP 工具鉴权 Token，或一键更新与卸载。
+1. **浏览和安装**：按名称或关键词搜索，选择插件源，点击插件卡片上的 **安装**。
+2. **添加插件市场**：打开 **+** 菜单，选择 **添加插件市场**，输入 Claude 或 Codex 仓库地址，查看解析结果后添加。
+3. **导入插件或技能**：在 **+** 菜单选择 **上传插件**，填写本地路径或 Git 地址，或选择支持的文件，查看预览后确认导入。
+4. **管理已安装插件**：点击插件卡片上的 **管理**，配置连接器、管理能力、更新或卸载插件。
+5. **使用 MCP 工具**：进入 **MCP** 页查看服务器和插件连接器，展开服务器工具列表，查看工具说明并控制启用状态。
 
 ## 本地数据与目录结构
 
@@ -60,6 +73,8 @@ npm install
   - 插件源 Git 缓存：`~/.dsh/agent-skills/universal-plugin-hub/market/<source-id>`
   - 插件源与安装记录：`~/.dsh/agent-skills/universal-plugin-hub/state.json`
 - **运行时配置补丁**：`~/.dsh/profiles/<profile>/cordis.patch.yml`
+
+`~/.dsh` 为默认数据目录；设置 `DSH_HOME` 后，路径随该配置调整。
 
 ## 开源协议
 
