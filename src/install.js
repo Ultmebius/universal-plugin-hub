@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync,
 import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
 import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
 import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, sourceCacheDir } from './store.js'
@@ -173,10 +174,36 @@ export function isConnectorAuthenticated(pluginName, connectorName) {
   return false
 }
 
+function isRemoteConnector(config = {}) {
+  return config.transport === 'streamable-http' || config.type === 'http' || config.type === 'sse' || (!config.command && (!!config.url || !config.args?.length))
+}
+
+function remoteConfigFingerprint(config = {}) {
+  const normalized = {
+    transport: 'http',
+    url: String(config.url || '').trim(),
+    headers: Object.fromEntries(Object.entries(config.headers || {}).filter(([key]) => key.toLowerCase() !== 'content-type').sort(([a], [b]) => a.localeCompare(b))),
+    oauth: config.oauth || 'none',
+  }
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
+}
+
+function setRemoteVerification(pluginName, connectorName, payload, verified) {
+  const key = `${pluginName}::${connectorName}`
+  const state = readMcpToolsState()
+  state[key] = {
+    ...(state[key] || {}),
+    verifiedRemoteConfig: verified ? remoteConfigFingerprint(payload) : null,
+  }
+  writeMcpToolsState(state)
+}
+
 export function isConnectorActive(pluginName, connectorName) {
   const entry = getConnectorEntry(pluginName, connectorName)
   if (!entry) return false
-  return isConnectorAuthenticated(pluginName, connectorName)
+  if (!isRemoteConnector(entry.config)) return isConnectorAuthenticated(pluginName, connectorName)
+  const key = `${pluginName}::${connectorName}`
+  return readMcpToolsState()[key]?.verifiedRemoteConfig === remoteConfigFingerprint(entry.config)
 }
 
 export const getPluginConnectors = listConnectors
@@ -928,6 +955,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   const command = (typeof payload === 'object' && payload?.command) || found?.command || null
 
   if (transport === 'stdio') {
+    setRemoteVerification(pluginName, connectorName, payload, false)
     if (found && found.url && !command) {
       return {
         ok: false,
@@ -963,6 +991,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
     }
   }
   if (!url) {
+    setRemoteVerification(pluginName, connectorName, payload, false)
     return {
       ok: false,
       message: '请输入有效的服务 URL',
@@ -983,6 +1012,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   }
 
   const startTime = Date.now()
+  let result
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
@@ -995,7 +1025,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
 
     const duration = Date.now() - startTime
     if (res.status === 200) {
-      return {
+      result = {
         ok: true,
         message: '验证成功！已连接到 MCP 远程服务并激活权限。',
         server: connectorName,
@@ -1014,7 +1044,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
           userFriendly = `认证未通过：缺少访问令牌 (Access Token) 或需要 OAuth 授权`
         }
       }
-      return {
+      result = {
         ok: false,
         message: userFriendly,
         server: connectorName,
@@ -1028,7 +1058,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   } catch (e) {
     const duration = Date.now() - startTime
     if (e.name === 'AbortError') {
-      return {
+      result = {
         ok: false,
         message: '连接超时（8 秒未响应），请检查服务 URL 与网络',
         server: connectorName,
@@ -1038,7 +1068,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
         duration,
       }
     }
-    return {
+    result = {
       ok: false,
       message: `连接异常：${e.message}`,
       server: connectorName,
@@ -1048,6 +1078,8 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
       duration,
     }
   }
+  setRemoteVerification(pluginName, connectorName, { transport, url, headers: reqHeaders, oauth: payload?.oauth }, result.ok === true)
+  return result
 }
 
 export function saveConnectorAuth(pluginName, connectorName, payload) {
@@ -1089,6 +1121,9 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
     headers: { ...baseHeaders, ...customHeaders },
     oauth: isStdio ? 'none' : oauth,
   })
+  if (result.ok && !isStdio) {
+    setRemoteVerification(pluginName, connectorName, { transport, url, headers: customHeaders, oauth }, false)
+  }
   // Re-auth (or transport switch) changes which remote the connector talks to.
   // The cached tool list was captured against the old connection, so drop it
   // here — fetchConnectorTools will repopulate on the next list call.
@@ -1960,6 +1995,7 @@ export function installedDetails() {
         oauth: savedConfig.oauth || c.oauth || 'none',
         needsAuth,
         authenticated,
+        enabled: !!savedEntry,
         connected,
       }
     }) : []

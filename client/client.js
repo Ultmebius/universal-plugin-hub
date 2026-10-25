@@ -9880,9 +9880,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const needsAuth = typeof c === "object" ? (c.needsAuth === true) : false;
 					const isAuthenticated = typeof c === "object" ? (c.authenticated === true) : true;
 					const isConnected = typeof c === "object" ? (c.connected === true) : false;
+					const isEnabled = typeof c === "object" ? (c.enabled === true) : isConnected;
 					const transport = typeof c === "object" ? (c.type || (c.url ? "HTTP" : "stdio")) : "MCP";
 					const endpoint = typeof c === "object" ? (c.url || (c.command ? `${c.command} ${(c.args || []).join(" ")}` : "")) : "";
-					const isPendingVerify = needsAuth && !isAuthenticated;
+					const isRemote = transport !== "stdio";
+					const isPendingVerify = isRemote ? !isConnected : (needsAuth && !isAuthenticated);
 					const isExpanded = !!expandedConnectors[cName];
 					const toolsInfo = connectorToolsData[cName];
 					const toolsList = toolsInfo?.tools || [];
@@ -9958,13 +9960,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									onClick: () => openAuthDialog(cName, c),
 								}, h(IconSettings, { size: 14 })),
 								h("button", {
-									className: "cpm-toggle" + (isConnected ? " on" : ""),
+									className: "cpm-toggle" + (isEnabled ? " on" : ""),
+									"aria-label": isEnabled ? "停用" : "启用",
 									disabled: togglingConn === cName || busy,
 									onClick: () => {
-										if (needsAuth && !isAuthenticated && !isConnected) {
+										if (!isEnabled && ((isRemote && !isConnected) || (needsAuth && !isAuthenticated))) {
 											openAuthDialog(cName, c);
 										} else {
-											toggleConn(cName, isConnected);
+											toggleConn(cName, isEnabled);
 										}
 									},
 								}),
@@ -10335,6 +10338,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												errorDetails: err.message,
 											},
 										} : null);
+									} finally {
+										await refreshState();
 									}
 								},
 							}, authDialog.testing ? "测试中…" : (
