@@ -478,8 +478,17 @@ async function handle(req, res, prefix = API_PREFIX) {
         }
       }
       if (detail && Array.isArray(detail.connectors)) {
+        // `pluginDetail` reads the marketplace copy, which knows nothing about
+        // what the user saved here (OAuth mode, client id, callback port, the
+        // URL they edited). Take the installed row's entry whenever one exists,
+        // so opening a connector's settings reflects the saved configuration
+        // instead of silently reverting it to `None` and the manifest URL.
+        const installed = installedDetails().find((p) => p.name === pluginName)
+        const installedConnectors = new Map((installed?.connectors || []).map((c) => [c.name, c]))
         detail.connectors = detail.connectors.map((c) => ({
           ...c,
+          ...(installedConnectors.get(c.name) || {}),
+          name: c.name,
           connected: isConnectorActive(pluginName, c.name),
         }))
       }

@@ -94,3 +94,44 @@ test('OAuth UI cancels close, late starts, form changes and unmount', async () =
   assert.equal(events.errors.length, 0)
   active.unmount()
 })
+
+test('the sign-in card renders inside the dialog with its own actions', async (t) => {
+  const start = client.indexOf('\tfunction OauthPendingCard')
+  const end = client.indexOf('\n\tfunction OauthFields', start)
+  assert.ok(start > 0 && end > start, 'OauthPendingCard must be extractable')
+  const sandbox = { ...React, h: React.createElement }
+  sandbox.window = {}
+  Object.assign(sandbox, {
+    IconLink: ({ size }) => React.createElement('svg', { width: size, 'data-icon': 'link' }),
+  })
+  vm.runInNewContext(`${client.slice(start, end)}\nglobalThis.PendingCard = OauthPendingCard`, sandbox)
+  const PendingCard = sandbox.PendingCard
+
+  let cancelled = 0
+  let renderer
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(PendingCard, {
+        pending: { message: '等待浏览器授权', authorizationUrl: 'https://example.test/authorize?state=abc' },
+        onCancel: () => { cancelled += 1 },
+      }),
+    )
+  })
+  const root = renderer.root
+  // One object, not a labelled settings row: spinner + title + message + actions.
+  assert.equal(root.findByProps({ className: 'cpm-oauth-pending' }).props.role, 'status')
+  assert.equal(root.findByProps({ className: 'cpm-oauth-pending-title' }).children[0], '等待浏览器授权')
+  const link = root.findByProps({ className: 'cpm-oauth-link' })
+  assert.equal(link.props.href, 'https://example.test/authorize?state=abc')
+  assert.equal(link.props.rel, 'noopener noreferrer')
+  assert.equal(link.props.target, '_blank')
+  const cancel = root.find((node) => typeof node.props.className === 'string' && node.props.className.split(' ').includes('cpm-oauth-cancel'))
+  await act(async () => { cancel.props.onClick() })
+  assert.equal(cancelled, 1)
+
+  // Without a URL the card still reads as progress and offers cancel.
+  await act(async () => { renderer.update(React.createElement(PendingCard, { pending: { message: '正在准备 OAuth 授权…' }, onCancel: () => {} })) })
+  assert.equal(renderer.root.findAll((node) => node.props.className === 'cpm-oauth-link').length, 0)
+  assert.equal(renderer.root.findAll((node) => typeof node.props.className === 'string' && node.props.className.split(' ').includes('cpm-oauth-cancel')).length, 1)
+  renderer.unmount()
+})

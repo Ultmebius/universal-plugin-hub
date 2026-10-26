@@ -6,6 +6,37 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	const React = require("react");
 	const { createElement: h, useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } = React;
+	// Manifests spell a remote transport three ways (`http`, `sse`,
+	// `streamable-http`). The editor only has two modes; anything unrecognised
+	// used to fall through to the stdio form and show an empty local command
+	// for a connector that is actually a remote URL.
+	function isRemoteTransport(transport) {
+		return transport === "http" || transport === "sse" || transport === "streamable-http" || transport === "streamableHttp";
+	}
+
+	// Inline progress card shown while a browser sign-in is in flight. Rendered
+	// as part of the dialog body (not a labelled grid row) so it reads as one
+	// object with its own title, message and actions, using the same tokens as
+	// the rest of the dialog.
+	function OauthPendingCard({ pending, onCancel }) {
+		return h("div", { className: "cpm-oauth-pending", role: "status", "aria-live": "polite" },
+			h("span", { className: "cpm-spin-ring", style: { width: 15, height: 15, borderWidth: 2, flexShrink: 0, marginTop: 1 } }),
+			h("div", { className: "cpm-oauth-pending-body" },
+				h("div", { className: "cpm-oauth-pending-title" }, "等待浏览器授权"),
+				h("div", { className: "cpm-oauth-pending-text" }, (pending && pending.message) || "正在准备 OAuth 授权…"),
+				h("div", { className: "cpm-oauth-pending-actions" },
+					pending && pending.authorizationUrl && h("a", {
+						className: "cpm-oauth-link",
+						href: pending.authorizationUrl,
+						target: "_blank",
+						rel: "noopener noreferrer",
+					}, h(IconLink, { size: 12 }), "重新打开授权页"),
+					h("button", { type: "button", className: "cpm-btn-ghost cpm-oauth-cancel", onClick: onCancel }, "取消"),
+				),
+			),
+		);
+	}
+
 	function OauthFields({ form, onChange, idPrefix }) {
 		if (form.oauth !== "custom") return null;
 		const update = (patch) => onChange({ ...form, ...patch, status: "untested" });
@@ -2010,6 +2041,80 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-mcp-add-btn:hover {
 	background: var(--cpm-tab-hover);
 	border-color: var(--cpm-accent);
+}
+
+/* Inline browser sign-in progress, shown inside the connector dialog body. */
+.cpm-oauth-pending {
+	display: flex;
+	align-items: flex-start;
+	gap: 11px;
+	padding: 12px 14px;
+	border-radius: 12px;
+	background: rgba(0, 0, 0, 0.032);
+	border: 1px solid rgba(0, 0, 0, 0.07);
+	animation: cpm-oauth-card-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cpm-dark .cpm-oauth-pending {
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.09);
+}
+@keyframes cpm-oauth-card-in {
+	from { opacity: 0; transform: translateY(-3px); }
+	to { opacity: 1; transform: none; }
+}
+.cpm-oauth-pending-body {
+	min-width: 0;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+.cpm-oauth-pending-title {
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--cpm-text);
+}
+.cpm-oauth-pending-text {
+	font-size: 12.5px;
+	line-height: 1.45;
+	color: var(--cpm-muted);
+	word-break: break-word;
+}
+.cpm-oauth-pending-actions {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 6px;
+}
+.cpm-oauth-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--cpm-accent);
+	text-decoration: none;
+	border-radius: 6px;
+	padding: 3px 6px;
+	margin-left: -6px;
+	transition: background 0.15s ease;
+}
+.cpm-oauth-link:hover {
+	background: var(--cpm-tab-hover);
+	text-decoration: underline;
+}
+.cpm-oauth-cancel {
+	height: 26px;
+	padding: 0 8px;
+	font-size: 12.5px;
+	color: var(--cpm-muted);
+}
+.cpm-dark .cpm-oauth-link {
+	color: #60a5fa;
+}
+@media (prefers-reduced-motion: reduce) {
+	.cpm-oauth-pending { animation: none; }
 }
 
 /* Custom Dropdown Styles */
@@ -8342,7 +8447,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	function AddMcpDialog({ onCancel, onSaved, showToast, initial, owner }) {
 		const [form, setForm] = useState(() => initial ? {
 			name: initial.name || "",
-			transport: initial.transport === "http" ? "http" : "stdio",
+			transport: isRemoteTransport(initial.transport) ? "http" : "stdio",
 			url: initial.url || "",
 			oauth: initial.oauth || "none",
 			oauthClientId: initial.oauthClientId || "",
@@ -8419,7 +8524,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			form,
 			verifyPath: owner ? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify` : "/mcps/verify",
 			userMcp: !owner,
-			onFinished: (res) => showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false }),
+			onFinished: async (res) => {
+				showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false });
+				// A finished sign-in is the whole point of the OAuth mode, so
+				// register the connector now. Otherwise the dialog reopens on
+				// `None` and the user has to save a second time.
+				if (res.ok) await save(true);
+			},
 			onError: (err) => showToast("验证失败", cleanMcpError(err), { restart: false }),
 		});
 		const test = async () => {
@@ -8435,7 +8546,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		const save = async () => {
+		const save = async (quiet = false) => {
 			if (!form.name.trim()) {
 				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
 				return;
@@ -8459,7 +8570,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					setSaving(false);
 					return;
 				}
-				showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${form.name.trim()}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
+				if (!quiet) showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${form.name.trim()}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
 				await onSaved();
 			} catch (err) {
 				showToast("保存失败", cleanMcpError(err), { restart: false });
@@ -8579,14 +8690,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						),
 					),
 					h(OauthFields, { form, onChange: upd, idPrefix: "add-mcp" }),
-					oauthFlow.pending && h("div", { className: "cpm-mcp-row", role: "status", "aria-live": "polite" },
-						h("div", { className: "cpm-mcp-label" }, "Authorization"),
-						h("div", { className: "cpm-mcp-control", style: { fontSize: 12, color: "var(--cpm-muted)", lineHeight: 1.5 } },
-							h("div", null, oauthFlow.pending.message || "正在准备 OAuth 授权…"),
-							oauthFlow.pending.authorizationUrl && h("a", { href: oauthFlow.pending.authorizationUrl, target: "_blank", rel: "noopener noreferrer" }, "浏览器未打开？点击这里授权"),
-							h("button", { type: "button", className: "cpm-btn-ghost", style: { marginTop: 6 }, onClick: oauthFlow.cancel }, "取消授权"),
-						),
-					),
+					oauthFlow.pending && h(OauthPendingCard, { pending: oauthFlow.pending, onCancel: oauthFlow.cancel }),
 					form.transport === "stdio" && h("div", { className: "cpm-mcp-row" },
 						h("div", { className: "cpm-mcp-label" }, "Command"),
 						h("div", { className: "cpm-mcp-control" },
@@ -8684,7 +8788,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						className: "cpm-btn cpm-btn-secondary",
 						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
 						onClick: test,
-					}, testing ? "测试中…" : (oauthFlow.pending ? "授权并测试中…" : "测试连接")),
+					}, testing ? "测试中…" : (oauthFlow.pending ? "等待授权…" : (
+						form.transport === "http" && form.oauth !== "none" ? "登录并连接" : "测试连接"
+					))),
 					h("button", {
 						className: "cpm-btn cpm-btn-primary",
 						disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
@@ -9306,6 +9412,48 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				oauthCallbackPort: authDialog.oauthCallbackPort, oauthScope: authDialog.oauthScope,
 			};
 		};
+		// Persist the dialog's configuration. Signing in is only half of an OAuth
+		// connector: the tokens live in the credential store, but the connector
+		// itself is not registered until this writes the bridge entry. Without it
+		// the dialog reopened on whatever was saved before — usually `None`.
+		const persistAuthDialog = async () => {
+			const headers = {};
+			for (const item of authDialog.headersList || []) {
+				const value = (item.value || "").trim();
+				if (!value) continue;
+				headers[(item.key || "").trim() || "Authorization"] = value;
+			}
+			let parsedArgs = [];
+			if (authDialog.transport === "stdio" && authDialog.args.trim()) {
+				try {
+					const parsed = JSON.parse(authDialog.args);
+					parsedArgs = Array.isArray(parsed) ? parsed : [String(parsed)];
+				} catch {
+					parsedArgs = [];
+				}
+			}
+			const envMap = {};
+			if (authDialog.transport === "stdio") {
+				for (const eItem of authDialog.envList) {
+					if (eItem.key.trim()) envMap[eItem.key.trim()] = eItem.value;
+				}
+			}
+			return api(`/plugins/${record.name}/connectors/${authDialog.connectorName}/auth`, {
+				method: "POST",
+				body: JSON.stringify({
+					transport: authDialog.transport,
+					url: authDialog.url,
+					headers,
+					oauth: authDialog.oauth,
+					oauthClientId: authDialog.oauthClientId,
+					oauthClientSecret: authDialog.oauthClientSecret,
+					oauthCallbackPort: authDialog.oauthCallbackPort,
+					oauthScope: authDialog.oauthScope,
+					args: parsedArgs,
+					env: envMap,
+				}),
+			});
+		};
 		const setAuthError = (message) => setAuthDialog((prev) => prev ? {
 			...prev, testing: false, status: "error", statusMessage: message,
 			lastResult: { ok: false, message, status: 500, server: prev.connectorName, transport: prev.transport, endpoint: prev.url, errorDetails: message },
@@ -9315,6 +9463,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			verifyPath: `/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`,
 			onFinished: async (res) => {
 				setAuthDialog((prev) => prev ? { ...prev, testing: false, status: res.ok ? "success" : "error", statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"), lastResult: res } : null);
+				// A successful sign-in is also the moment the connector becomes
+				// usable, so register it right away. Leaving that to the Save
+				// button is what made a completed sign-in reopen as `None`.
+				if (res.ok) {
+					const saved = await persistAuthDialog();
+					if (saved && saved.ok === false) {
+						showToast("保存失败", saved.error || "配置校验未通过，请检查填写内容", { restart: false });
+					}
+				}
 				await refreshState();
 				if (res.ok && res.server) await loadConnectorTools(res.server, true);
 			},
@@ -9688,10 +9845,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					isSecret: true,
 				}));
 
-			const isHttpOnly = !!(connObj && (connObj.url || connObj.type === "http" || connObj.type === "sse") && !connObj.command);
+			const isHttpOnly = !!(connObj && (connObj.url || isRemoteTransport(connObj.type)) && !connObj.command);
 			const isStdioOnly = !!(connObj && (connObj.command || connObj.type === "stdio") && !connObj.url);
 			const allowedTransports = isHttpOnly ? ["http"] : (isStdioOnly ? ["stdio"] : ["http", "stdio"]);
-			const initialTransport = isHttpOnly ? "http" : (isStdioOnly ? "stdio" : ((connObj && connObj.type === "stdio") ? "stdio" : "http"));
+			const initialTransport = isHttpOnly ? "http" : (isStdioOnly ? "stdio" : (connObj && connObj.type === "stdio" ? "stdio" : "http"));
 
 			let rawArgs = "";
 			if (connObj && connObj.args) {
@@ -10377,14 +10534,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							),
 						),
 						h(OauthFields, { form: authDialog, onChange: setAuthDialog, idPrefix: "edit-mcp" }),
-						oauthFlow.pending && h("div", { className: "cpm-mcp-row", role: "status", "aria-live": "polite" },
-							h("div", { className: "cpm-mcp-label" }, "Authorization"),
-							h("div", { className: "cpm-mcp-control", style: { fontSize: 12, color: "var(--cpm-muted)", lineHeight: 1.5 } },
-								h("div", null, oauthFlow.pending.message || "正在准备 OAuth 授权…"),
-								oauthFlow.pending.authorizationUrl && h("a", { href: oauthFlow.pending.authorizationUrl, target: "_blank", rel: "noopener noreferrer" }, "浏览器未打开？点击这里授权"),
-								h("button", { type: "button", className: "cpm-btn-ghost", style: { marginTop: 6 }, onClick: oauthFlow.cancel }, "取消授权"),
-							),
-						),
+						oauthFlow.pending && h(OauthPendingCard, { pending: oauthFlow.pending, onCancel: oauthFlow.cancel }),
 					),
 
 					h("div", { className: "cpm-mcp-footer" },
@@ -10487,10 +10637,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								className: "cpm-btn cpm-btn-secondary",
 								disabled: authDialog.testing || authDialog.saving || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
 								onClick: runAuthTest,
-							}, authDialog.testing ? (authDialog.oauth !== "none" ? "授权并测试中…" : "测试中…") : (
+							}, authDialog.testing ? (authDialog.oauth !== "none" ? "等待授权…" : "测试中…") : (
 								authDialog.transport === "stdio" ? "测试连接" : (
-									(authDialog.oauth && authDialog.oauth !== "none") ? "Sign in & test" : (
-										(authDialog.headersList && authDialog.headersList.some(h => (h.value || '').trim())) ? "验证并测试" : "测试连接"
+									(authDialog.oauth && authDialog.oauth !== "none") ? "登录并连接" : (
+										(authDialog.headersList && authDialog.headersList.some(h => (h.value || '').trim())) ? "验证并连接" : "测试连接"
 									)
 								)
 							)),
@@ -10499,45 +10649,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								className: "cpm-btn cpm-btn-primary",
 								disabled: authDialog.saving || authDialog.testing || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
 								onClick: async () => {
-									const computedHeaders = {};
-									for (const hItem of authDialog.headersList) {
-										const v = (hItem.value || "").trim();
-										if (!v) continue;
-										const k = (hItem.key || "").trim() || "Authorization";
-										computedHeaders[k] = v;
-									}
 									setAuthDialog((prev) => prev ? { ...prev, saving: true } : null);
 									try {
-										let parsedArgs = [];
-										if (authDialog.transport === "stdio" && authDialog.args.trim()) {
-											try {
-												const parsed = JSON.parse(authDialog.args);
-												parsedArgs = Array.isArray(parsed) ? parsed : [String(parsed)];
-											} catch {
-												parsedArgs = [];
-											}
-										}
-										const envMap = {};
-										if (authDialog.transport === "stdio") {
-											for (const eItem of authDialog.envList) {
-												if (eItem.key.trim()) envMap[eItem.key.trim()] = eItem.value;
-											}
-										}
-										const res = await api(`/plugins/${record.name}/connectors/${authDialog.connectorName}/auth`, {
-											method: "POST",
-											body: JSON.stringify({
-												transport: authDialog.transport,
-												url: authDialog.url,
-												headers: computedHeaders,
-												oauth: authDialog.oauth,
-												oauthClientId: authDialog.oauthClientId,
-												oauthClientSecret: authDialog.oauthClientSecret,
-												oauthCallbackPort: authDialog.oauthCallbackPort,
-												oauthScope: authDialog.oauthScope,
-												args: parsedArgs,
-												env: envMap,
-											}),
-										});
+										const res = await persistAuthDialog();
 										if (res && res.ok === false) {
 											showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
 											setAuthDialog((prev) => prev ? { ...prev, saving: false } : null);

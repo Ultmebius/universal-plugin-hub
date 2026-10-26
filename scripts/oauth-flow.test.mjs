@@ -21,7 +21,7 @@ const credentialRoot = join(root, 'credentials')
 process.env.UPH_OAUTH_STORE_DIR = credentialRoot
 process.env.DSH_HOME = join(root, 'dsh')
 const { installedDir, writeState } = await import('../src/store.js')
-const { saveConnectorAuth, isConnectorActive, toggleConnector, getConnectorEntry, readMcpToolsState, queryStdioToolsList, verifyConnectorAuth } = await import('../src/install.js')
+const { saveConnectorAuth, isConnectorActive, toggleConnector, getConnectorEntry, readMcpToolsState, queryStdioToolsList, verifyConnectorAuth, installedDetails } = await import('../src/install.js')
 
 async function body(req) {
   const chunks = []
@@ -313,6 +313,55 @@ test('ordinary stdio waits for initialize without duplicate tools/list requests'
   assert.equal(result.error, null)
   assert.deepEqual(result.tools.map((tool) => tool.name), ['slow'])
   assert.equal(readFileSync(log, 'utf8'), '1 true\n')
+})
+
+test('manifest transports normalize and saved OAuth settings survive the detail route', { timeout: 30000 }, async (t) => {
+  const { mountRoutes } = await import('../src/routes.js')
+  const { readState } = await import('../src/store.js')
+  const target = installedDir('manifest-plugin')
+  mkdirSync(join(target, '.claude-plugin'), { recursive: true })
+  writeFileSync(join(target, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'manifest-plugin', version: '1.0.0' }))
+  writeFileSync(join(target, '.mcp.json'), JSON.stringify({ mcpServers: {
+    remote: { type: 'streamable-http', url: 'https://mcp.manifest.test/mcp', headers: { 'x-source': 'manifest' } },
+    legacySse: { type: 'sse', url: 'https://mcp.manifest.test/sse' },
+    local: { type: 'stdio', command: 'node' },
+  } }))
+  const state = readState()
+  state.plugins = [...state.plugins.filter((p) => p.name !== 'manifest-plugin'), { name: 'manifest-plugin', sourceId: 'local' }]
+  writeState(state)
+
+  const connectors = installedDetails().find((p) => p.name === 'manifest-plugin').connectors
+  const byName = Object.fromEntries(connectors.map((c) => [c.name, c]))
+  // `streamable-http` and `sse` are both remote. Left as-is they fell through
+  // the editor's two-mode check and rendered an empty stdio command form.
+  assert.equal(byName.remote.type, 'http')
+  assert.equal(byName.legacySse.type, 'http')
+  assert.equal(byName.local.type, 'stdio')
+
+  saveConnectorAuth('manifest-plugin', 'remote', {
+    transport: 'http', url: 'https://mcp.manifest.test/mcp', headers: { 'x-source': 'manifest' },
+    oauth: 'auto_register', oauthScope: 'tools.read',
+  })
+
+  const server = createServer()
+  let handler
+  mountRoutes({ register: ({ handler: registered }) => { handler = registered; return () => {} } })
+  server.on('request', (req, res) => handler(req, res))
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const base = `http://127.0.0.1:${server.address().port}/universal-plugin-hub/api`
+
+  // The marketplace copy of a plugin knows nothing about what the user saved.
+  // Letting it win overwrote the OAuth mode, so the edit dialog reopened on
+  // `None` immediately after a successful sign-in.
+  const detail = await (await fetch(`${base}/plugins/local/manifest-plugin`)).json()
+  const routed = Object.fromEntries((detail.plugin.detail.connectors || []).map((c) => [c.name, c]))
+  assert.equal(routed.remote.oauth, 'auto_register')
+  assert.equal(routed.remote.type, 'http')
+  assert.equal(routed.remote.oauthScope, 'tools.read')
+  assert.equal(routed.remote.url, 'https://mcp.manifest.test/mcp')
+  assert.equal(routed.local.oauth, 'none')
 })
 
 test.after(() => rmSync(root, { recursive: true, force: true }))

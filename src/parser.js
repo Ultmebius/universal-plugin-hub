@@ -856,6 +856,19 @@ export function listHooks(dir) {
   return hooks
 }
 
+/**
+ * Collapse every remote transport spelling a manifest may use into the two
+ * values the editor and the host understand. Marketplaces write
+ * `streamable-http`, `.mcp.json` files write `http`, some older servers write
+ * `sse`; a `type` the editor does not recognise would fall back to stdio and
+ * show an empty local-command form for a remote URL.
+ */
+function connectorTransport(type, url, command) {
+  if (type === 'stdio') return 'stdio'
+  if (type === 'http' || type === 'sse' || type === 'streamable-http' || type === 'streamableHttp') return 'http'
+  return command && !url ? 'stdio' : 'http'
+}
+
 /** Connector-ish entries: .mcp.json, mcp.json, server.json, or plugin.json "mcp" / "connectors". */
 export function listConnectors(dir) {
   const connectors = []
@@ -892,7 +905,7 @@ export function listConnectors(dir) {
               seen.add(name)
               connectors.push({
                 name,
-                type: cfg.type || (cfg.url ? 'http' : 'stdio'),
+                type: connectorTransport(cfg.type, cfg.url, cfg.command),
                 url: cfg.url || null,
                 command: cfg.command || null,
                 args: cfg.args || [],
@@ -922,7 +935,7 @@ export function listConnectors(dir) {
           seen.add(name)
           connectors.push({
             name,
-            type: cfg.type || (cfg.url ? 'http' : 'stdio'),
+            type: connectorTransport(cfg.type, cfg.url, cfg.command),
             url: cfg.url || null,
             command: cfg.command || null,
             args: cfg.args || [],
@@ -939,7 +952,7 @@ export function listConnectors(dir) {
           seen.add(name)
           connectors.push({
             name,
-            type: c.type || (c.url ? 'http' : 'stdio'),
+            type: connectorTransport(c.type, c.url, c.command),
             url: c.url || null,
             command: c.command || null,
             args: c.args || [],
