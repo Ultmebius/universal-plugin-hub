@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import * as acorn from 'acorn'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
@@ -177,4 +178,15 @@ test('a throwing onFinished is reported as an error, not as a failed verificatio
   assert.equal(events.errors.length, 1)
   assert.match(String(events.errors[0].message), /save rejected/)
   renderer.unmount()
+})
+
+test('the client bundle parses as a whole', () => {
+  // The stylesheet is a template literal, so a stray backtick in a CSS comment
+  // closes it early and turns the rest of the rule into code — which is how
+  // `import failed: btn is not defined` shipped. Compiling the real file (not a
+  // slice) catches that, and any other edit that breaks the module.
+  assert.doesNotThrow(() => vm.compileFunction(client, ['window', 'require', 'module', 'exports']), 'client.js must compile')
+  const tokens = [...acorn.tokenizer(client, { ecmaVersion: 'latest' })]
+  const stray = tokens.filter((token) => token.type.label === 'name' && token.value === 'btn')
+  assert.deepEqual(stray.map((token) => token.value), [], 'no bare `btn` identifier may appear in the bundle')
 })

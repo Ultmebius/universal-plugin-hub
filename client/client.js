@@ -2120,7 +2120,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: var(--cpm-tab-hover);
 	text-decoration: underline;
 }
-/* Two classes so it outranks the later `.cpm-btn-ghost` rule for the sizing. */
+/* Two classes so it outranks the later cpm-btn-ghost rule for the sizing. */
 .cpm-oauth-pending .cpm-oauth-cancel {
 	height: 26px;
 	padding: 0 8px;
