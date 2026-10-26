@@ -470,8 +470,16 @@ async function handle(req, res, prefix = API_PREFIX) {
         row = readMarketplace(sourceId).find((r) => r.name === pluginName) || row
         detail = pluginDetail(sourceId, pluginName, row.source, row)
       }
+      // One pass over the installed tree per request: `installedDetails()` re-reads
+      // every connector, skill and LSP entry for every plugin, so it must not run
+      // twice in the same handler.
+      let installed = null
+      const findInstalled = () => {
+        if (!installed) installed = installedDetails().find((p) => p.name === pluginName)
+        return installed
+      }
       if (!detail) {
-        const inst = installedDetails().find((p) => p.name === pluginName)
+        const inst = findInstalled()
         if (inst) {
           detail = inst
           if (!row) row = inst
@@ -483,8 +491,7 @@ async function handle(req, res, prefix = API_PREFIX) {
         // URL they edited). Take the installed row's entry whenever one exists,
         // so opening a connector's settings reflects the saved configuration
         // instead of silently reverting it to `None` and the manifest URL.
-        const installed = installedDetails().find((p) => p.name === pluginName)
-        const installedConnectors = new Map((installed?.connectors || []).map((c) => [c.name, c]))
+        const installedConnectors = new Map(((findInstalled()?.connectors) || []).map((c) => [c.name, c]))
         detail.connectors = detail.connectors.map((c) => ({
           ...c,
           ...(installedConnectors.get(c.name) || {}),

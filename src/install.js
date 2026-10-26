@@ -17,7 +17,7 @@ import { homedir } from 'node:os'
 import * as yaml from 'js-yaml'
 import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, sourceCacheDir } from './store.js'
 import { materializePlugin, pullSource, pluginPath } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { buildPluginIcons } from './icons.js'
 import { beginOAuthVerification, completeOAuthVerification, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
@@ -82,7 +82,7 @@ export function getConnectorEntry(pluginName, connectorName) {
 
 export function connectorRequiresAuth(cfg) {
   if (!cfg) return true
-  const isHttp = (cfg.type === 'http' || cfg.type === 'sse' || (!cfg.command && (!!cfg.url || !cfg.args?.length)))
+  const isHttp = (connectorTransport(cfg.type, cfg.url, cfg.command) === 'http')
   
   // 1. If HTTP / SSE connector has NO valid URL or empty placeholder URL, it ALWAYS requires configuration/auth!
   if (isHttp) {
@@ -141,7 +141,7 @@ export function isConnectorAuthenticated(pluginName, connectorName) {
   const entry = getConnectorEntry(pluginName, connectorName)
   const cfg = entry?.config || found || {}
 
-  const isHttp = (entry?.config?.transport === 'streamable-http' || found?.type === 'http' || found?.type === 'sse' || (!found?.command && (found?.url || cfg.url)) || (!found?.command && !found?.args?.length))
+  const isHttp = (isRemoteTransportName(entry?.config?.transport) || isRemoteTransportName(found?.type) || (!found?.command && (found?.url || cfg.url)) || (!found?.command && !found?.args?.length))
   if (isHttp) {
     const url = cfg.url || found?.url || ''
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
@@ -181,7 +181,7 @@ export function isConnectorAuthenticated(pluginName, connectorName) {
 }
 
 function isRemoteConnector(config = {}) {
-  return config.transport === 'streamable-http' || config.type === 'http' || config.type === 'sse' || (!config.command && (!!config.url || !config.args?.length))
+  return isRemoteTransportName(config.transport) || isRemoteTransportName(config.type) || (!config.command && (!!config.url || !config.args?.length))
 }
 
 function remoteConfigFingerprint(config = {}) {
@@ -260,7 +260,7 @@ export function registerConnector(pluginName, connectorName, connectorConfig) {
 
   insertBlock.insert = insertBlock.insert.filter((item) => item && item.id !== id)
 
-  const isHttp = resolvedConfig.type === 'http' || resolvedConfig.type === 'sse' || (!resolvedConfig.command && (!!resolvedConfig.url || !resolvedConfig.args?.length))
+  const isHttp = connectorTransport(resolvedConfig.type || resolvedConfig.transport, resolvedConfig.url, resolvedConfig.command) === 'http'
   if (isHttp && (!resolvedConfig.url || !resolvedConfig.url.trim() || !/^https?:\/\//i.test(resolvedConfig.url.trim()))) {
     return { ok: false, connected: false, error: '缺少有效的服务 URL' }
   }
@@ -1806,7 +1806,7 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   }
   for (const c of pluginConnectors) {
     if (!connectorRequiresAuth(c)) {
-      const isHttp = (c.type === 'http' || c.type === 'sse' || (!c.command && (!!c.url || !c.args?.length)))
+      const isHttp = (connectorTransport(c.type, c.url, c.command) === 'http')
       if (isHttp && (!c.url || !c.url.trim() || !/^https?:\/\//i.test(c.url.trim()))) {
         continue
       }
@@ -2070,7 +2070,7 @@ export function installedDetails() {
       const savedEnv = remote ? {} : ((savedConfig.env && Object.keys(savedConfig.env).length > 0) ? savedConfig.env : c.env)
       const savedUrl = remote ? remote.url : (savedConfig.url || c.url)
       const savedArgs = remote ? [] : ((savedConfig.args && savedConfig.args.length > 0) ? savedConfig.args : c.args)
-      const savedTransport = remote ? 'http' : (savedConfig.transport ? (savedConfig.transport === 'streamable-http' ? 'http' : (savedConfig.transport === 'stdio' ? 'stdio' : c.type)) : c.type)
+      const savedTransport = remote ? 'http' : connectorTransport(savedConfig.transport || savedConfig.type, savedUrl, savedConfig.command || c.command)
       const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, savedUrl, remote.oauth) : null
 
       return {

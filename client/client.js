@@ -14,6 +14,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return transport === "http" || transport === "sse" || transport === "streamable-http" || transport === "streamableHttp";
 	}
 
+	function cleanMcpErrorText(err) {
+		if (!err) return "操作失败";
+		const msg = String(err.message || err).replace(/^Error:\s*/i, "").trim();
+		return msg.length > 50 ? msg.slice(0, 48) + "…" : msg;
+	}
+
 	// Inline progress card shown while a browser sign-in is in flight. Rendered
 	// as part of the dialog body (not a labelled grid row) so it reads as one
 	// object with its own title, message and actions, using the same tokens as
@@ -95,6 +101,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			let stopped = false;
 			let timer;
 			const poll = async () => {
+				let final = null;
 				try {
 					const path = userMcp ? "/mcps/oauth-status" : pending.statusPath;
 					const response = await window.fetch(`/universal-plugin-hub/api${path}?sessionId=${encodeURIComponent(pending.sessionId)}`);
@@ -106,13 +113,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						timer = window.setTimeout(poll, 350);
 						return;
 					}
-					pendingRef.current = null;
-					setPending(null);
-					await callbacks.current.onFinished?.(result);
+					final = result;
 				} catch (error) {
 					if (stopped || pendingRef.current?.sessionId !== pending.sessionId) return;
 					pendingRef.current = null;
 					setPending(null);
+					callbacks.current.onError?.(error);
+					return;
+				}
+				pendingRef.current = null;
+				setPending(null);
+				// Outside the try: the caller's onFinished may itself reject (saving
+				// the verified configuration can fail), and that is a save problem,
+				// not a failed verification.
+				try {
+					await callbacks.current.onFinished?.(final);
+				} catch (error) {
 					callbacks.current.onError?.(error);
 				}
 			};
@@ -2104,7 +2120,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: var(--cpm-tab-hover);
 	text-decoration: underline;
 }
-.cpm-oauth-cancel {
+/* Two classes so it outranks the later `.cpm-btn-ghost` rule for the sizing. */
+.cpm-oauth-pending .cpm-oauth-cancel {
 	height: 26px;
 	padding: 0 8px;
 	font-size: 12.5px;
@@ -8514,12 +8531,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			};
 		};
 
-		const cleanMcpError = (err) => {
-			if (!err) return "操作失败";
-			let msg = String(err.message || err).replace(/^Error:\s*/i, "").trim();
-			return msg.length > 50 ? msg.slice(0, 48) + "…" : msg;
-		};
-
+		const cleanMcpError = (err) => cleanMcpErrorText(err);
+		// The payload that was actually sent for verification. A finished OAuth
+		// handshake must save exactly that configuration, not whatever the form
+		// holds by the time the browser comes back.
+		const verifiedPayloadRef = useRef(null);
 		const oauthFlow = useOauthVerification({
 			form,
 			verifyPath: owner ? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify` : "/mcps/verify",
@@ -8529,7 +8545,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				// A finished sign-in is the whole point of the OAuth mode, so
 				// register the connector now. Otherwise the dialog reopens on
 				// `None` and the user has to save a second time.
-				if (res.ok) await save(true);
+				if (res.ok) await save(verifiedPayloadRef.current);
 			},
 			onError: (err) => showToast("验证失败", cleanMcpError(err), { restart: false }),
 		});
@@ -8538,43 +8554,47 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
 				return;
 			}
+			const payload = buildPayload();
+			verifiedPayloadRef.current = payload;
 			setTesting(true);
 			try {
-				await oauthFlow.start(buildPayload());
+				await oauthFlow.start(payload);
 			} finally {
 				setTesting(false);
 			}
 		};
 
-		const save = async (quiet = false) => {
-			if (!form.name.trim()) {
+		const save = async (payload, quiet = false) => {
+			const data = payload || buildPayload();
+			if (!data.name) {
 				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
 				return;
 			}
-			if (form.transport === "http" && !form.url.trim()) {
+			if (data.transport === "http" && !String(data.url || "").trim()) {
 				showToast("请输入服务 URL", "HTTP 连接需要有效的 MCP 服务地址，如 https://mcp.notion.com/mcp", { restart: false });
 				return;
 			}
-			if (form.transport === "stdio" && !form.command.trim()) {
+			if (data.transport === "stdio" && !data.command) {
 				showToast("请输入启动命令", "stdio 连接需要本地启动命令，如 npx、node 或 uvx", { restart: false });
 				return;
 			}
 			setSaving(true);
 			try {
 				const saveUrl = owner
-					? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/auth`
+					? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(data.name)}/auth`
 					: (initial ? "/mcps/update" : "/mcps");
-				const res = await api(saveUrl, { method: "POST", body: JSON.stringify(buildPayload()) });
+				const res = await api(saveUrl, { method: "POST", body: JSON.stringify(data) });
 				if (res && res.ok === false) {
 					showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
 					setSaving(false);
 					return;
 				}
-				if (!quiet) showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${form.name.trim()}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
+				showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${data.name}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
 				await onSaved();
 			} catch (err) {
 				showToast("保存失败", cleanMcpError(err), { restart: false });
 				setSaving(false);
+				throw err;
 			}
 		};
 
@@ -8794,7 +8814,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					h("button", {
 						className: "cpm-btn cpm-btn-primary",
 						disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
-						onClick: save,
+						onClick: () => save(),
 					}, saving ? "保存中…" : "保存并启用"),
 				),
 			),
@@ -9416,15 +9436,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// connector: the tokens live in the credential store, but the connector
 		// itself is not registered until this writes the bridge entry. Without it
 		// the dialog reopened on whatever was saved before — usually `None`.
-		const persistAuthDialog = async () => {
-			const headers = {};
-			for (const item of authDialog.headersList || []) {
-				const value = (item.value || "").trim();
-				if (!value) continue;
-				headers[(item.key || "").trim() || "Authorization"] = value;
-			}
+		const persistAuthDialog = async (payload) => {
+			const data = payload || buildAuthPayload();
+			const headers = { ...(data.headers || {}) };
 			let parsedArgs = [];
-			if (authDialog.transport === "stdio" && authDialog.args.trim()) {
+			if (data.transport === "stdio" && authDialog.args.trim()) {
 				try {
 					const parsed = JSON.parse(authDialog.args);
 					parsedArgs = Array.isArray(parsed) ? parsed : [String(parsed)];
@@ -9433,22 +9449,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 			}
 			const envMap = {};
-			if (authDialog.transport === "stdio") {
+			if (data.transport === "stdio") {
 				for (const eItem of authDialog.envList) {
 					if (eItem.key.trim()) envMap[eItem.key.trim()] = eItem.value;
 				}
 			}
-			return api(`/plugins/${record.name}/connectors/${authDialog.connectorName}/auth`, {
+			return api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog.connectorName)}/auth`, {
 				method: "POST",
 				body: JSON.stringify({
-					transport: authDialog.transport,
-					url: authDialog.url,
+					transport: data.transport,
+					url: data.url,
 					headers,
-					oauth: authDialog.oauth,
-					oauthClientId: authDialog.oauthClientId,
-					oauthClientSecret: authDialog.oauthClientSecret,
-					oauthCallbackPort: authDialog.oauthCallbackPort,
-					oauthScope: authDialog.oauthScope,
+					oauth: data.oauth,
+					oauthClientId: data.oauthClientId,
+					oauthClientSecret: data.oauthClientSecret,
+					oauthCallbackPort: data.oauthCallbackPort,
+					oauthScope: data.oauthScope,
 					args: parsedArgs,
 					env: envMap,
 				}),
@@ -9466,10 +9482,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				// A successful sign-in is also the moment the connector becomes
 				// usable, so register it right away. Leaving that to the Save
 				// button is what made a completed sign-in reopen as `None`.
+				// A failure here is a save problem and must not read as a failed
+				// verification, so it stays out of the polling error path.
 				if (res.ok) {
-					const saved = await persistAuthDialog();
-					if (saved && saved.ok === false) {
-						showToast("保存失败", saved.error || "配置校验未通过，请检查填写内容", { restart: false });
+					try {
+						const saved = await persistAuthDialog(verifiedPayloadRef.current);
+						if (saved && saved.ok === false) {
+							showToast("保存失败", saved.error || "配置校验未通过，请检查填写内容", { restart: false });
+						}
+					} catch (error) {
+						showToast("保存失败", cleanMcpError(error), { restart: false });
 					}
 				}
 				await refreshState();
@@ -9482,10 +9504,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			setAuthDialog(null);
 			void oauthFlow.cancel();
 		}, [oauthFlow.cancel]);
+		// Which configuration the running verification was started with. The
+		// dialog can be edited while the browser is open, so the auto-save after
+		// a finished sign-in must persist the verified one, not the latest form.
+		const verifiedPayloadRef = useRef(null);
 		const runAuthTest = async () => {
 			if (!authDialog) return;
+			const payload = buildAuthPayload();
+			verifiedPayloadRef.current = payload;
 			setAuthDialog((prev) => prev ? { ...prev, testing: true, status: "testing", statusMessage: "" } : null);
-			await oauthFlow.start(buildAuthPayload());
+			await oauthFlow.start(payload);
 		};
 
 		useEffect(() => {

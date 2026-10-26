@@ -862,11 +862,20 @@ export function listHooks(dir) {
  * `streamable-http`, `.mcp.json` files write `http`, some older servers write
  * `sse`; a `type` the editor does not recognise would fall back to stdio and
  * show an empty local-command form for a remote URL.
+ *
+ * This is the single source of truth for that mapping — the host's connector
+ * checks and the browser editor call it instead of keeping their own copy of
+ * the whitelist, so a new spelling only has to be taught once.
  */
-function connectorTransport(type, url, command) {
+export function connectorTransport(type, url, command) {
   if (type === 'stdio') return 'stdio'
   if (type === 'http' || type === 'sse' || type === 'streamable-http' || type === 'streamableHttp') return 'http'
   return command && !url ? 'stdio' : 'http'
+}
+
+/** True when a transport name is one of the remote spellings. */
+export function isRemoteTransportName(type) {
+  return type === 'http' || type === 'sse' || type === 'streamable-http' || type === 'streamableHttp'
 }
 
 /** Connector-ish entries: .mcp.json, mcp.json, server.json, or plugin.json "mcp" / "connectors". */

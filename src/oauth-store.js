@@ -27,13 +27,26 @@ function unprotectDpapi(encoded) {
   })
 }
 
+// Decrypting a DPAPI record spawns a pwsh process (hundreds of ms on Windows),
+// and `installedDetails()` reads one per custom-OAuth connector on every
+// `/state` and plugin-detail request. Cache the plaintext by file content, so a
+// write — which changes the ciphertext — invalidates the entry automatically.
+const RECORD_CACHE = new Map()
+
 export function readOAuthRecord(key) {
   const file = oauthCredentialPath(key)
-  if (!existsSync(file)) return {}
+  if (!existsSync(file)) {
+    RECORD_CACHE.delete(file)
+    return {}
+  }
   try {
-    const stored = JSON.parse(readFileSync(file, 'utf8'))
-    if (stored.dpapi === true) return JSON.parse(unprotectDpapi(stored.data))
-    return stored
+    const raw = readFileSync(file, 'utf8')
+    const cached = RECORD_CACHE.get(file)
+    if (cached && cached.raw === raw) return cached.record
+    const stored = JSON.parse(raw)
+    const record = stored.dpapi === true ? JSON.parse(unprotectDpapi(stored.data)) : stored
+    RECORD_CACHE.set(file, { raw, record })
+    return record
   } catch {
     return {}
   }
@@ -50,6 +63,9 @@ export function writeOAuthRecord(key, record) {
   writeFileSync(tmp, JSON.stringify(stored), { mode: 0o600 })
   renameSync(tmp, file)
   try { if (process.platform !== 'win32') writeFileSync(file, JSON.stringify(stored), { mode: 0o600 }) } catch {}
+  // Seed the read cache with what was just written: no pwsh round trip, and a
+  // concurrent reader can never see the previous version.
+  RECORD_CACHE.set(file, { raw: JSON.stringify(stored), record })
 }
 
 export function saveOAuthClientCredentials(key, client) {

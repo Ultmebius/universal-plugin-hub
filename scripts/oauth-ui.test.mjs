@@ -135,3 +135,46 @@ test('the sign-in card renders inside the dialog with its own actions', async (t
   assert.equal(renderer.root.findAll((node) => typeof node.props.className === 'string' && node.props.className.split(' ').includes('cpm-oauth-cancel')).length, 1)
   renderer.unmount()
 })
+
+test('a throwing onFinished is reported as an error, not as a failed verification', async (t) => {
+  const timers = []
+  const original = window.setTimeout
+  const originalClear = window.clearTimeout
+  window.setTimeout = (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer }
+  window.clearTimeout = () => {}
+  t.after(() => { window.setTimeout = original; window.clearTimeout = originalClear })
+  const events = { finished: [], cancelled: [], errors: [] }
+  window.fetch = async (url, options) => {
+    if (options?.method === 'POST') return response({ pending: true, sessionId: 'save-fails' })
+    return response({ found: true, ok: true, message: '验证成功' })
+  }
+  let current
+  function Probe({ form }) {
+    current = context.OAuthProbe({
+      form,
+      verifyPath: '/plugins/test/connectors/remote/verify',
+      // Saving the verified configuration can reject. The verification itself
+      // succeeded, so its result must still reach the caller and the rejection
+      // must surface as its own error rather than replacing the outcome.
+      onFinished: async (result) => { events.finished.push(result); throw new Error('save rejected') },
+      onCancel: () => events.cancelled.push(true),
+      onError: (error) => events.errors.push(error),
+    })
+    return null
+  }
+  let renderer
+  await act(async () => {
+    renderer = TestRenderer.create(React.createElement(Probe, { form: { url: 'https://example.test/mcp' } }))
+  })
+  await act(() => current.start())
+  await flush()
+  await act(() => timers.shift().callback())
+  await flush()
+  assert.equal(events.finished.length, 1)
+  assert.equal(events.finished[0].ok, true)
+  // The rejection is the caller's own save problem. It reaches onError with its
+  // own message, and never replaces the verification result it followed.
+  assert.equal(events.errors.length, 1)
+  assert.match(String(events.errors[0].message), /save rejected/)
+  renderer.unmount()
+})

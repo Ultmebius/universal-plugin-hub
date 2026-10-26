@@ -365,3 +365,40 @@ test('manifest transports normalize and saved OAuth settings survive the detail 
 })
 
 test.after(() => rmSync(root, { recursive: true, force: true }))
+
+test('credential reads are cached by file content and rewritten on save', async () => {
+  const { writeOAuthRecord } = await import('../src/oauth-store.js')
+  const key = oauthCredentialKey('test-plugin', 'cached', 'https://mcp.cache.test/mcp', 'custom')
+  writeOAuthRecord(key, { customClient: { client_id: 'one' } })
+  const first = readOAuthRecord(key)
+  assert.equal(first.customClient.client_id, 'one')
+  // Same content: served from cache (no pwsh round trip, same object identity).
+  assert.equal(readOAuthRecord(key), first)
+  writeOAuthRecord(key, { customClient: { client_id: 'two' } })
+  const second = readOAuthRecord(key)
+  assert.equal(second.customClient.client_id, 'two')
+  assert.notEqual(second, first)
+})
+
+test('the auth route rejects names outside the plugin-segment whitelist', async (t) => {
+  // The route only accepts `[a-z0-9][a-z0-9._-]*` segments, so a name with a
+  // space can never reach a handler. The editor therefore has to keep its
+  // encodeURIComponent (it does) and nothing else — the pipeline is asserted
+  // here so a relaxed regex or a dropped encode is caught together.
+  const { safeSegment } = await import('../src/market.js')
+  assert.equal(safeSegment('my-connector', 'connector name'), 'my-connector')
+  assert.throws(() => safeSegment('my connector', 'connector name'), /invalid connector name/)
+  assert.throws(() => safeSegment('a/b', 'connector name'), /invalid connector name/)
+  const { mountRoutes } = await import('../src/routes.js')
+  const server = createServer()
+  let handler
+  mountRoutes({ register: ({ handler: registered }) => { handler = registered; return () => {} } })
+  server.on('request', (req, res) => handler(req, res))
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const base = `http://127.0.0.1:${server.address().port}/universal-plugin-hub/api`
+  const res = await fetch(`${base}/plugins/demo/connectors/${encodeURIComponent('my connector')}/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+  assert.equal(res.status, 500)
+  assert.match(JSON.stringify(await res.json()), /invalid connector name/)
+})
