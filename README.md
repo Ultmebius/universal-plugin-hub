@@ -41,9 +41,17 @@ Supports DeepSeek Harness Desktop and the CLI web profile.
 1. Open DeepSeek Harness.
 2. Go to **Settings** -> **Plugins**.
 3. Click **Add plugin** and enter the package name:
+
    ```text
    universal-plugin-hub
    ```
+
+   You can also enter the repository URL:
+
+   ```text
+   https://github.com/Ultmebius/universal-plugin-hub.git
+   ```
+
 4. Click install.
 
 ### Command line

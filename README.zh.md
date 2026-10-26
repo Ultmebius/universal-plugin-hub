@@ -41,9 +41,17 @@ Universal Plugin Hub 提供插件市场、安装管理和能力接入。添加�
 1. 打开 DeepSeek Harness 客户端。
 2. 进入**设置** -> **插件**。
 3. 点击 **添加插件**，在输入框中填写包名：
+
    ```text
    universal-plugin-hub
    ```
+
+   填入仓库地址也能安装：
+
+   ```text
+   https://github.com/Ultmebius/universal-plugin-hub.git
+   ```
+
 4. 点击安装。
 
 ### 命令行安装
