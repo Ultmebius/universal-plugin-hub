@@ -286,6 +286,27 @@ test('custom clients, cancellation and configuration transitions stay isolated',
   for (const file of readdirSync(credentialRoot)) assert.equal(readFileSync(join(credentialRoot, file), 'utf8').includes('test-client-secret') && process.platform !== 'win32', false)
 })
 
+test('connector tool list and OAuth status routes always answer', async () => {
+  const { mountRoutes } = await import('../src/routes.js')
+  const server = createServer()
+  let handler
+  mountRoutes({ register: ({ handler: h }) => { handler = h; return () => {} } })
+  server.on('request', (req, res) => handler(req, res))
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const base = `http://127.0.0.1:${server.address().port}/universal-plugin-hub/api`
+  try {
+    const tools = await fetch(`${base}/plugins/nonexistent/connectors/${encodeURIComponent('missing')}/tools`)
+    assert.equal(tools.status, 200)
+    assert.equal(typeof (await tools.json()).ok, 'boolean')
+    const status = await fetch(`${base}/plugins/nonexistent/connectors/missing/oauth-status?sessionId=unknown`)
+    assert.equal(status.status, 200)
+    assert.equal((await status.json()).found, false)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
 test('ordinary stdio waits for initialize without duplicate tools/list requests', async () => {
   const log = join(root, 'slow-stdio.log')
   const result = await queryStdioToolsList(process.execPath, [new URL('./fixtures/slow-stdio-server.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')], { TEST_STDIO_LOG: log })

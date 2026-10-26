@@ -406,6 +406,7 @@ async function handle(req, res, prefix = API_PREFIX) {
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
       const result = await fetchConnectorTools(pluginName, connectorName, url.searchParams.get('fresh') === '1')
+      return sendJson(res, 200, result)
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/tools/toggle')) {
