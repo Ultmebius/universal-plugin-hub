@@ -8,6 +8,7 @@
  * agents.
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
 import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
@@ -19,6 +20,11 @@ import { materializePlugin, pullSource, pluginPath } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { buildPluginIcons } from './icons.js'
+import { beginOAuthVerification, completeOAuthVerification, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
+import { encodeOAuthConfig, isOAuthMode, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
+import { oauthStoreDir } from './oauth-store.js'
+
+const OAUTH_BRIDGE_PATH = fileURLToPath(new URL('./oauth-bridge.js', import.meta.url))
 
 /** Active profile name: env DSH_PROFILE -> desktop (if present) -> web. */
 export function resolveActiveProfileName() {
@@ -182,8 +188,14 @@ function remoteConfigFingerprint(config = {}) {
   const normalized = {
     transport: 'http',
     url: String(config.url || '').trim(),
-    headers: Object.fromEntries(Object.entries(config.headers || {}).filter(([key]) => key.toLowerCase() !== 'content-type').sort(([a], [b]) => a.localeCompare(b))),
+    headers: Object.fromEntries(Object.entries(config.headers || {}).filter(([key]) => {
+      const name = key.toLowerCase()
+      return name !== 'content-type' && (!isOAuthMode(config.oauth) || name !== 'authorization')
+    }).sort(([a], [b]) => a.localeCompare(b))),
     oauth: config.oauth || 'none',
+    oauthClientId: config.oauthClientId || '',
+    oauthScope: config.oauthScope || '',
+    oauthCallbackPort: Number(config.oauthCallbackPort) || null,
   }
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
 }
@@ -201,6 +213,11 @@ function setRemoteVerification(pluginName, connectorName, payload, verified) {
 export function isConnectorActive(pluginName, connectorName) {
   const entry = getConnectorEntry(pluginName, connectorName)
   if (!entry) return false
+  const remote = remoteConfigFromEntry(entry.config)
+  if (remote) {
+    const key = `${pluginName}::${connectorName}`
+    return readMcpToolsState()[key]?.verifiedRemoteConfig === remoteConfigFingerprint(remote)
+  }
   if (!isRemoteConnector(entry.config)) return isConnectorAuthenticated(pluginName, connectorName)
   const key = `${pluginName}::${connectorName}`
   return readMcpToolsState()[key]?.verifiedRemoteConfig === remoteConfigFingerprint(entry.config)
@@ -231,6 +248,7 @@ export function substitutePluginRoot(val, pluginRoot) {
 export function registerConnector(pluginName, connectorName, connectorConfig) {
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
+  const existingEntry = patch.flatMap((item) => item?.insert || []).find((item) => item?.id === id)
   const pluginRoot = installedDir(pluginName)
   const resolvedConfig = substitutePluginRoot(connectorConfig, pluginRoot)
 
@@ -273,6 +291,13 @@ export function registerConnector(pluginName, connectorName, connectorConfig) {
 export function unregisterConnector(pluginName, connectorName) {
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
+  const remote = remoteConfigFromEntry(getConnectorEntry(pluginName, connectorName)?.config)
+  if (remote) {
+    const key = `${pluginName}::${connectorName}`
+    const state = readMcpToolsState()
+    state[key] = { ...(state[key] || {}), savedOAuthRemoteConfig: remote }
+    writeMcpToolsState(state)
+  }
 
   for (const item of patch) {
     if (item && Array.isArray(item.insert)) {
@@ -934,6 +959,18 @@ export function toggleConnector(pluginName, connectorName, enabled) {
   const found = connectors.find((c) => c.name === connectorName) || { name: connectorName }
 
   if (enabled) {
+    const entry = getConnectorEntry(pluginName, connectorName)
+    const remote = remoteConfigFromEntry(entry?.config) || readMcpToolsState()[`${pluginName}::${connectorName}`]?.savedOAuthRemoteConfig
+    if (remote && isOAuthMode(remote.oauth)) {
+      const saved = remoteConfigFromEntry(entry?.config) ? entry.config : {
+        command: process.execPath, args: [OAUTH_BRIDGE_PATH],
+        env: { UPH_OAUTH_STORE_DIR: oauthStoreDir(), UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(oauthRuntimeConfig({
+          ...remote, credentialKey: oauthCredentialKey(pluginName, connectorName, remote.url, remote.oauth),
+          oauth: { mode: remote.oauth, clientId: remote.oauthClientId, callbackPort: remote.oauthCallbackPort, scope: remote.oauthScope },
+        })) },
+      }
+      return registerConnector(pluginName, connectorName, { ...remote, type: 'stdio', command: saved.command, args: saved.args, env: saved.env })
+    }
     if (connectorRequiresAuth(found) && !isConnectorAuthenticated(pluginName, connectorName)) {
       throw new Error(`请先验证并配置 ${connectorName} 的授权访问 Token`)
     }
@@ -953,6 +990,24 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   const transport = (typeof payload === 'object' && payload?.transport) ? payload.transport : (found?.type || 'http')
   const url = (typeof payload === 'object' && payload?.url) || found?.url || (connectorName === 'notion' ? 'https://mcp.notion.com/mcp' : null)
   const command = (typeof payload === 'object' && payload?.command) || found?.command || null
+
+  if (transport !== 'stdio' && url && isOAuthMode(payload?.oauth)) {
+    setRemoteVerification(pluginName, connectorName, payload, false)
+    try {
+      saveCustomOAuthClient(pluginName, connectorName, payload)
+      const session = beginOAuthVerification(pluginName, connectorName, { ...payload, url }, {
+        onFinished: (result) => setRemoteVerification(pluginName, connectorName, payload, result.ok === true),
+      })
+      const result = await Promise.race([
+        completeOAuthVerification(session),
+        new Promise((resolve) => setTimeout(() => resolve({ pending: true, sessionId: session.id, status: session.status, message: session.message || '正在准备 OAuth 授权…' }), 250)),
+      ])
+      setRemoteVerification(pluginName, connectorName, payload, result.ok === true)
+      return { ...result, server: connectorName, transport: 'http', endpoint: url, statusCode: result.statusCode ?? result.status }
+    } catch (error) {
+      return { ok: false, message: error.message, server: connectorName, transport: 'http', endpoint: url }
+    }
+  }
 
   if (transport === 'stdio') {
     setRemoteVerification(pluginName, connectorName, payload, false)
@@ -1094,6 +1149,7 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
   let customEnv = typeof payload === 'object' && payload?.env ? { ...payload.env } : { ...(found.env || {}) }
   let customArgs = typeof payload === 'object' && Array.isArray(payload?.args) ? payload.args : (found.args || [])
   let oauth = typeof payload === 'object' && payload?.oauth ? payload.oauth : 'none'
+  if (isOAuthMode(oauth)) token = ''
 
   if (token && token.trim()) {
     const authVal = token.trim().startsWith('Bearer ') ? token.trim() : `Bearer ${token.trim()}`
@@ -1111,7 +1167,7 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
   }
 
   const isStdio = (transport === 'stdio')
-  const result = registerConnector(pluginName, connectorName, {
+  let registration = {
     ...found,
     type: isStdio ? 'stdio' : (transport === 'sse' ? 'sse' : 'http'),
     url: isStdio ? null : (url || found.url || null),
@@ -1120,14 +1176,41 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
     env: { ...baseEnv, ...customEnv },
     headers: { ...baseHeaders, ...customHeaders },
     oauth: isStdio ? 'none' : oauth,
-  })
-  if (result.ok && !isStdio) {
-    setRemoteVerification(pluginName, connectorName, { transport, url, headers: customHeaders, oauth }, false)
   }
-  // Re-auth (or transport switch) changes which remote the connector talks to.
-  // The cached tool list was captured against the old connection, so drop it
-  // here — fetchConnectorTools will repopulate on the next list call.
+  if (!isStdio && isOAuthMode(oauth)) {
+    saveCustomOAuthClient(pluginName, connectorName, payload)
+    const credentialKey = oauthCredentialKey(pluginName, connectorName, url, oauth)
+    const remote = oauthRuntimeConfig({
+      url, headers: customHeaders, credentialKey,
+      oauth: {
+        mode: oauth, clientId: payload.oauthClientId || '', callbackPort: Number(payload.oauthCallbackPort) || null,
+        scope: payload.oauthScope || '',
+      },
+    })
+    registration = {
+      type: 'stdio', command: process.execPath, args: [OAUTH_BRIDGE_PATH],
+      env: { UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(remote), UPH_OAUTH_STORE_DIR: oauthStoreDir() },
+    }
+  }
+  const result = registerConnector(pluginName, connectorName, registration)
   const toolsKey = `${pluginName}::${connectorName}`
+  if (result.ok && !isStdio) {
+    const verifiedConfig = { transport, url, headers: customHeaders, oauth, oauthClientId: payload.oauthClientId || '', oauthScope: payload.oauthScope || '', oauthCallbackPort: payload.oauthCallbackPort }
+    const savedState = readMcpToolsState()
+    savedState[toolsKey] = { ...(savedState[toolsKey] || {}), savedOAuthRemoteConfig: isOAuthMode(oauth) ? remoteConfigFromEntry(registration.env ? { env: registration.env } : {}) : undefined }
+    if (!isOAuthMode(oauth)) delete savedState[toolsKey].savedOAuthRemoteConfig
+    writeMcpToolsState(savedState)
+    if (savedState[toolsKey]?.verifiedRemoteConfig !== remoteConfigFingerprint(verifiedConfig)) {
+      setRemoteVerification(pluginName, connectorName, verifiedConfig, false)
+    }
+  }
+  if (result.ok) {
+    const savedState = readMcpToolsState()
+    if (savedState[toolsKey]) {
+      delete savedState[toolsKey].cachedTools
+      writeMcpToolsState(savedState)
+    }
+  }
   if (MEMORY_TOOLS_CACHE.has(toolsKey)) {
     const mem = MEMORY_TOOLS_CACHE.get(toolsKey)
     MEMORY_TOOLS_CACHE.set(toolsKey, { ...mem, tools: [], disabledTools: mem.disabledTools || [] })
@@ -1205,7 +1288,7 @@ function quoteArgForShell(value) {
  * an (possibly empty) tool list, so callers can tell "no tools" from "the
  * probe never reached the server".
  */
-function queryStdioToolsList(cmd, args, extraEnv = {}) {
+export function queryStdioToolsList(cmd, args, extraEnv = {}) {
   return new Promise((resolve) => {
     const argv = Array.isArray(args) ? args : []
     const useShell = SHELL_COMMANDS.test(String(cmd).trim())
@@ -1230,10 +1313,12 @@ function queryStdioToolsList(cmd, args, extraEnv = {}) {
     let stderr = ''
     let answered = false
     let settled = false
+    let timer
 
     const finish = (tools, error) => {
       if (settled) return
       settled = true
+      clearTimeout(timer)
       try { cp.kill() } catch {}
       resolve({ tools: tools || [], error: tools ? null : error })
     }
@@ -1242,7 +1327,9 @@ function queryStdioToolsList(cmd, args, extraEnv = {}) {
 
     cp.stdout.on('data', (d) => {
       output += d.toString()
-      for (const line of output.split('\n')) {
+      const lines = output.split('\n')
+      output = lines.pop() || ''
+      for (const line of lines) {
         if (!line.trim()) continue
         try {
           const json = JSON.parse(line.trim())
@@ -1251,6 +1338,11 @@ function queryStdioToolsList(cmd, args, extraEnv = {}) {
             finish(json.result.tools, null)
             return
           }
+          if (json.id === 0 && json.result) {
+            cp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+            cp.stdin.write(toolsReq)
+          }
+          if (json.id === 0 && json.error) finish([], json.error.message || 'MCP initialize failed')
         } catch {}
       }
     })
@@ -1280,16 +1372,9 @@ function queryStdioToolsList(cmd, args, extraEnv = {}) {
 
     try {
       cp.stdin.write(initReq)
-      setTimeout(() => {
-        if (!settled) {
-          try {
-            cp.stdin.write(toolsReq)
-          } catch {}
-        }
-      }, 300)
     } catch {}
 
-    setTimeout(() => {
+    timer = setTimeout(() => {
       if (!settled) {
         const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
         finish([], detail || 'MCP 服务在 25 秒内没有返回工具列表')
@@ -1324,8 +1409,9 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
     return { ok: true, tools: cached, disabledTools }
   }
 
-  const transport = entryCfg.transport === 'stdio' ? 'stdio' : (found?.type === 'stdio' ? 'stdio' : 'http')
-  const url = entryCfg.url || found?.url
+  const transport = entryCfg.transport || (found?.type === 'stdio' ? 'stdio' : 'http')
+  const remote = remoteConfigFromEntry(entryCfg)
+  const url = remote?.url || entryCfg.url || found?.url
   const headers = entryCfg.headers || found?.headers || {}
 
   // Nothing to connect to (unknown server, or a config with neither URL nor
@@ -1392,7 +1478,7 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
     if (cmd) {
       try {
         const probe = await queryStdioToolsList(cmd, args, entryCfg.env || found?.env || {})
-        if (probe.tools.length > 0) {
+        if (probe.tools.length > 0 || !probe.error) {
           if (!state[key]) state[key] = { disabledTools, cachedTools: [] }
           state[key].cachedTools = probe.tools
           writeMcpToolsState(state)
@@ -1979,11 +2065,13 @@ export function installedDetails() {
       const connected = isConnectorActive(rec.name, c.name)
       const savedEntry = getConnectorEntry(rec.name, c.name)
       const savedConfig = savedEntry?.config || {}
-      const savedHeaders = (savedConfig.headers && Object.keys(savedConfig.headers).length > 0) ? savedConfig.headers : c.headers
-      const savedEnv = (savedConfig.env && Object.keys(savedConfig.env).length > 0) ? savedConfig.env : c.env
-      const savedUrl = savedConfig.url || c.url
-      const savedArgs = (savedConfig.args && savedConfig.args.length > 0) ? savedConfig.args : c.args
-      const savedTransport = savedConfig.transport ? (savedConfig.transport === 'streamable-http' ? 'http' : (savedConfig.transport === 'stdio' ? 'stdio' : c.type)) : c.type
+      const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? readMcpToolsState()[`${rec.name}::${c.name}`]?.savedOAuthRemoteConfig : null)
+      const savedHeaders = remote ? remote.headers : ((savedConfig.headers && Object.keys(savedConfig.headers).length > 0) ? savedConfig.headers : c.headers)
+      const savedEnv = remote ? {} : ((savedConfig.env && Object.keys(savedConfig.env).length > 0) ? savedConfig.env : c.env)
+      const savedUrl = remote ? remote.url : (savedConfig.url || c.url)
+      const savedArgs = remote ? [] : ((savedConfig.args && savedConfig.args.length > 0) ? savedConfig.args : c.args)
+      const savedTransport = remote ? 'http' : (savedConfig.transport ? (savedConfig.transport === 'streamable-http' ? 'http' : (savedConfig.transport === 'stdio' ? 'stdio' : c.type)) : c.type)
+      const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, savedUrl, remote.oauth) : null
 
       return {
         ...c,
@@ -1992,7 +2080,11 @@ export function installedDetails() {
         headers: savedHeaders,
         env: savedEnv,
         args: savedArgs,
-        oauth: savedConfig.oauth || c.oauth || 'none',
+        oauth: remote?.oauth || savedConfig.oauth || c.oauth || 'none',
+        oauthClientId: savedClient?.clientId || '',
+        oauthHasClientSecret: savedClient?.hasClientSecret || false,
+        oauthCallbackPort: remote?.oauthCallbackPort || '',
+        oauthScope: remote?.oauthScope || '',
         needsAuth,
         authenticated,
         enabled: !!savedEntry,

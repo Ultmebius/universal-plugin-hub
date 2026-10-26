@@ -15,9 +15,11 @@ import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
-  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, getConnectorEntry,
+  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, getConnectorEntry, readMcpToolsState,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
+import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
+import { remoteConfigFromEntry } from './oauth-config.js'
 
 const API_PREFIX = '/universal-plugin-hub/api'
 
@@ -46,6 +48,9 @@ function userMcpConfig(name, body) {
     env: body.env && typeof body.env === 'object' ? body.env : {},
     headers: body.headers && typeof body.headers === 'object' ? body.headers : {},
     oauth: body.oauth || 'none',
+    oauthClientId: body.oauthClientId || '',
+    oauthCallbackPort: body.oauthCallbackPort || null,
+    oauthScope: body.oauthScope || '',
   }
 }
 
@@ -285,8 +290,30 @@ async function handle(req, res, prefix = API_PREFIX) {
       if (changed) writeState(state)
       const mcps = state.userMcps
         .filter((x) => x && x.name)
-        .map((x) => ({ ...x, enabled: enabledIds.has('mcp-user-mcp-' + x.name) }))
+        .map((x) => {
+          const entry = getConnectorEntry('user-mcp', x.name)
+          const remote = remoteConfigFromEntry(entry?.config) || readMcpToolsState()[`user-mcp::${x.name}`]?.savedOAuthRemoteConfig
+          const client = remote?.oauth === 'custom' ? readSavedOAuthClient('user-mcp', x.name, remote.url, remote.oauth) : null
+          return {
+            ...x,
+            ...(remote ? {
+              transport: 'http', url: remote.url, headers: remote.headers,
+              oauth: remote.oauth, oauthClientId: client?.clientId || remote.oauthClientId,
+              oauthHasClientSecret: client?.hasClientSecret || false,
+              oauthCallbackPort: remote.oauthCallbackPort || null, oauthScope: remote.oauthScope || '',
+            } : {}),
+            enabled: enabledIds.has('mcp-user-mcp-' + x.name),
+          }
+        })
       return sendJson(res, 200, { ok: true, mcps })
+    }
+    if (path === '/mcps/oauth-status') {
+      requireSameOrigin(req)
+      if (method !== 'GET' && method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
+      const sessionId = String(method === 'GET' ? url.searchParams.get('sessionId') : (await readJsonBody(req)).sessionId || '')
+      const result = getOAuthVerification(sessionId, { pluginName: 'user-mcp' })
+      if (method === 'POST') return sendJson(res, 200, { ok: true, cancelled: result.found ? cancelOAuthVerification(sessionId, '已取消授权', { pluginName: 'user-mcp' }) : false })
+      return sendJson(res, 200, result)
     }
     if (method === 'POST' && path === '/mcps/verify') {
       requireSameOrigin(req)
@@ -363,12 +390,22 @@ async function handle(req, res, prefix = API_PREFIX) {
     }
 
     // ── connector routes (must precede catch-all /plugins/ routes) ────────
+    if ((method === 'GET' || method === 'POST') && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/oauth-status')) {
+      requireSameOrigin(req)
+      const parts = path.slice('/plugins/'.length).split('/')
+      const pluginName = safeSegment(parts[0], 'plugin name')
+      const connectorName = safeSegment(parts[2], 'connector name')
+      const sessionId = String(method === 'GET' ? url.searchParams.get('sessionId') : (await readJsonBody(req)).sessionId || '')
+      const result = getOAuthVerification(sessionId, { pluginName, connectorName })
+      if (method === 'POST') return sendJson(res, 200, { ok: true, cancelled: result.found ? cancelOAuthVerification(sessionId, '已取消授权', { pluginName, connectorName }) : false })
+      return sendJson(res, 200, result)
+    }
+
     if (method === 'GET' && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/tools')) {
       const parts = path.slice('/plugins/'.length).split('/')
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
-      const result = await fetchConnectorTools(pluginName, connectorName)
-      return sendJson(res, 200, result)
+      const result = await fetchConnectorTools(pluginName, connectorName, url.searchParams.get('fresh') === '1')
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/tools/toggle')) {

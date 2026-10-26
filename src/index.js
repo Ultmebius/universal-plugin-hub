@@ -7,6 +7,7 @@
  * scripts behind an approval prompt, so startup is the reliable path.
  */
 import { mountRoutes } from './routes.js'
+import { cancelAllOAuthVerifications } from './oauth.js'
 import { syncAllInstalledSkillsToDsh, installProfilePackages, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
 
 export const name = 'universal-plugin-hub'
@@ -27,6 +28,9 @@ export function apply(ctx) {
   })
 
   ctx.inject(['webServer'], (hostCtx) => {
-    hostCtx.effect(() => mountRoutes(hostCtx.webServer), 'universal-plugin-hub: http routes')
+    hostCtx.effect(() => {
+      const unmount = mountRoutes(hostCtx.webServer)
+      return () => { unmount(); cancelAllOAuthVerifications() }
+    }, 'universal-plugin-hub: http routes')
   })
 }

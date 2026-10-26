@@ -6,6 +6,126 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	const React = require("react");
 	const { createElement: h, useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } = React;
+	function OauthFields({ form, onChange, idPrefix }) {
+		if (form.oauth !== "custom") return null;
+		const update = (patch) => onChange({ ...form, ...patch, status: "untested" });
+		const input = (label, key, placeholder, type = "text") => h("div", { className: "cpm-mcp-row" },
+			h("label", { className: "cpm-mcp-label", htmlFor: `${idPrefix}-${key}` }, label),
+			h("div", { className: "cpm-mcp-control" }, h("input", {
+				id: `${idPrefix}-${key}`, className: "cpm-mcp-input", type,
+				value: form[key] || "", placeholder, autoComplete: "off",
+				onChange: (event) => update({ [key]: event.target.value }),
+			})),
+		);
+		return h(React.Fragment, null,
+			input("Client ID", "oauthClientId", "OAuth client ID"),
+			input("Client Secret", "oauthClientSecret", form.oauthHasClientSecret ? "已保存，留空保持不变" : "Public client 可留空", "password"),
+			input("Callback port", "oauthCallbackPort", "留空则随机；固定端口需与注册 URI 一致", "number"),
+			input("Scope", "oauthScope", "可选，默认由服务发现"),
+		);
+	}
+
+	function useOauthVerification({ form, verifyPath, userMcp, onFinished, onCancel, onError }) {
+		const [pending, setPending] = useState(null);
+		const pendingRef = useRef(null);
+		const startingRef = useRef(false);
+		const startControllerRef = useRef(null);
+		const operationRef = useRef(0);
+		const latestForm = useRef(form);
+		latestForm.current = form;
+		const callbacks = useRef({ onFinished, onCancel, onError });
+		callbacks.current = { onFinished, onCancel, onError };
+		const cancelPending = useCallback(async (notify = true) => {
+			operationRef.current += 1;
+			startingRef.current = false;
+			const controller = startControllerRef.current;
+			startControllerRef.current = null;
+			const session = pendingRef.current;
+			pendingRef.current = null;
+			setPending(null);
+			const path = userMcp ? "/mcps/oauth-status" : verifyPath.replace(/\/verify$/, "/oauth-status");
+			try {
+				const response = await window.fetch("/universal-plugin-hub/api" + path, {
+					method: "POST", headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ sessionId: session?.sessionId || "" }), keepalive: true,
+				});
+				if (!session && response.ok && (await response.json()).found === false) controller?.abort();
+			} catch { controller?.abort(); }
+			if (notify) callbacks.current.onCancel?.();
+		}, [userMcp, verifyPath]);
+		const cancel = useCallback(() => cancelPending(true), [cancelPending]);
+		const formFingerprint = JSON.stringify(form, (key, value) => ["testing", "saving", "status", "statusMessage", "lastResult", "oauthSessionId", "diagHover"].includes(key) ? undefined : value);
+		useEffect(() => {
+			if (pendingRef.current || startingRef.current) void cancelPending(false);
+		}, [formFingerprint, cancelPending]);
+		useEffect(() => () => { void cancelPending(false); }, [cancelPending]);
+		useEffect(() => {
+			if (!pending) return;
+			let stopped = false;
+			let timer;
+			const poll = async () => {
+				try {
+					const path = userMcp ? "/mcps/oauth-status" : pending.statusPath;
+					const response = await window.fetch(`/universal-plugin-hub/api${path}?sessionId=${encodeURIComponent(pending.sessionId)}`);
+					const result = await response.json();
+					if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+					if (stopped || pendingRef.current?.sessionId !== pending.sessionId) return;
+					if (result.pending) {
+						setPending((previous) => previous?.sessionId === pending.sessionId ? { ...previous, status: result.status, message: result.message, authorizationUrl: result.authorizationUrl } : previous);
+						timer = window.setTimeout(poll, 350);
+						return;
+					}
+					pendingRef.current = null;
+					setPending(null);
+					await callbacks.current.onFinished?.(result);
+				} catch (error) {
+					if (stopped || pendingRef.current?.sessionId !== pending.sessionId) return;
+					pendingRef.current = null;
+					setPending(null);
+					callbacks.current.onError?.(error);
+				}
+			};
+			timer = window.setTimeout(poll, 100);
+			return () => { stopped = true; window.clearTimeout(timer); };
+		}, [pending?.sessionId, userMcp]);
+		const start = async (payload) => {
+			if (startingRef.current || pendingRef.current) return;
+			startingRef.current = true;
+			const operation = ++operationRef.current;
+			const controller = new AbortController();
+			startControllerRef.current = controller;
+			try {
+				const response = await window.fetch("/universal-plugin-hub/api" + verifyPath, {
+					method: "POST", headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload || latestForm.current), signal: controller.signal,
+				});
+				const result = await response.json();
+				if (operation !== operationRef.current) {
+					if (result.sessionId) {
+						const path = userMcp ? "/mcps/oauth-status" : verifyPath.replace(/\/verify$/, "/oauth-status");
+						void window.fetch("/universal-plugin-hub/api" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: result.sessionId }), keepalive: true }).catch(() => {});
+					}
+					return;
+				}
+				if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+				if (result.pending) {
+					const session = { ...result, statusPath: verifyPath.replace(/\/verify$/, "/oauth-status") };
+					pendingRef.current = session;
+					setPending(session);
+					return;
+				}
+				await callbacks.current.onFinished?.(result);
+			} catch (error) {
+				if (operation === operationRef.current && error.name !== "AbortError") callbacks.current.onError?.(error);
+			} finally {
+				if (operation === operationRef.current) {
+					startingRef.current = false;
+					startControllerRef.current = null;
+				}
+			}
+		};
+		return { pending, start, cancel };
+	}
 	const useSafeLayoutEffect = typeof useLayoutEffect === "function" ? useLayoutEffect : useEffect;
 
 	// ────────────────────────────── Styles ──────────────────────────────
@@ -8225,11 +8345,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			transport: initial.transport === "http" ? "http" : "stdio",
 			url: initial.url || "",
 			oauth: initial.oauth || "none",
+			oauthClientId: initial.oauthClientId || "",
+			oauthClientSecret: "",
+			oauthHasClientSecret: initial.oauthHasClientSecret === true,
+			oauthCallbackPort: initial.oauthCallbackPort || "",
+			oauthScope: initial.oauthScope || "",
 			command: initial.command || "",
 			args: Array.isArray(initial.args) ? JSON.stringify(initial.args) : (initial.args || ""),
 			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => ({ _id: `hi_${i}`, key: k, value: String(v), isSecret: true })),
 			envList: Object.entries(initial.env || {}).map(([k, v], i) => ({ _id: `ei_${i}`, key: k, value: String(v), isSecret: true })),
-		} : { name: "", transport: "stdio", url: "", oauth: "none", command: "", args: "", headersList: [], envList: [] });
+		} : { name: "", transport: "stdio", url: "", oauth: "none", oauthClientId: "", oauthClientSecret: "", oauthHasClientSecret: false, oauthCallbackPort: "", oauthScope: "", command: "", args: "", headersList: [], envList: [] });
 		const [testing, setTesting] = useState(false);
 		const [saving, setSaving] = useState(false);
 		const upd = (patch) => setForm((prev) => ({ ...prev, ...patch }));
@@ -8275,6 +8400,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				command: form.transport === "stdio" ? (form.command.trim() || null) : null,
 				headers,
 				oauth: form.transport === "http" ? form.oauth : "none",
+				oauthClientId: form.oauthClientId,
+				oauthClientSecret: form.oauthClientSecret,
+				oauthCallbackPort: form.oauthCallbackPort,
+				oauthScope: form.oauthScope,
 				args,
 				env,
 			};
@@ -8286,6 +8415,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return msg.length > 50 ? msg.slice(0, 48) + "…" : msg;
 		};
 
+		const oauthFlow = useOauthVerification({
+			form,
+			verifyPath: owner ? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify` : "/mcps/verify",
+			userMcp: !owner,
+			onFinished: (res) => showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false }),
+			onError: (err) => showToast("验证失败", cleanMcpError(err), { restart: false }),
+		});
 		const test = async () => {
 			if (!form.name.trim()) {
 				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
@@ -8293,13 +8429,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 			setTesting(true);
 			try {
-				const verifyUrl = owner
-					? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify`
-					: "/mcps/verify";
-				const res = await api(verifyUrl, { method: "POST", body: JSON.stringify(buildPayload()) });
-				showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false });
-			} catch (err) {
-				showToast("验证失败", cleanMcpError(err), { restart: false });
+				await oauthFlow.start(buildPayload());
 			} finally {
 				setTesting(false);
 			}
@@ -8448,6 +8578,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							}),
 						),
 					),
+					h(OauthFields, { form, onChange: upd, idPrefix: "add-mcp" }),
+					oauthFlow.pending && h("div", { className: "cpm-mcp-row", role: "status", "aria-live": "polite" },
+						h("div", { className: "cpm-mcp-label" }, "Authorization"),
+						h("div", { className: "cpm-mcp-control", style: { fontSize: 12, color: "var(--cpm-muted)", lineHeight: 1.5 } },
+							h("div", null, oauthFlow.pending.message || "正在准备 OAuth 授权…"),
+							oauthFlow.pending.authorizationUrl && h("a", { href: oauthFlow.pending.authorizationUrl, target: "_blank", rel: "noopener noreferrer" }, "浏览器未打开？点击这里授权"),
+							h("button", { type: "button", className: "cpm-btn-ghost", style: { marginTop: 6 }, onClick: oauthFlow.cancel }, "取消授权"),
+						),
+					),
 					form.transport === "stdio" && h("div", { className: "cpm-mcp-row" },
 						h("div", { className: "cpm-mcp-label" }, "Command"),
 						h("div", { className: "cpm-mcp-control" },
@@ -8545,10 +8684,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						className: "cpm-btn cpm-btn-secondary",
 						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
 						onClick: test,
-					}, testing ? "测试中…" : "测试连接"),
+					}, testing ? "测试中…" : (oauthFlow.pending ? "授权并测试中…" : "测试连接")),
 					h("button", {
 						className: "cpm-btn cpm-btn-primary",
-						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
+						disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
 						onClick: save,
 					}, saving ? "保存中…" : "保存并启用"),
 				),
@@ -9108,7 +9247,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [hoveredTool, closeToolHover, toolHover] = useHoverPreview();
 		useEffect(() => { closeToolHover(); }, [record?.name, closeToolHover]);
 
-		const loadConnectorTools = useCallback(async (connectorName) => {
+		const loadConnectorTools = useCallback(async (connectorName, forceFresh = false) => {
 			const key = `${record.name}::${connectorName}`;
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
 			const hasCachedTools = Array.isArray(cached?.tools) && cached.tools.length > 0;
@@ -9122,7 +9261,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 
 			try {
-				const res = await api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(connectorName)}/tools`);
+				const res = await api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(connectorName)}/tools${forceFresh ? "?fresh=1" : ""}`);
 				const tools = Array.isArray(res.tools) ? res.tools : [];
 				const disabledTools = Array.isArray(res.disabledTools) ? res.disabledTools : [];
 
@@ -9154,7 +9293,44 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [record?.name]);
 
-		// Pre-fetch tools in background as soon as ManagePage opens for connected connectors
+		const buildAuthPayload = () => {
+			const headers = {};
+			for (const item of authDialog?.headersList || []) {
+				const value = (item.value || "").trim();
+				if (value) headers[(item.key || "").trim() || "Authorization"] = value;
+			}
+			return {
+				transport: authDialog.transport, url: authDialog.url, headers,
+				oauth: authDialog.oauth, oauthClientId: authDialog.oauthClientId,
+				oauthClientSecret: authDialog.oauthClientSecret,
+				oauthCallbackPort: authDialog.oauthCallbackPort, oauthScope: authDialog.oauthScope,
+			};
+		};
+		const setAuthError = (message) => setAuthDialog((prev) => prev ? {
+			...prev, testing: false, status: "error", statusMessage: message,
+			lastResult: { ok: false, message, status: 500, server: prev.connectorName, transport: prev.transport, endpoint: prev.url, errorDetails: message },
+		} : null);
+		const oauthFlow = useOauthVerification({
+			form: authDialog,
+			verifyPath: `/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`,
+			onFinished: async (res) => {
+				setAuthDialog((prev) => prev ? { ...prev, testing: false, status: res.ok ? "success" : "error", statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"), lastResult: res } : null);
+				await refreshState();
+				if (res.ok && res.server) await loadConnectorTools(res.server, true);
+			},
+			onCancel: () => setAuthDialog((prev) => prev ? { ...prev, testing: false, status: "untested", statusMessage: "" } : null),
+			onError: (error) => setAuthError(error.message),
+		});
+		const closeAuthDialog = useCallback(() => {
+			setAuthDialog(null);
+			void oauthFlow.cancel();
+		}, [oauthFlow.cancel]);
+		const runAuthTest = async () => {
+			if (!authDialog) return;
+			setAuthDialog((prev) => prev ? { ...prev, testing: true, status: "testing", statusMessage: "" } : null);
+			await oauthFlow.start(buildAuthPayload());
+		};
+
 		useEffect(() => {
 			if (record && Array.isArray(record.connectors)) {
 				record.connectors.forEach((c) => {
@@ -9536,6 +9712,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				args: rawArgs,
 				envList: envEntries,
 				oauth: (connObj && connObj.oauth) || "none",
+				oauthClientId: (connObj && connObj.oauthClientId) || "",
+				oauthClientSecret: "",
+				oauthHasClientSecret: (connObj && connObj.oauthHasClientSecret) === true,
+				oauthCallbackPort: (connObj && connObj.oauthCallbackPort) || "",
+				oauthScope: (connObj && connObj.oauthScope) || "",
 				testing: false,
 				saving: false,
 				status: "untested",
@@ -9561,7 +9742,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (!authDialog && !confirmRemove) return;
 			const onKey = (e) => {
 				if (e.key === "Escape") {
-					if (authDialog) setAuthDialog(null);
+					if (authDialog) closeAuthDialog();
 					if (confirmRemove) setConfirmRemove(false);
 				}
 			};
@@ -9991,11 +10172,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 			),
 
-			authDialog && h("div", { className: "cpm-dialog", onClick: () => setAuthDialog(null) },
+			authDialog && h("div", { className: "cpm-dialog", onClick: closeAuthDialog },
 				h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
 					h("button", {
 						className: "cpm-mcp-close-top",
-						onClick: () => setAuthDialog(null),
+						onClick: closeAuthDialog,
 					}, h(IconClose, { size: 14 })),
 
 					h("div", { className: "cpm-mcp-body" },
@@ -10195,6 +10376,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								}),
 							),
 						),
+						h(OauthFields, { form: authDialog, onChange: setAuthDialog, idPrefix: "edit-mcp" }),
+						oauthFlow.pending && h("div", { className: "cpm-mcp-row", role: "status", "aria-live": "polite" },
+							h("div", { className: "cpm-mcp-label" }, "Authorization"),
+							h("div", { className: "cpm-mcp-control", style: { fontSize: 12, color: "var(--cpm-muted)", lineHeight: 1.5 } },
+								h("div", null, oauthFlow.pending.message || "正在准备 OAuth 授权…"),
+								oauthFlow.pending.authorizationUrl && h("a", { href: oauthFlow.pending.authorizationUrl, target: "_blank", rel: "noopener noreferrer" }, "浏览器未打开？点击这里授权"),
+								h("button", { type: "button", className: "cpm-btn-ghost", style: { marginTop: 6 }, onClick: oauthFlow.cancel }, "取消授权"),
+							),
+						),
 					),
 
 					h("div", { className: "cpm-mcp-footer" },
@@ -10296,53 +10486,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							h("button", {
 								className: "cpm-btn cpm-btn-secondary",
 								disabled: authDialog.testing || authDialog.saving || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
-								onClick: async () => {
-									const computedHeaders = {};
-									for (const hItem of authDialog.headersList) {
-										const v = (hItem.value || "").trim();
-										if (!v) continue;
-										const k = (hItem.key || "").trim() || "Authorization";
-										computedHeaders[k] = v;
-									}
-									setAuthDialog((prev) => prev ? { ...prev, testing: true, status: "testing", statusMessage: "" } : null);
-									try {
-										const res = await api(`/plugins/${record.name}/connectors/${authDialog.connectorName}/verify`, {
-											method: "POST",
-											body: JSON.stringify({
-												transport: authDialog.transport,
-												url: authDialog.url,
-												headers: computedHeaders,
-												oauth: authDialog.oauth,
-											}),
-										});
-										setAuthDialog((prev) => prev ? {
-											...prev,
-											testing: false,
-											status: res.ok ? "success" : "error",
-											statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"),
-											lastResult: res,
-										} : null);
-									} catch (err) {
-										setAuthDialog((prev) => prev ? {
-											...prev,
-											testing: false,
-											status: "error",
-											statusMessage: err.message,
-											lastResult: {
-												ok: false,
-												message: err.message,
-												status: 500,
-												server: prev.connectorName,
-												transport: prev.transport,
-												endpoint: prev.url,
-												errorDetails: err.message,
-											},
-										} : null);
-									} finally {
-										await refreshState();
-									}
-								},
-							}, authDialog.testing ? "测试中…" : (
+								onClick: runAuthTest,
+							}, authDialog.testing ? (authDialog.oauth !== "none" ? "授权并测试中…" : "测试中…") : (
 								authDialog.transport === "stdio" ? "测试连接" : (
 									(authDialog.oauth && authDialog.oauth !== "none") ? "Sign in & test" : (
 										(authDialog.headersList && authDialog.headersList.some(h => (h.value || '').trim())) ? "验证并测试" : "测试连接"
@@ -10385,6 +10530,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												url: authDialog.url,
 												headers: computedHeaders,
 												oauth: authDialog.oauth,
+												oauthClientId: authDialog.oauthClientId,
+												oauthClientSecret: authDialog.oauthClientSecret,
+												oauthCallbackPort: authDialog.oauthCallbackPort,
+												oauthScope: authDialog.oauthScope,
 												args: parsedArgs,
 												env: envMap,
 											}),
@@ -10396,7 +10545,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										}
 										await refreshState();
 										showToast("配置成功", `已成功保存 ${authDialog.connectorName} 认证信息并注册为可用 MCP 服务`, { restart: false });
-										setAuthDialog(null);
+										closeAuthDialog();
 									} catch (err) {
 										showToast("保存失败", err.message);
 										setAuthDialog((prev) => prev ? { ...prev, saving: false, status: "error", statusMessage: err.message } : null);
