@@ -3491,932 +3491,121 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
-	// ────────────────────────────── Official Lucide Vector Library (64 Multi-Domain Themes) ──────────────────────────────
-	const LUCIDE_BADGES = [
-		// 0. Terminal (Emerald / Code & CLI)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("polyline", { key: "p", points: "4 17 10 11 4 5", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("line", { key: "l", x1: 12, y1: 19, x2: 20, y2: 19, stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 1. Code (Cyan / Software & Syntax)
-		{
-			color: "#06b6d4",
-			bgLight: "linear-gradient(135deg, #ecfeff 0%, #cffafe 100%)",
-			borderLight: "#a5f3fc",
-			bgDark: "linear-gradient(135deg, #164e63 0%, #0d313f 100%)",
-			borderDark: "#155e75",
-			render: () => [
-				h("polyline", { key: "p1", points: "16 18 22 12 16 6", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("polyline", { key: "p2", points: "8 6 2 12 8 18", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 2. Video (Red / Video & Cinema)
-		{
-			color: "#ef4444",
-			bgLight: "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)",
-			borderLight: "#fecaca",
-			bgDark: "linear-gradient(135deg, #450a0a 0%, #2b0606 100%)",
-			borderDark: "#991b1b",
-			render: () => [
-				h("rect", { key: "r", x: "2", y: "6", width: "14", height: "12", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("polygon", { key: "p", points: "22 8 16 12 22 16 22 8", stroke: "currentColor", strokeWidth: 2, fill: "currentColor", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 3. Film (Rose / Motion & Reels)
-		{
-			color: "#f43f5e",
-			bgLight: "linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)",
-			borderLight: "#fecdd3",
-			bgDark: "linear-gradient(135deg, #4c0519 0%, #2e030f 100%)",
-			borderDark: "#9f1239",
-			render: () => [
-				h("rect", { key: "r", x: "3", y: "3", width: "18", height: "18", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l1", x1: "7", y1: "3", x2: "7", y2: "21", stroke: "currentColor", strokeWidth: 2 }),
-				h("line", { key: "l2", x1: "17", y1: "3", x2: "17", y2: "21", stroke: "currentColor", strokeWidth: 2 }),
-				h("line", { key: "l3", x1: "3", y1: "12", x2: "21", y2: "12", stroke: "currentColor", strokeWidth: 2 }),
-			],
-		},
-		// 4. Scissors (Pink / Video Cut & Editing)
-		{
-			color: "#ec4899",
-			bgLight: "linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%)",
-			borderLight: "#fbcfe8",
-			bgDark: "linear-gradient(135deg, #831843 0%, #500724 100%)",
-			borderDark: "#be185d",
-			render: () => [
-				h("circle", { key: "c1", cx: "6", cy: "6", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c2", cx: "6", cy: "18", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l1", x1: "20", y1: "4", x2: "8.12", y2: "15.88", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("line", { key: "l2", x1: "14.47", y1: "14.48", x2: "20", y2: "20", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("line", { key: "l3", x1: "8.12", y1: "8.12", x2: "12", y2: "12", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 5. Wand (Fuchsia / Magic & VFX)
-		{
-			color: "#d946ef",
-			bgLight: "linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%)",
-			borderLight: "#f5d0fe",
-			bgDark: "linear-gradient(135deg, #4a044e 0%, #2e0231 100%)",
-			borderDark: "#701a75",
-			render: () => [
-				h("path", { key: "p1", d: "M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M12.2 6.2 11 5", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("path", { key: "p2", d: "M7 2a5 5 0 0 0-5 5c0 2 1.5 3.5 3 5l12 12a1.4 1.4 0 0 0 2 0l2-2a1.4 1.4 0 0 0 0-2L9 8c-1.5-1.5-2-3-2-6Z", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 6. Play (Orange / Action & Streaming)
-		{
-			color: "#f97316",
-			bgLight: "linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)",
-			borderLight: "#fed7aa",
-			bgDark: "linear-gradient(135deg, #431407 0%, #270b04 100%)",
-			borderDark: "#c2410c",
-			render: () => [
-				h("polygon", { key: "p", points: "6 4 20 12 6 20 6 4", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 7. Mic (Violet / Voice & Speech)
-		{
-			color: "#8b5cf6",
-			bgLight: "linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)",
-			borderLight: "#ddd6fe",
-			bgDark: "linear-gradient(135deg, #2e1065 0%, #1c0a3d 100%)",
-			borderDark: "#4c1d95",
-			render: () => [
-				h("rect", { key: "r", x: "9", y: "2", width: "6", height: "12", rx: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p1", d: "M5 10v2a7 7 0 0 0 14 0v-2", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("line", { key: "l1", x1: "12", y1: "19", x2: "12", y2: "22", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 8. Headphones (Indigo / Audio & Music)
-		{
-			color: "#6366f1",
-			bgLight: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)",
-			borderLight: "#c7d2fe",
-			bgDark: "linear-gradient(135deg, #1e1b4b 0%, #131131 100%)",
-			borderDark: "#3730a3",
-			render: () => [
-				h("path", { key: "p", d: "M3 18v-6a9 9 0 0 1 18 0v6", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("rect", { key: "r1", x: "17", y: "14", width: "4", height: "7", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("rect", { key: "r2", x: "3", y: "14", width: "4", height: "7", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 9. Music (Purple / Melodies & Audio Tracks)
-		{
-			color: "#a855f7",
-			bgLight: "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)",
-			borderLight: "#e9d5ff",
-			bgDark: "linear-gradient(135deg, #3b0764 0%, #240340 100%)",
-			borderDark: "#6b21a8",
-			render: () => [
-				h("path", { key: "p", d: "M9 18V5l12-2v13", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("circle", { key: "c1", cx: "6", cy: "18", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c2", cx: "18", cy: "16", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 10. Volume (Blue / Sound Synthesizer)
-		{
-			color: "#3b82f6",
-			bgLight: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-			borderLight: "#bfdbfe",
-			bgDark: "linear-gradient(135deg, #1e3a8a 0%, #112240 100%)",
-			borderDark: "#1d4ed8",
-			render: () => [
-				h("polygon", { key: "p", points: "11 5 6 9 2 9 2 15 6 15 11 19 11 5", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "w1", d: "M15.54 8.46a5 5 0 0 1 0 7.07", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("path", { key: "w2", d: "M19.07 4.93a10 10 0 0 1 0 14.14", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 11. Bug (Red / Debugger & Troubleshooting)
-		{
-			color: "#ef4444",
-			bgLight: "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)",
-			borderLight: "#fecaca",
-			bgDark: "linear-gradient(135deg, #450a0a 0%, #2b0606 100%)",
-			borderDark: "#991b1b",
-			render: () => [
-				h("rect", { key: "r", width: "8", height: "14", x: "8", y: "6", rx: "4", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "m19 7-3 2M5 7l3 2M19 19l-3-2M5 19l3-2M20 13h-4M4 13h4M10 4l1 2M14 4l-1 2", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 12. GitBranch (Amber / Branching & Flow)
-		{
-			color: "#f59e0b",
-			bgLight: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-			borderLight: "#fde68a",
-			bgDark: "linear-gradient(135deg, #451a03 0%, #291002 100%)",
-			borderDark: "#78350f",
-			render: () => [
-				h("line", { key: "l", x1: "6", x2: "6", y1: "3", y2: "15", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("circle", { key: "c1", cx: "18", cy: "6", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c2", cx: "6", cy: "18", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "M18 9a9 9 0 0 1-9 9", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 13. GitPullRequest (Rose / PRs & Review)
-		{
-			color: "#e11d48",
-			bgLight: "linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)",
-			borderLight: "#fecdd3",
-			bgDark: "linear-gradient(135deg, #4c0519 0%, #2e030f 100%)",
-			borderDark: "#881337",
-			render: () => [
-				h("circle", { key: "c1", cx: "18", cy: "18", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c2", cx: "6", cy: "6", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "M13 6h3a2 2 0 0 1 2 2v7", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("line", { key: "l", x1: "6", x2: "6", y1: "9", y2: "21", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 14. Cpu (Indigo / Processor & Architecture)
-		{
-			color: "#6366f1",
-			bgLight: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)",
-			borderLight: "#c7d2fe",
-			bgDark: "linear-gradient(135deg, #1e1b4b 0%, #131131 100%)",
-			borderDark: "#3730a3",
-			render: () => [
-				h("rect", { key: "r1", width: "16", height: "16", x: "4", y: "4", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("rect", { key: "r2", width: "6", height: "6", x: "9", y: "9", rx: "1", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 15. Braces (Teal / AST, JSON & Linters)
-		{
-			color: "#14b8a6",
-			bgLight: "linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)",
-			borderLight: "#99f6e4",
-			bgDark: "linear-gradient(135deg, #134e4a 0%, #0c3330 100%)",
-			borderDark: "#0f766e",
-			render: () => [
-				h("path", { key: "p1", d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("path", { key: "p2", d: "M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 16. Database (Cyan / SQL, Tables & Storage)
-		{
-			color: "#06b6d4",
-			bgLight: "linear-gradient(135deg, #ecfeff 0%, #cffafe 100%)",
-			borderLight: "#a5f3fc",
-			bgDark: "linear-gradient(135deg, #164e63 0%, #0d313f 100%)",
-			borderDark: "#155e75",
-			render: () => [
-				h("ellipse", { key: "e", cx: "12", cy: "5", rx: "9", ry: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p1", d: "M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p2", d: "M3 12c0 1.66 4 3 9 3s9-1.34 9-3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 17. Server (Sky Blue / Cloud Backend & Node)
-		{
-			color: "#0284c7",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #0c4a6e 0%, #082f46 100%)",
-			borderDark: "#0369a1",
-			render: () => [
-				h("rect", { key: "r1", width: "20", height: "8", x: "2", y: "2", rx: "2", ry: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("rect", { key: "r2", width: "20", height: "8", x: "2", y: "14", rx: "2", ry: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l1", x1: "6", x2: "6.01", y1: "6", y2: "6", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("line", { key: "l2", x1: "6", x2: "6.01", y1: "18", y2: "18", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 18. Container (Sky / Docker & Microservices)
-		{
-			color: "#0ea5e9",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #075985 0%, #032b42 100%)",
-			borderDark: "#0284c7",
-			render: () => [
-				h("path", { key: "p1", d: "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "m3.3 7 8.7 5 8.7-5M12 22V12", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 19. Brain (Violet / Neural & AI Models)
-		{
-			color: "#8b5cf6",
-			bgLight: "linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)",
-			borderLight: "#ddd6fe",
-			bgDark: "linear-gradient(135deg, #2e1065 0%, #1c0a3d 100%)",
-			borderDark: "#4c1d95",
-			render: () => [
-				h("path", { key: "p1", d: "M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("path", { key: "p2", d: "M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("path", { key: "p3", d: "M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 20. Bot (Emerald / Autonomous Agents)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("path", { key: "p1", d: "M12 8V4H8", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("rect", { key: "r", width: "16", height: "12", x: "4", y: "8", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p2", d: "M2 14h2M20 14h2M15 13v2M9 13v2", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 21. Sparkles (Amber / Generation & Prompts)
-		{
-			color: "#f59e0b",
-			bgLight: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-			borderLight: "#fde68a",
-			bgDark: "linear-gradient(135deg, #451a03 0%, #291002 100%)",
-			borderDark: "#78350f",
-			render: () => [
-				h("path", { key: "s1", d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "s2", d: "M5 3v4M3 5h4M19 17v4M17 19h4", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 22. ScanFace (Cyan / Vision, CV & OCR)
-		{
-			color: "#06b6d4",
-			bgLight: "linear-gradient(135deg, #ecfeff 0%, #cffafe 100%)",
-			borderLight: "#a5f3fc",
-			bgDark: "linear-gradient(135deg, #164e63 0%, #0d313f 100%)",
-			borderDark: "#155e75",
-			render: () => [
-				h("path", { key: "p1", d: "M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("circle", { key: "c1", cx: "9", cy: "10", r: "1", fill: "currentColor" }),
-				h("circle", { key: "c2", cx: "15", cy: "10", r: "1", fill: "currentColor" }),
-				h("path", { key: "p2", d: "M10 15a3 3 0 0 0 4 0", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 23. Activity (Emerald / Monitoring & Metrics)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("path", { key: "a", d: "M22 12h-4l-3 9L9 3l-3 9H2", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 24. PenTool (Purple / Copywriting & Content Creation)
-		{
-			color: "#a855f7",
-			bgLight: "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)",
-			borderLight: "#e9d5ff",
-			bgDark: "linear-gradient(135deg, #3b0764 0%, #240340 100%)",
-			borderDark: "#6b21a8",
-			render: () => [
-				h("path", { key: "p1", d: "m12 19 7-7 3 3-7 7-3-3z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("circle", { key: "c", cx: "11", cy: "11", r: "2", fill: "currentColor" }),
-			],
-		},
-		// 25. FileText (Blue / Specs, Summaries & Docs)
-		{
-			color: "#3b82f6",
-			bgLight: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-			borderLight: "#bfdbfe",
-			bgDark: "linear-gradient(135deg, #1e3a8a 0%, #112240 100%)",
-			borderDark: "#1d4ed8",
-			render: () => [
-				h("path", { key: "p1", d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "M14 2v4a2 2 0 0 0 2 2h4", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p3", d: "M10 9H8M16 13H8M16 17H8", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 26. BookOpen (Indigo / Knowledge Base & Wiki)
-		{
-			color: "#6366f1",
-			bgLight: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)",
-			borderLight: "#c7d2fe",
-			bgDark: "linear-gradient(135deg, #1e1b4b 0%, #131131 100%)",
-			borderDark: "#3730a3",
-			render: () => [
-				h("path", { key: "p1", d: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 27. Feather (Pink / Stories & Essays)
-		{
-			color: "#ec4899",
-			bgLight: "linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%)",
-			borderLight: "#fbcfe8",
-			bgDark: "linear-gradient(135deg, #831843 0%, #500724 100%)",
-			borderDark: "#be185d",
-			render: () => [
-				h("path", { key: "p", d: "M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("line", { key: "l1", x1: "16", y1: "8", x2: "2", y2: "22", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("line", { key: "l2", x1: "17.5", y1: "15", x2: "9", y2: "15", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 28. Type (Fuchsia / Headlines & Typography)
-		{
-			color: "#d946ef",
-			bgLight: "linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%)",
-			borderLight: "#f5d0fe",
-			bgDark: "linear-gradient(135deg, #4a044e 0%, #2e0231 100%)",
-			borderDark: "#701a75",
-			render: () => [
-				h("polyline", { key: "p", points: "4 7 4 4 20 4 20 7", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("line", { key: "l1", x1: "9", y1: "20", x2: "15", y2: "20", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("line", { key: "l2", x1: "12", y1: "4", x2: "12", y2: "20", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 29. Newspaper (Sky Blue / Feeds & RSS)
-		{
-			color: "#0284c7",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #0c4a6e 0%, #082f46 100%)",
-			borderDark: "#0369a1",
-			render: () => [
-				h("path", { key: "p1", d: "M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "M18 14h-8M15 18h-5M10 6h8v4h-8V6Z", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 30. Share (Emerald / Social Distribution)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("circle", { key: "c1", cx: "18", cy: "5", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c2", cx: "6", cy: "12", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c3", cx: "18", cy: "19", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l1", x1: "8.59", x2: "15.42", y1: "13.51", y2: "17.49", stroke: "currentColor", strokeWidth: 2 }),
-				h("line", { key: "l2", x1: "15.41", x2: "8.59", y1: "6.51", y2: "10.49", stroke: "currentColor", strokeWidth: 2 }),
-			],
-		},
-		// 31. Palette (Rose / Art & Graphic Design)
-		{
-			color: "#f43f5e",
-			bgLight: "linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)",
-			borderLight: "#fecdd3",
-			bgDark: "linear-gradient(135deg, #4c0519 0%, #2e030f 100%)",
-			borderDark: "#9f1239",
-			render: () => [
-				h("circle", { key: "c1", cx: "13.5", cy: "6.5", r: "1", fill: "currentColor" }),
-				h("circle", { key: "c2", cx: "17.5", cy: "10.5", r: "1", fill: "currentColor" }),
-				h("circle", { key: "c3", cx: "8.5", cy: "7.5", r: "1", fill: "currentColor" }),
-				h("circle", { key: "c4", cx: "6.5", cy: "12.5", r: "1", fill: "currentColor" }),
-				h("path", { key: "p", d: "M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.6-.7 1.6-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1a1.6 1.6 0 0 1 1.7-1.7h2c3 0 5.5-2.5 5.5-5.5C21.9 6 17.5 2 12 2z", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 32. Layout (Sky / Dashboard & Wireframes)
-		{
-			color: "#0ea5e9",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #075985 0%, #032b42 100%)",
-			borderDark: "#0284c7",
-			render: () => [
-				h("rect", { key: "r", width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l1", x1: "3", y1: "9", x2: "21", y2: "9", stroke: "currentColor", strokeWidth: 2 }),
-				h("line", { key: "l2", x1: "9", y1: "21", x2: "9", y2: "9", stroke: "currentColor", strokeWidth: 2 }),
-			],
-		},
-		// 33. Image (Purple / Photos & Midjourney)
-		{
-			color: "#a855f7",
-			bgLight: "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)",
-			borderLight: "#e9d5ff",
-			bgDark: "linear-gradient(135deg, #3b0764 0%, #240340 100%)",
-			borderDark: "#6b21a8",
-			render: () => [
-				h("rect", { key: "r", width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c", cx: "9", cy: "9", r: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 34. Eye (Cyan / Visual Inspector & A11y)
-		{
-			color: "#06b6d4",
-			bgLight: "linear-gradient(135deg, #ecfeff 0%, #cffafe 100%)",
-			borderLight: "#a5f3fc",
-			bgDark: "linear-gradient(135deg, #164e63 0%, #0d313f 100%)",
-			borderDark: "#155e75",
-			render: () => [
-				h("path", { key: "p", d: "M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("circle", { key: "c", cx: "12", cy: "12", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 35. Layers (Teal / Architecture & Stacks)
-		{
-			color: "#14b8a6",
-			bgLight: "linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)",
-			borderLight: "#99f6e4",
-			bgDark: "linear-gradient(135deg, #134e4a 0%, #0c3330 100%)",
-			borderDark: "#0f766e",
-			render: () => [
-				h("path", { key: "l1", d: "m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "l2", d: "m2 12 8.58 3.91a2 2 0 0 0 1.66 0L22 12", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "l3", d: "m2 17 8.58 3.91a2 2 0 0 0 1.66 0L22 17", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 36. Compass (Lime / Discovery & Navigation)
-		{
-			color: "#84cc16",
-			bgLight: "linear-gradient(135deg, #f7fee7 0%, #ecfccb 100%)",
-			borderLight: "#d9f99d",
-			bgDark: "linear-gradient(135deg, #365314 0%, #20310c 100%)",
-			borderDark: "#4d7c0f",
-			render: () => [
-				h("circle", { key: "c", cx: "12", cy: "12", r: "10", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("polygon", { key: "p", points: "16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 37. Search (Blue / RAG & Query Retrieval)
-		{
-			color: "#3b82f6",
-			bgLight: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-			borderLight: "#bfdbfe",
-			bgDark: "linear-gradient(135deg, #1e3a8a 0%, #112240 100%)",
-			borderDark: "#1d4ed8",
-			render: () => [
-				h("circle", { key: "c", cx: "11", cy: "11", r: "8", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l", x1: "21", y1: "21", x2: "16.65", y2: "16.65", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 38. Globe (Sky / Internet & Web Crawling)
-		{
-			color: "#0284c7",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #0c4a6e 0%, #082f46 100%)",
-			borderDark: "#0369a1",
-			render: () => [
-				h("circle", { key: "g1", cx: "12", cy: "12", r: "10", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "g2", x1: "2", x2: "22", y1: "12", y2: "12", stroke: "currentColor", strokeWidth: 2 }),
-				h("path", { key: "g3", d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 39. Link (Teal / Bridge & Connectors)
-		{
-			color: "#14b8a6",
-			bgLight: "linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)",
-			borderLight: "#99f6e4",
-			bgDark: "linear-gradient(135deg, #134e4a 0%, #0c3330 100%)",
-			borderDark: "#0f766e",
-			render: () => [
-				h("path", { key: "p1", d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("path", { key: "p2", d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 40. Anchor (Cyan / Hooks & Interceptors)
-		{
-			color: "#06b6d4",
-			bgLight: "linear-gradient(135deg, #ecfeff 0%, #cffafe 100%)",
-			borderLight: "#a5f3fc",
-			bgDark: "linear-gradient(135deg, #164e63 0%, #0d313f 100%)",
-			borderDark: "#155e75",
-			render: () => [
-				h("circle", { key: "c", cx: "12", cy: "5", r: "3", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l", x1: "12", x2: "12", y1: "22", y2: "8", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("path", { key: "p", d: "M5 12H2a10 10 0 0 0 20 0h-3", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 41. ShieldCheck (Emerald / Verified Protection)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("path", { key: "s", d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "c", d: "m9 12 2 2 4-4", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 42. ShieldAlert (Red / Risk Control & Security Auditing)
-		{
-			color: "#ef4444",
-			bgLight: "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)",
-			borderLight: "#fecaca",
-			bgDark: "linear-gradient(135deg, #450a0a 0%, #2b0606 100%)",
-			borderDark: "#991b1b",
-			render: () => [
-				h("path", { key: "s", d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("line", { key: "l1", x1: "12", y1: "8", x2: "12", y2: "12", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("line", { key: "l2", x1: "12", y1: "16", x2: "12.01", y2: "16", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 43. Lock (Amber / Privacy & Encryption)
-		{
-			color: "#f59e0b",
-			bgLight: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-			borderLight: "#fde68a",
-			bgDark: "linear-gradient(135deg, #451a03 0%, #291002 100%)",
-			borderDark: "#78350f",
-			render: () => [
-				h("rect", { key: "r", width: "18", height: "11", x: "3", y: "11", rx: "2", ry: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "M7 11V7a5 5 0 0 1 10 0v4", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 44. Key (Amber / OAuth Keys & Auth)
-		{
-			color: "#f59e0b",
-			bgLight: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-			borderLight: "#fde68a",
-			bgDark: "linear-gradient(135deg, #451a03 0%, #291002 100%)",
-			borderDark: "#78350f",
-			render: () => [
-				h("circle", { key: "c", cx: "7.5", cy: "15.5", r: "5.5", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "m21 2-2 2m-1.5 1.5L19 7l-3 3-2-2-3 3", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 45. CreditCard (Indigo / Payments & Billing)
-		{
-			color: "#6366f1",
-			bgLight: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)",
-			borderLight: "#c7d2fe",
-			bgDark: "linear-gradient(135deg, #1e1b4b 0%, #131131 100%)",
-			borderDark: "#3730a3",
-			render: () => [
-				h("rect", { key: "r", width: "20", height: "14", x: "2", y: "5", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("line", { key: "l", x1: "2", x2: "22", y1: "10", y2: "10", stroke: "currentColor", strokeWidth: 2 }),
-			],
-		},
-		// 46. Coins (Yellow / Finance & Commercial)
-		{
-			color: "#eab308",
-			bgLight: "linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)",
-			borderLight: "#fef08a",
-			bgDark: "linear-gradient(135deg, #422006 0%, #271304 100%)",
-			borderDark: "#854d0e",
-			render: () => [
-				h("circle", { key: "c1", cx: "8", cy: "8", r: "6", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p1", d: "M18.09 10.37A6 6 0 1 1 10.34 18", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p2", d: "M7 6h1v4M17 14h.01", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 47. ShoppingCart (Orange / E-Commerce & Stores)
-		{
-			color: "#f97316",
-			bgLight: "linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)",
-			borderLight: "#fed7aa",
-			bgDark: "linear-gradient(135deg, #431407 0%, #270b04 100%)",
-			borderDark: "#c2410c",
-			render: () => [
-				h("circle", { key: "c1", cx: "8", cy: "21", r: "1", fill: "currentColor" }),
-				h("circle", { key: "c2", cx: "19", cy: "21", r: "1", fill: "currentColor" }),
-				h("path", { key: "p", d: "M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 48. TrendingUp (Emerald / Growth & Performance Benchmark)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("polyline", { key: "p1", points: "22 7 13.5 15.5 8.5 10.5 2 17", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("polyline", { key: "p2", points: "16 7 22 7 22 13", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 49. PieChart (Violet / Data Analytics & BI)
-		{
-			color: "#8b5cf6",
-			bgLight: "linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)",
-			borderLight: "#ddd6fe",
-			bgDark: "linear-gradient(135deg, #2e1065 0%, #1c0a3d 100%)",
-			borderDark: "#4c1d95",
-			render: () => [
-				h("path", { key: "p1", d: "M21.21 15.89A10 10 0 1 1 8 2.83", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p2", d: "M22 12A10 10 0 0 0 12 2v10z", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 50. MessageSquare (Blue / Chat & Messaging)
-		{
-			color: "#3b82f6",
-			bgLight: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-			borderLight: "#bfdbfe",
-			bgDark: "linear-gradient(135deg, #1e3a8a 0%, #112240 100%)",
-			borderDark: "#1d4ed8",
-			render: () => [
-				h("path", { key: "m", d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 51. MessagesSquare (Pink / Chatrooms & Group Discussions)
-		{
-			color: "#ec4899",
-			bgLight: "linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%)",
-			borderLight: "#fbcfe8",
-			bgDark: "linear-gradient(135deg, #831843 0%, #500724 100%)",
-			borderDark: "#be185d",
-			render: () => [
-				h("path", { key: "p1", d: "M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 52. Mail (Sky / Email Newsletters)
-		{
-			color: "#0284c7",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #0c4a6e 0%, #082f46 100%)",
-			borderDark: "#0369a1",
-			render: () => [
-				h("rect", { key: "r", width: "20", height: "16", x: "2", y: "4", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 53. Users (Indigo / Community & Team Members)
-		{
-			color: "#6366f1",
-			bgLight: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)",
-			borderLight: "#c7d2fe",
-			bgDark: "linear-gradient(135deg, #1e1b4b 0%, #131131 100%)",
-			borderDark: "#3730a3",
-			render: () => [
-				h("path", { key: "p1", d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("circle", { key: "c1", cx: "9", cy: "7", r: "4", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p2", d: "M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-			],
-		},
-		// 54. Wrench (Sky / Diagnosis & Doctor Repair)
-		{
-			color: "#0284c7",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #0c4a6e 0%, #082f46 100%)",
-			borderDark: "#0369a1",
-			render: () => [
-				h("path", { key: "w", d: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 55. Gauge (Amber / Speedometer & Latency)
-		{
-			color: "#f59e0b",
-			bgLight: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-			borderLight: "#fde68a",
-			bgDark: "linear-gradient(135deg, #451a03 0%, #291002 100%)",
-			borderDark: "#78350f",
-			render: () => [
-				h("path", { key: "g1", d: "m12 14 4-4", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("path", { key: "g2", d: "M3.34 19a10 10 0 1 1 17.32 0", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-			],
-		},
-		// 56. CheckCircle (Emerald / Quality QA & Compliance Standards)
-		{
-			color: "#10b981",
-			bgLight: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)",
-			borderLight: "#a7f3d0",
-			bgDark: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)",
-			borderDark: "#047857",
-			render: () => [
-				h("path", { key: "p1", d: "M22 11.08V12a10 10 0 1 1-5.93-9.14", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("polyline", { key: "p2", points: "22 4 12 14.01 9 11.01", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 57. Flame (Rose / Power Boost & Turbo)
-		{
-			color: "#f43f5e",
-			bgLight: "linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)",
-			borderLight: "#fecdd3",
-			bgDark: "linear-gradient(135deg, #4c0519 0%, #2e030f 100%)",
-			borderDark: "#9f1239",
-			render: () => [
-				h("path", { key: "f", d: "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 58. Zap (Yellow / Superpowers & Speed)
-		{
-			color: "#eab308",
-			bgLight: "linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)",
-			borderLight: "#fef08a",
-			bgDark: "linear-gradient(135deg, #422006 0%, #271304 100%)",
-			borderDark: "#854d0e",
-			render: () => [
-				h("polygon", { key: "z", points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 59. Truck (Orange / Migration & Asset Transfer)
-		{
-			color: "#f97316",
-			bgLight: "linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)",
-			borderLight: "#fed7aa",
-			bgDark: "linear-gradient(135deg, #431407 0%, #270b04 100%)",
-			borderDark: "#c2410c",
-			render: () => [
-				h("path", { key: "p1", d: "M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("path", { key: "p2", d: "M15 18H9M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14v10Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("circle", { key: "c1", cx: "17", cy: "18", r: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("circle", { key: "c2", cx: "7", cy: "18", r: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 60. RefreshCw (Sky Blue / Sync & Auto-Update)
-		{
-			color: "#0ea5e9",
-			bgLight: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-			borderLight: "#bae6fd",
-			bgDark: "linear-gradient(135deg, #075985 0%, #032b42 100%)",
-			borderDark: "#0284c7",
-			render: () => [
-				h("path", { key: "p1", d: "M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p2", d: "M3 3v5h5", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p3", d: "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p4", d: "M16 16h5v5", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 61. Workflow (Violet / Pipelines & Automation)
-		{
-			color: "#8b5cf6",
-			bgLight: "linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)",
-			borderLight: "#ddd6fe",
-			bgDark: "linear-gradient(135deg, #2e1065 0%, #1c0a3d 100%)",
-			borderDark: "#4c1d95",
-			render: () => [
-				h("rect", { key: "r1", width: "8", height: "8", x: "3", y: "3", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("path", { key: "p", d: "M7 11v4a2 2 0 0 0 2 2h4", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round" }),
-				h("rect", { key: "r2", width: "8", height: "8", x: "13", y: "13", rx: "2", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-			],
-		},
-		// 62. Clock (Slate / Cron & Scheduling)
-		{
-			color: "#64748b",
-			bgLight: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-			borderLight: "#cbd5e1",
-			bgDark: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
-			borderDark: "#334155",
-			render: () => [
-				h("circle", { key: "c", cx: "12", cy: "12", r: "10", stroke: "currentColor", strokeWidth: 2, fill: "none" }),
-				h("polyline", { key: "p", points: "12 6 12 12 16 14", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-		// 63. Package (Purple / Tools & Module Library)
-		{
-			color: "#a855f7",
-			bgLight: "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)",
-			borderLight: "#e9d5ff",
-			bgDark: "linear-gradient(135deg, #3b0764 0%, #240340 100%)",
-			borderDark: "#6b21a8",
-			render: () => [
-				h("path", { key: "p1", d: "m7.5 4.27 9 5.15", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }),
-				h("path", { key: "p2", d: "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-				h("path", { key: "p3", d: "m3.3 7 8.7 5 8.7-5M12 22V12", stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }),
-			],
-		},
-	];
+	// Phosphor Icons 2.1.1, duotone subset. MIT; see assets/licenses/phosphor-icons.txt.
+	const PHOSPHOR_ICONS = {
+		"brain": [["M240,124a48,48,0,0,1-32,45.27h0V176a40,40,0,0,1-80,0,40,40,0,0,1-80,0v-6.73h0a48,48,0,0,1,0-90.54V72a40,40,0,0,1,80,0,40,40,0,0,1,80,0v6.73A48,48,0,0,1,240,124Z",0.2],["M248,124a56.11,56.11,0,0,0-32-50.61V72a48,48,0,0,0-88-26.49A48,48,0,0,0,40,72v1.39a56,56,0,0,0,0,101.2V176a48,48,0,0,0,88,26.49A48,48,0,0,0,216,176v-1.41A56.09,56.09,0,0,0,248,124ZM88,208a32,32,0,0,1-31.81-28.56A55.87,55.87,0,0,0,64,180h8a8,8,0,0,0,0-16H64A40,40,0,0,1,50.67,86.27,8,8,0,0,0,56,78.73V72a32,32,0,0,1,64,0v68.26A47.8,47.8,0,0,0,88,128a8,8,0,0,0,0,16,32,32,0,0,1,0,64Zm104-44h-8a8,8,0,0,0,0,16h8a55.87,55.87,0,0,0,7.81-.56A32,32,0,1,1,168,144a8,8,0,0,0,0-16,47.8,47.8,0,0,0-32,12.26V72a32,32,0,0,1,64,0v6.73a8,8,0,0,0,5.33,7.54A40,40,0,0,1,192,164Zm16-52a8,8,0,0,1-8,8h-4a36,36,0,0,1-36-36V80a8,8,0,0,1,16,0v4a20,20,0,0,0,20,20h4A8,8,0,0,1,208,112ZM60,120H56a8,8,0,0,1,0-16h4A20,20,0,0,0,80,84V80a8,8,0,0,1,16,0v4A36,36,0,0,1,60,120Z"]],
+		"compass-tool": [["M160,80a32,32,0,1,1-32-32A32,32,0,0,1,160,80Z",0.2],["M215.12,123.64a8,8,0,1,0-14.24-7.28,79.58,79.58,0,0,1-33.08,33.5l-16.58-37.32A40,40,0,0,0,136,40.8V24a8,8,0,0,0-16,0V40.8a40,40,0,0,0-15.22,71.74L56.69,220.75a8,8,0,1,0,14.62,6.5l25.14-56.56A95.48,95.48,0,0,0,128,176a99.13,99.13,0,0,0,31.6-5.21l25.09,56.46a8,8,0,0,0,14.62-6.5l-25-56.25A95.81,95.81,0,0,0,215.12,123.64ZM128,56a24,24,0,1,1-24,24A24,24,0,0,1,128,56Zm0,104a79.52,79.52,0,0,1-25-4l16.42-36.94a39.81,39.81,0,0,0,17.2,0l16.48,37.06A83.21,83.21,0,0,1,128,160Z"]],
+		"chat-circle-dots": [["M224,128A96,96,0,0,1,79.93,211.11h0L42.54,223.58a8,8,0,0,1-10.12-10.12l12.47-37.39h0A96,96,0,1,1,224,128Z",0.2],["M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-4-1.08,7.85,7.85,0,0,0-2.53.42L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Zm12-88a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm-44,0a12,12,0,1,1-12-12A12,12,0,0,1,96,128Zm88,0a12,12,0,1,1-12-12A12,12,0,0,1,184,128Z"]],
+		"microscope": [["M136,32V136a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V32a8,8,0,0,1,8-8h48A8,8,0,0,1,136,32Z",0.2],["M224,208H203.94A88.05,88.05,0,0,0,144,64.37V32a16,16,0,0,0-16-16H80A16,16,0,0,0,64,32V136a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V80.46A72,72,0,0,1,181.25,208H32a8,8,0,0,0,0,16H224a8,8,0,0,0,0-16Zm-96-72H80V32h48V136ZM72,184a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"]],
+		"graduation-cap": [["M216,113.07v53.22a8,8,0,0,1-2,5.31c-11.3,12.59-38.9,36.4-86,36.4s-74.68-23.81-86-36.4a8,8,0,0,1-2-5.31V113.07L128,160Z",0.2],["M251.76,88.94l-120-64a8,8,0,0,0-7.52,0l-120,64a8,8,0,0,0,0,14.12L32,117.87v48.42a15.91,15.91,0,0,0,4.06,10.65C49.16,191.53,78.51,216,128,216a130,130,0,0,0,48-8.76V240a8,8,0,0,0,16,0V199.51a115.63,115.63,0,0,0,27.94-22.57A15.91,15.91,0,0,0,224,166.29V117.87l27.76-14.81a8,8,0,0,0,0-14.12ZM128,200c-43.27,0-68.72-21.14-80-33.71V126.4l76.24,40.66a8,8,0,0,0,7.52,0L176,143.47v46.34C163.4,195.69,147.52,200,128,200Zm80-33.75a97.83,97.83,0,0,1-16,14.25V134.93l16-8.53ZM188,118.94l-.22-.13-56-29.87a8,8,0,0,0-7.52,14.12L171,128l-43,22.93L25,96,128,41.07,231,96Z"]],
+		"notebook": [["M80,40V216H48a8,8,0,0,1-8-8V48a8,8,0,0,1,8-8Z",0.2],["M184,112a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h64A8,8,0,0,1,184,112Zm-8,24H112a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm48-88V208a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32H208A16,16,0,0,1,224,48ZM48,208H72V48H48Zm160,0V48H88V208H208Z"]],
+		"translate": [["M224,184H144l40-80ZM96,127.56h0A95.78,95.78,0,0,0,128,56H64A95.78,95.78,0,0,0,96,127.56Z",0.2],["M247.15,212.42l-56-112a8,8,0,0,0-14.31,0l-21.71,43.43A88,88,0,0,1,108,126.93,103.65,103.65,0,0,0,135.69,64H160a8,8,0,0,0,0-16H104V32a8,8,0,0,0-16,0V48H32a8,8,0,0,0,0,16h87.63A87.7,87.7,0,0,1,96,116.35a87.74,87.74,0,0,1-19-31,8,8,0,1,0-15.08,5.34A103.63,103.63,0,0,0,84,127a87.55,87.55,0,0,1-52,17,8,8,0,0,0,0,16,103.46,103.46,0,0,0,64-22.08,104.18,104.18,0,0,0,51.44,21.31l-26.6,53.19a8,8,0,0,0,14.31,7.16L148.94,192h70.11l13.79,27.58A8,8,0,0,0,240,224a8,8,0,0,0,7.15-11.58ZM156.94,176,184,121.89,211.05,176Z"]],
+		"briefcase": [["M224,118.31V200a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V118.31h0A191.14,191.14,0,0,0,128,144,191.08,191.08,0,0,0,224,118.31Z",0.2],["M104,112a8,8,0,0,1,8-8h32a8,8,0,0,1,0,16H112A8,8,0,0,1,104,112ZM232,72V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V72A16,16,0,0,1,40,56H80V48a24,24,0,0,1,24-24h48a24,24,0,0,1,24,24v8h40A16,16,0,0,1,232,72ZM96,56h64V48a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8ZM40,72v41.62A184.07,184.07,0,0,0,128,136a184,184,0,0,0,88-22.39V72ZM216,200V131.63A200.25,200.25,0,0,1,128,152a200.19,200.19,0,0,1-88-20.36V200H216Z"]],
+		"identification-card": [["M216,48H40a8,8,0,0,0-8,8V200a8,8,0,0,0,8,8H216a8,8,0,0,0,8-8V56A8,8,0,0,0,216,48ZM96,144a24,24,0,1,1,24-24A24,24,0,0,1,96,144Z",0.2],["M200,112a8,8,0,0,1-8,8H152a8,8,0,0,1,0-16h40A8,8,0,0,1,200,112Zm-8,24H152a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm40-80V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Zm-80.26-34a8,8,0,1,1-15.5,4c-2.63-10.26-13.06-18-24.25-18s-21.61,7.74-24.25,18a8,8,0,1,1-15.5-4,39.84,39.84,0,0,1,17.19-23.34,32,32,0,1,1,45.12,0A39.76,39.76,0,0,1,135.75,166ZM96,136a16,16,0,1,0-16-16A16,16,0,0,0,96,136Z"]],
+		"scales": [["M56,88l32,80c0,17.67-20,24-32,24s-32-6.33-32-24ZM200,56l-32,80c0,17.67,20,24,32,24s32-6.33,32-24Z",0.2],["M239.43,133l-32-80h0a8,8,0,0,0-9.16-4.84L136,62V40a8,8,0,0,0-16,0V65.58L54.26,80.19A8,8,0,0,0,48.57,85h0v.06L16.57,165a7.92,7.92,0,0,0-.57,3c0,23.31,24.54,32,40,32s40-8.69,40-32a7.92,7.92,0,0,0-.57-3L66.92,93.77,120,82V208H104a8,8,0,0,0,0,16h48a8,8,0,0,0,0-16H136V78.42L187,67.1,160.57,133a7.92,7.92,0,0,0-.57,3c0,23.31,24.54,32,40,32s40-8.69,40-32A7.92,7.92,0,0,0,239.43,133ZM56,184c-7.53,0-22.76-3.61-23.93-14.64L56,109.54l23.93,59.82C78.76,180.39,63.53,184,56,184Zm144-32c-7.53,0-22.76-3.61-23.93-14.64L200,77.54l23.93,59.82C222.76,148.39,207.53,152,200,152Z"]],
+		"handshake": [["M200,152l-40,40L96,176,40,136,72.68,70.63,128,56l55.32,14.63L183.6,72H144L98.34,116.29a8,8,0,0,0,1.38,12.42C117.23,139.9,141,139.13,160,120Z",0.2],["M254.3,107.91,228.78,56.85a16,16,0,0,0-21.47-7.15L182.44,62.13,130.05,48.27a8.14,8.14,0,0,0-4.1,0L73.56,62.13,48.69,49.7a16,16,0,0,0-21.47,7.15L1.7,107.9a16,16,0,0,0,7.15,21.47l27,13.51,55.49,39.63a8.06,8.06,0,0,0,2.71,1.25l64,16a8,8,0,0,0,7.6-2.1l55.07-55.08,26.42-13.21a16,16,0,0,0,7.15-21.46Zm-54.89,33.37L165,113.72a8,8,0,0,0-10.68.61C136.51,132.27,116.66,130,104,122L147.24,80h31.81l27.21,54.41ZM41.53,64,62,74.22,36.43,125.27,16,115.06Zm116,119.13L99.42,168.61l-49.2-35.14,28-56L128,64.28l9.8,2.59-45,43.68-.08.09a16,16,0,0,0,2.72,24.81c20.56,13.13,45.37,11,64.91-5L188,152.66Zm62-57.87-25.52-51L214.47,64,240,115.06Zm-87.75,92.67a8,8,0,0,1-7.75,6.06,8.13,8.13,0,0,1-1.95-.24L80.41,213.33a7.89,7.89,0,0,1-2.71-1.25L51.35,193.26a8,8,0,0,1,9.3-13l25.11,17.94L126,208.24A8,8,0,0,1,131.82,217.94Z"]],
+		"magnifying-glass": [["M192,112a80,80,0,1,1-80-80A80,80,0,0,1,192,112Z",0.2],["M229.66,218.34,179.6,168.28a88.21,88.21,0,1,0-11.32,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"]],
+		"puzzle-piece": [["M204,168a28,28,0,0,0,12-2.69V208a8,8,0,0,1-8,8H64a8,8,0,0,1-8-8V165.31a28,28,0,1,1,0-50.62V72a8,8,0,0,1,8-8h46.69a28,28,0,1,1,50.61,0H208a8,8,0,0,1,8,8v42.69A28,28,0,1,0,204,168Z",0.2],["M220.27,158.54a8,8,0,0,0-7.7-.46,20,20,0,1,1,0-36.16A8,8,0,0,0,224,114.69V72a16,16,0,0,0-16-16H171.78a35.36,35.36,0,0,0,.22-4,36.15,36.15,0,0,0-11.36-26.25,36,36,0,0,0-60.55,23.63,36.56,36.56,0,0,0,.14,6.62H64A16,16,0,0,0,48,72v32.22a35.36,35.36,0,0,0-4-.22,36.12,36.12,0,0,0-26.24,11.36,35.7,35.7,0,0,0-9.69,27,36.08,36.08,0,0,0,33.31,33.6,36.56,36.56,0,0,0,6.62-.14V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V165.31A8,8,0,0,0,220.27,158.54ZM208,208H64V165.31a8,8,0,0,0-11.43-7.23,20,20,0,1,1,0-36.16A8,8,0,0,0,64,114.69V72h46.69a8,8,0,0,0,7.23-11.43,20,20,0,1,1,36.16,0A8,8,0,0,0,161.31,72H208v32.23a35.68,35.68,0,0,0-6.62-.14A36,36,0,0,0,204,176a35.36,35.36,0,0,0,4-.22Z"]],
+		"presentation-chart": [["M224,56V176a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V56a8,8,0,0,1,8-8H216A8,8,0,0,1,224,56Z",0.2],["M216,40H136V24a8,8,0,0,0-16,0V40H40A16,16,0,0,0,24,56V176a16,16,0,0,0,16,16H79.36L57.75,219a8,8,0,0,0,12.5,10l29.59-37h56.32l29.59,37a8,8,0,1,0,12.5-10l-21.61-27H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,136H40V56H216V176ZM104,120v24a8,8,0,0,1-16,0V120a8,8,0,0,1,16,0Zm32-16v40a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm32-16v56a8,8,0,0,1-16,0V88a8,8,0,0,1,16,0Z"]],
+		"image-square": [["M208,40H48a8,8,0,0,0-8,8V208a8,8,0,0,0,8,8h8.69L166.34,106.34a8,8,0,0,1,11.32,0L216,144.69V48A8,8,0,0,0,208,40ZM96,112a16,16,0,1,1,16-16A16,16,0,0,1,96,112Z",0.2],["M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM48,48H208v77.38l-24.69-24.7a16,16,0,0,0-22.62,0L53.37,208H48ZM208,208H76l96-96,36,36v60ZM96,120A24,24,0,1,0,72,96,24,24,0,0,0,96,120Zm0-32a8,8,0,1,1-8,8A8,8,0,0,1,96,88Z"]],
+		"pen-nib": [["M128,48,68.32,70.38a8,8,0,0,0-5.08,6.17L40,216l139.45-23.24a8,8,0,0,0,6.17-5.08L208,128Zm-4,104a20,20,0,1,1,20-20A20,20,0,0,1,124,152Z",0.2],["M248,92.68a15.86,15.86,0,0,0-4.69-11.31L174.63,12.68a16,16,0,0,0-22.63,0L123.57,41.11l-58,21.77A16.06,16.06,0,0,0,55.35,75.23L32.11,214.68A8,8,0,0,0,40,224a8.4,8.4,0,0,0,1.32-.11l139.44-23.24a16,16,0,0,0,12.35-10.17l21.77-58L243.31,104A15.87,15.87,0,0,0,248,92.68Zm-69.87,92.19L63.32,204l47.37-47.37a28,28,0,1,0-11.32-11.32L52,192.7,71.13,77.86,126,57.29,198.7,130ZM112,132a12,12,0,1,1,12,12A12,12,0,0,1,112,132Zm96-15.32L139.31,48l24-24L232,92.68Z"]],
+		"code-block": [["M152,32V96a16,16,0,0,1-16,16H32A16,16,0,0,1,16,96V32A16,16,0,0,1,32,16H136A16,16,0,0,1,152,32Z",0.2],["M58.34,101.66l-32-32a8,8,0,0,1,0-11.32l32-32A8,8,0,0,1,69.66,37.66L43.31,64,69.66,90.34a8,8,0,0,1-11.32,11.32Zm40,0a8,8,0,0,0,11.32,0l32-32a8,8,0,0,0,0-11.32l-32-32A8,8,0,0,0,98.34,37.66L124.69,64,98.34,90.34A8,8,0,0,0,98.34,101.66ZM200,40H176a8,8,0,0,0,0,16h24V200H56V136a8,8,0,0,0-16,0v64a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Z"]],
+		"tree-structure": [["M64,112v32a8,8,0,0,1-8,8H24a8,8,0,0,1-8-8V112a8,8,0,0,1,8-8H56A8,8,0,0,1,64,112ZM208,40H160a8,8,0,0,0-8,8V96a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V48A8,8,0,0,0,208,40Zm0,112H160a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V160A8,8,0,0,0,208,152Z",0.2],["M160,112h48a16,16,0,0,0,16-16V48a16,16,0,0,0-16-16H160a16,16,0,0,0-16,16V64H128a24,24,0,0,0-24,24v32H72v-8A16,16,0,0,0,56,96H24A16,16,0,0,0,8,112v32a16,16,0,0,0,16,16H56a16,16,0,0,0,16-16v-8h32v32a24,24,0,0,0,24,24h16v16a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V160a16,16,0,0,0-16-16H160a16,16,0,0,0-16,16v16H128a8,8,0,0,1-8-8V88a8,8,0,0,1,8-8h16V96A16,16,0,0,0,160,112ZM56,144H24V112H56v32Zm104,16h48v48H160Zm0-112h48V96H160Z"]],
+		"question": [["M224,128a96,96,0,1,1-96-96A96,96,0,0,1,224,128Z",0.2],["M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,72c-22.06,0-40,16.15-40,36v4a8,8,0,0,0,16,0v-4c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-.72c18.24-3.35,32-17.9,32-35.28C168,88.15,150.06,72,128,72Zm104,56A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"]],
+		"ticket": [["M200,128a32,32,0,0,0,32,32v32a8,8,0,0,1-8,8H96V56H224a8,8,0,0,1,8,8V96A32,32,0,0,0,200,128Z",0.2],["M232,104a8,8,0,0,0,8-8V64a16,16,0,0,0-16-16H32A16,16,0,0,0,16,64V96a8,8,0,0,0,8,8,24,24,0,0,1,0,48,8,8,0,0,0-8,8v32a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V160a8,8,0,0,0-8-8,24,24,0,0,1,0-48ZM32,167.2a40,40,0,0,0,0-78.4V64H88V192H32Zm192,0V192H104V64H224V88.8a40,40,0,0,0,0,78.4Z"]],
+		"blueprint": [["M232,64V200H48a24,24,0,0,1,0-48H64V64Z",0.2],["M232,56H72V40a8,8,0,0,0-8-8H48A32,32,0,0,0,16,64V176a32,32,0,0,0,32,32H232a8,8,0,0,0,8-8V64A8,8,0,0,0,232,56ZM32,64A16,16,0,0,1,48,48h8v96H48a31.82,31.82,0,0,0-16,4.29ZM224,192H48a16,16,0,0,1,0-32H64a8,8,0,0,0,8-8V72H224ZM104,136a8,8,0,0,0,0,16h16v8a8,8,0,0,0,16,0v-8h24v8a8,8,0,0,0,16,0v-8h16a8,8,0,0,0,0-16H176V120h16a8,8,0,0,0,0-16H176V96a8,8,0,0,0-16,0v8H136V96a8,8,0,0,0-16,0v8H104a8,8,0,0,0,0,16h16v16Zm32-16h24v16H136Z"]],
+		"kanban": [["M216,56v64H160V56ZM40,208a8,8,0,0,0,8,8H88a8,8,0,0,0,8-8V120H40Z",0.2],["M216,48H40a8,8,0,0,0-8,8V208a16,16,0,0,0,16,16H88a16,16,0,0,0,16-16V160h48v16a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V56A8,8,0,0,0,216,48Zm-8,64H168V64h40ZM88,64v48H48V64Zm0,144H48V128H88Zm16-64V64h48v80Zm64,32V128h40v48Z"]],
+		"sliders-horizontal": [["M128,80a24,24,0,1,1-24-24A24,24,0,0,1,128,80Zm40,72a24,24,0,1,0,24,24A24,24,0,0,0,168,152Z",0.2],["M40,88H73a32,32,0,0,0,62,0h81a8,8,0,0,0,0-16H135a32,32,0,0,0-62,0H40a8,8,0,0,0,0,16Zm64-24A16,16,0,1,1,88,80,16,16,0,0,1,104,64ZM216,168H199a32,32,0,0,0-62,0H40a8,8,0,0,0,0,16h97a32,32,0,0,0,62,0h17a8,8,0,0,0,0-16Zm-48,24a16,16,0,1,1,16-16A16,16,0,0,1,168,192Z"]],
+		"terminal-window": [["M224,56V200a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V56a8,8,0,0,1,8-8H216A8,8,0,0,1,224,56Z",0.2],["M128,128a8,8,0,0,1-3,6.25l-40,32a8,8,0,1,1-10-12.5L107.19,128,75,102.25a8,8,0,1,1,10-12.5l40,32A8,8,0,0,1,128,128Zm48,24H136a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm56-96V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Z"]],
+		"database": [["M216,80c0,26.51-39.4,48-88,48S40,106.51,40,80s39.4-48,88-48S216,53.49,216,80Z",0.2],["M128,24C74.17,24,32,48.6,32,80v96c0,31.4,42.17,56,96,56s96-24.6,96-56V80C224,48.6,181.83,24,128,24Zm80,104c0,9.62-7.88,19.43-21.61,26.92C170.93,163.35,150.19,168,128,168s-42.93-4.65-58.39-13.08C55.88,147.43,48,137.62,48,128V111.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64ZM69.61,53.08C85.07,44.65,105.81,40,128,40s42.93,4.65,58.39,13.08C200.12,60.57,208,70.38,208,80s-7.88,19.43-21.61,26.92C170.93,115.35,150.19,120,128,120s-42.93-4.65-58.39-13.08C55.88,99.43,48,89.62,48,80S55.88,60.57,69.61,53.08ZM186.39,202.92C170.93,211.35,150.19,216,128,216s-42.93-4.65-58.39-13.08C55.88,195.43,48,185.62,48,176V159.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64V176C208,185.62,200.12,195.43,186.39,202.92Z"]],
+		"cloud": [["M240,128a80,80,0,0,1-80,80H72A56,56,0,1,1,85.92,97.74l0,.1A80,80,0,0,1,240,128Z",0.2],["M160,40A88.09,88.09,0,0,0,81.29,88.67,64,64,0,1,0,72,216h88a88,88,0,0,0,0-176Zm0,160H72a48,48,0,0,1,0-96c1.1,0,2.2,0,3.29.11A88,88,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,72,72Z"]],
+		"shield-check": [["M216,56v56c0,96-88,120-88,120S40,208,40,112V56a8,8,0,0,1,8-8H208A8,8,0,0,1,216,56Z",0.2],["M208,40H48A16,16,0,0,0,32,56v56c0,52.72,25.52,84.67,46.93,102.19,23.06,18.86,46,25.26,47,25.53a8,8,0,0,0,4.2,0c1-.27,23.91-6.67,47-25.53C198.48,196.67,224,164.72,224,112V56A16,16,0,0,0,208,40Zm0,72c0,37.07-13.66,67.16-40.6,89.42A129.3,129.3,0,0,1,128,223.62a128.25,128.25,0,0,1-38.92-21.81C61.82,179.51,48,149.3,48,112l0-56,160,0ZM82.34,141.66a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56a8,8,0,0,1-11.32,0Z"]],
+		"music-notes": [["M208,164a28,28,0,1,1-28-28A28,28,0,0,1,208,164ZM52,168a28,28,0,1,0,28,28A28,28,0,0,0,52,168Z",0.2],["M212.92,17.69a8,8,0,0,0-6.86-1.45l-128,32A8,8,0,0,0,72,56V166.08A36,36,0,1,0,88,196V110.25l112-28v51.83A36,36,0,1,0,216,164V24A8,8,0,0,0,212.92,17.69ZM52,216a20,20,0,1,1,20-20A20,20,0,0,1,52,216ZM88,93.75V62.25l112-28v31.5ZM180,184a20,20,0,1,1,20-20A20,20,0,0,1,180,184Z"]],
+		"film-strip": [["M32,176H224v24a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8ZM216,48H40a8,8,0,0,0-8,8V80H224V56A8,8,0,0,0,216,48Z",0.2],["M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM40,88h80v80H40Zm96-16V56h32V72Zm-16,0H88V56h32Zm0,112v16H88V184Zm16,0h32v16H136Zm0-16V88h80v80Zm80-96H184V56h32ZM72,56V72H40V56ZM40,184H72v16H40Zm176,16H184V184h32v16Z"]],
+		"globe": [["M224,128a96,96,0,1,1-96-96A96,96,0,0,1,224,128Z",0.2],["M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm88,104a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48ZM40,128a87.61,87.61,0,0,1,3.33-24H81.84a157.44,157.44,0,0,0,0,48H43.33A87.61,87.61,0,0,1,40,128ZM154,88H102a115.11,115.11,0,0,1,26-45A115.27,115.27,0,0,1,154,88Zm52.33,0H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM107.59,42.4A135.28,135.28,0,0,0,85.29,88H49.63A88.29,88.29,0,0,1,107.59,42.4ZM49.63,168H85.29a135.28,135.28,0,0,0,22.3,45.6A88.29,88.29,0,0,1,49.63,168Zm98.78,45.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"]],
+		"robot": [["M200,56H56A24,24,0,0,0,32,80V192a24,24,0,0,0,24,24H200a24,24,0,0,0,24-24V80A24,24,0,0,0,200,56ZM164,184H92a20,20,0,0,1,0-40h72a20,20,0,0,1,0,40Z",0.2],["M200,48H136V16a8,8,0,0,0-16,0V48H56A32,32,0,0,0,24,80V192a32,32,0,0,0,32,32H200a32,32,0,0,0,32-32V80A32,32,0,0,0,200,48Zm16,144a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V80A16,16,0,0,1,56,64H200a16,16,0,0,1,16,16ZM72,108a12,12,0,1,1,12,12A12,12,0,0,1,72,108Zm88,0a12,12,0,1,1,12,12A12,12,0,0,1,160,108Zm4,28H92a28,28,0,0,0,0,56h72a28,28,0,0,0,0-56Zm-24,16v24H116V152ZM80,164a12,12,0,0,1,12-12h8v24H92A12,12,0,0,1,80,164Zm84,12h-8V152h8a12,12,0,0,1,0,24Z"]],
+		"calendar-blank": [["M216,48V88H40V48a8,8,0,0,1,8-8H208A8,8,0,0,1,216,48Z",0.2],["M208,32H184V24a8,8,0,0,0-16,0v8H88V24a8,8,0,0,0-16,0v8H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM72,48v8a8,8,0,0,0,16,0V48h80v8a8,8,0,0,0,16,0V48h24V80H48V48ZM208,208H48V96H208V208Z"]],
+		"chart-line-up": [["M224,64V208H32V48H208A16,16,0,0,1,224,64Z",0.2],["M232,208a8,8,0,0,1-8,8H32a8,8,0,0,1-8-8V48a8,8,0,0,1,16,0V156.69l50.34-50.35a8,8,0,0,1,11.32,0L128,132.69,180.69,80H160a8,8,0,0,1,0-16h40a8,8,0,0,1,8,8v40a8,8,0,0,1-16,0V91.31l-58.34,58.35a8,8,0,0,1-11.32,0L96,123.31l-56,56V200H224A8,8,0,0,1,232,208Z"]],
+		"stack": [["M224,80l-96,56L32,80l96-56Z",0.2],["M230.91,172A8,8,0,0,1,228,182.91l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,36,169.09l92,53.65,92-53.65A8,8,0,0,1,230.91,172ZM220,121.09l-92,53.65L36,121.09A8,8,0,0,0,28,134.91l96,56a8,8,0,0,0,8.06,0l96-56A8,8,0,1,0,220,121.09ZM24,80a8,8,0,0,1,4-6.91l96-56a8,8,0,0,1,8.06,0l96,56a8,8,0,0,1,0,13.82l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,24,80Zm23.88,0L128,126.74,208.12,80,128,33.26Z"]],
+		"book-open-text": [["M232,56V200H160a32,32,0,0,0-32,32V88a32,32,0,0,1,32-32Z",0.2],["M232,48H160a40,40,0,0,0-32,16A40,40,0,0,0,96,48H24a8,8,0,0,0-8,8V200a8,8,0,0,0,8,8H96a24,24,0,0,1,24,24,8,8,0,0,0,16,0,24,24,0,0,1,24-24h72a8,8,0,0,0,8-8V56A8,8,0,0,0,232,48ZM96,192H32V64H96a24,24,0,0,1,24,24V200A39.81,39.81,0,0,0,96,192Zm128,0H160a39.81,39.81,0,0,0-24,8V88a24,24,0,0,1,24-24h64ZM160,88h40a8,8,0,0,1,0,16H160a8,8,0,0,1,0-16Zm48,40a8,8,0,0,1-8,8H160a8,8,0,0,1,0-16h40A8,8,0,0,1,208,128Zm0,32a8,8,0,0,1-8,8H160a8,8,0,0,1,0-16h40A8,8,0,0,1,208,160Z"]],
+		"cpu": [["M200,48H56a8,8,0,0,0-8,8V200a8,8,0,0,0,8,8H200a8,8,0,0,0,8-8V56A8,8,0,0,0,200,48ZM152,152H104V104h48Z",0.2],["M152,96H104a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V104A8,8,0,0,0,152,96Zm-8,48H112V112h32Zm88,0H216V112h16a8,8,0,0,0,0-16H216V56a16,16,0,0,0-16-16H160V24a8,8,0,0,0-16,0V40H112V24a8,8,0,0,0-16,0V40H56A16,16,0,0,0,40,56V96H24a8,8,0,0,0,0,16H40v32H24a8,8,0,0,0,0,16H40v40a16,16,0,0,0,16,16H96v16a8,8,0,0,0,16,0V216h32v16a8,8,0,0,0,16,0V216h40a16,16,0,0,0,16-16V160h16a8,8,0,0,0,0-16Zm-32,56H56V56H200v95.87s0,.09,0,.13,0,.09,0,.13V200Z"]],
+		"bug": [["M208,128v16a80,80,0,0,1-160,0V128Z",0.2],["M144,92a12,12,0,1,1,12,12A12,12,0,0,1,144,92ZM100,80a12,12,0,1,0,12,12A12,12,0,0,0,100,80Zm116,64A87.76,87.76,0,0,1,213,167l22.24,9.72A8,8,0,0,1,232,192a7.89,7.89,0,0,1-3.2-.67L207.38,182a88,88,0,0,1-158.76,0L27.2,191.33A7.89,7.89,0,0,1,24,192a8,8,0,0,1-3.2-15.33L43,167A87.76,87.76,0,0,1,40,144v-8H16a8,8,0,0,1,0-16H40v-8a87.76,87.76,0,0,1,3-23L20.8,79.33a8,8,0,1,1,6.4-14.66L48.62,74a88,88,0,0,1,158.76,0l21.42-9.36a8,8,0,0,1,6.4,14.66L213,89.05a87.76,87.76,0,0,1,3,23v8h24a8,8,0,0,1,0,16H216ZM56,120H200v-8a72,72,0,0,0-144,0Zm64,95.54V136H56v8A72.08,72.08,0,0,0,120,215.54ZM200,144v-8H136v79.54A72.08,72.08,0,0,0,200,144Z"]],
+		"git-branch": [["M224,64a24,24,0,1,1-24-24A24,24,0,0,1,224,64Z",0.2],["M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192ZM200,80a16,16,0,1,1,16-16A16,16,0,0,1,200,80Z"]],
+		"link-simple": [["M209.94,113.94l-96,96a48,48,0,0,1-67.88-67.88l96-96a48,48,0,0,1,67.88,67.88Z",0.2],["M165.66,90.34a8,8,0,0,1,0,11.32l-64,64a8,8,0,0,1-11.32-11.32l64-64A8,8,0,0,1,165.66,90.34ZM215.6,40.4a56,56,0,0,0-79.2,0L106.34,70.45a8,8,0,0,0,11.32,11.32l30.06-30a40,40,0,0,1,56.57,56.56l-30.07,30.06a8,8,0,0,0,11.31,11.32L215.6,119.6a56,56,0,0,0,0-79.2ZM138.34,174.22l-30.06,30.06a40,40,0,1,1-56.56-56.57l30.05-30.05a8,8,0,0,0-11.32-11.32L40.4,136.4a56,56,0,0,0,79.2,79.2l30.06-30.07a8,8,0,0,0-11.32-11.31Z"]],
+		"lock-key": [["M208,88H48a8,8,0,0,0-8,8V208a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V96A8,8,0,0,0,208,88Zm-80,72a20,20,0,1,1,20-20A20,20,0,0,1,128,160Z",0.2],["M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Zm-80-96a28,28,0,0,0-8,54.83V184a8,8,0,0,0,16,0V166.83A28,28,0,0,0,128,112Zm0,40a12,12,0,1,1,12-12A12,12,0,0,1,128,152Z"]],
+		"sparkle": [["M194.82,151.43l-55.09,20.3-20.3,55.09a7.92,7.92,0,0,1-14.86,0l-20.3-55.09-55.09-20.3a7.92,7.92,0,0,1,0-14.86l55.09-20.3,20.3-55.09a7.92,7.92,0,0,1,14.86,0l20.3,55.09,55.09,20.3A7.92,7.92,0,0,1,194.82,151.43Z",0.2],["M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144ZM144,40a8,8,0,0,1,8-8h16V16a8,8,0,0,1,16,0V32h16a8,8,0,0,1,0,16H184V64a8,8,0,0,1-16,0V48H152A8,8,0,0,1,144,40ZM248,88a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V96h-8a8,8,0,0,1,0-16h8V72a8,8,0,0,1,16,0v8h8A8,8,0,0,1,248,88Z"]],
+		"currency-circle-dollar": [["M224,128a96,96,0,1,1-96-96A96,96,0,0,1,224,128Z",0.2],["M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-68a28,28,0,0,1-28,28h-4v8a8,8,0,0,1-16,0v-8H104a8,8,0,0,1,0-16h36a12,12,0,0,0,0-24H116a28,28,0,0,1,0-56h4V72a8,8,0,0,1,16,0v8h16a8,8,0,0,1,0,16H116a12,12,0,0,0,0,24h24A28,28,0,0,1,168,148Z"]],
+		"shopping-bag-open": [["M224,56V80H32V56a8,8,0,0,1,8-8H216A8,8,0,0,1,224,56Z",0.2],["M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,16V72H40V56Zm0,144H40V88H216V200Zm-40-88a48,48,0,0,1-96,0,8,8,0,0,1,16,0,32,32,0,0,0,64,0,8,8,0,0,1,16,0Z"]],
+	};
 
+	const FALLBACK_PALETTES = {
+		violet: { color: "#7251b5", dark: "#c4a9f3", light: "#f1ebfb", deep: "#30273e" },
+		blue: { color: "#3575b6", dark: "#9bc9f6", light: "#eaf2fb", deep: "#243344" },
+		teal: { color: "#218b80", dark: "#8ed8ca", light: "#e7f5ef", deep: "#213a36" },
+		rose: { color: "#bc5b80", dark: "#f0a9c6", light: "#fbeef3", deep: "#402b36" },
+		amber: { color: "#b67b30", dark: "#ecc28b", light: "#fbf1e4", deep: "#3d3325" },
+		indigo: { color: "#5c68bb", dark: "#b5bdf5", light: "#edf0fc", deep: "#2b3044" },
+	};
+	const FALLBACK_RULES = [
+		[/\b(brainstorm|brainstorming|brain|mind)\b|头脑风暴|大脑/, "brain", "violet"],
+		[/\b(first principles|mental models?|reasoning|logic)\b|第一性原理|心智模型|逻辑/, "compass-tool", "amber"],
+		[/\b(bq|interview|grill|grilling|conversation|chat|discuss)\b|面试|沟通|讨论/, "chat-circle-dots", "rose"],
+		[/\b(resume|cv|profile|identity)\b|简历|档案/, "identification-card", "blue"],
+		[/\b(salary|negotiation|negotiate|negotiating)\b|谈薪|谈判/, "handshake", "amber"],
+		[/\b(compare|comparison|decision)\b|对比|决策/, "scales", "indigo"],
+		[/\b(job|career|offer|recruit|hiring|business)\b|求职|招聘|职场/, "briefcase", "blue"],
+		[/\b(learn eng|english|translate|translation|language|i18n)\b|英语|翻译|语言/, "translate", "teal"],
+		[/\b(memo|memory|memorize|flashcard|flashcards|maimemo)\b|记忆|背单词|墨墨/, "stack", "violet"],
+		[/\b(teach|learn|learning|homework|cs61b|education|course|study)\b|教学|学习|课程/, "graduation-cap", "blue"],
+		[/\b(research|investigate|science|scientific)\b|研究|科研|调研/, "microscope", "indigo"],
+		[/\b(note|notes|notebook|obsidian|wiki|knowledge)\b|笔记|知识库/, "notebook", "teal"],
+		[/\b(ppt|presentation|presentations|slides|slide|keynote)\b|演示|幻灯片/, "presentation-chart", "amber"],
+		[/\b(image|photo|picture|draw|illustration|canvas)\b|图像|图片|插画|海报/, "image-square", "rose"],
+		[/\b(humanizer|unslop|write|writing|writer|copywriting|article|text|markdown)\b|润色|写作|文章|文案/, "pen-nib", "rose"],
+		[/\b(triage|kanban|project|projects)\b|分诊|看板|项目/, "kanban", "teal"],
+		[/\b(ticket|tickets|issue|issues)\b|工单|票据/, "ticket", "amber"],
+		[/\b(spec|specification|plan|planning|blueprint)\b|规格|规范|规划/, "blueprint", "indigo"],
+		[/\b(how|workflow|architecture|orchestration|pipeline|automation)\b|流程|架构|编排/, "tree-structure", "violet"],
+		[/\b(why|question|questions|explain)\b|为什么|提问|解释/, "question", "violet"],
+		[/\b(setup|config|configuration|settings|controls)\b|配置|设置/, "sliders-horizontal", "blue"],
+		[/\b(find|search|discovery|lookup|retrieval|rag)\b|查找|搜索|检索/, "magnifying-glass", "teal"],
+		[/\b(reverse engineer|cpu|firmware|binary|kernel|chip)\b|逆向|内核|芯片/, "cpu", "indigo"],
+		[/\b(karpathy|implement|code|coding|dev|developer|sdk|lsp|compiler|programming)\b|编程|代码|开发/, "code-block", "blue"],
+		[/\b(design|ui|ux|frontend|layout|glass|theme|color)\b|设计|界面|布局/, "stack", "violet"],
+		[/\b(terminal|cli|shell|bash|console|command)\b|终端|命令行/, "terminal-window", "indigo"],
+		[/\b(database|sql|postgres|mysql|redis|storage|data)\b|数据库|存储/, "database", "teal"],
+		[/\b(security|guard|safety|audit|verify|permission)\b|安全|审计|权限/, "shield-check", "teal"],
+		[/\b(lock|encryption|privacy|secret|credential|oauth)\b|加密|隐私|密钥/, "lock-key", "indigo"],
+		[/\b(video|film|movie|animation|editing)\b|视频|影片|动画/, "film-strip", "rose"],
+		[/\b(audio|voice|speech|music|podcast|sound)\b|音乐|语音|音频/, "music-notes", "rose"],
+		[/\b(calendar|schedule|cron|time|daily)\b|日历|日程|定时/, "calendar-blank", "amber"],
+		[/\b(chart|analytics|statistics|metrics|growth)\b|图表|统计|增长/, "chart-line-up", "blue"],
+		[/\b(finance|money|billing|payment|currency)\b|金融|财务|支付/, "currency-circle-dollar", "amber"],
+		[/\b(shop|shopping|commerce|store|cart)\b|购物|电商|商店/, "shopping-bag-open", "rose"],
+		[/\b(bug|debug|error|test|testing|diagnosis)\b|调试|测试|诊断/, "bug", "amber"],
+		[/\b(git|github|branch|commit|repository)\b|分支|提交|仓库/, "git-branch", "indigo"],
+		[/\b(bridge|gateway|integration|connect|link)\b|网关|桥接|连接/, "link-simple", "blue"],
+		[/\b(cloud|server|deploy|container|docker|backend)\b|云端|部署|服务器/, "cloud", "blue"],
+		[/\b(web|browser|crawl|scrape|internet)\b|网页|浏览器|网络/, "globe", "teal"],
+		[/\b(book|docs|documentation|read|reading)\b|文档|阅读|手册/, "book-open-text", "indigo"],
+		[/\b(agent|robot|assistant|bot)\b|智能体|助手|机器人/, "robot", "violet"],
+		[/\b(ai|llm|prompt|generate|magic)\b|提示词|生成|大模型/, "sparkle", "violet"],
+		[/\b(plugin|plugins|package|bundle|toolkit)\b|插件|工具箱/, "puzzle-piece", "teal"],
+	];
 	const BADGE_CACHE = new Map();
 	function getPluginBadge(plugin) {
-		const rawName = String(plugin?.name || "").toLowerCase();
-		const rawDisp = String(plugin?.displayName || "").toLowerCase();
-		const rawDesc = String(plugin?.description || "").toLowerCase();
-		const author = String(typeof plugin?.author === "string" ? plugin.author : (plugin?.author && plugin.author.name) || "").toLowerCase();
-		const cacheKey = `${rawName}::${rawDisp}::${author}`;
-
-		if (BADGE_CACHE.has(cacheKey)) {
-			return BADGE_CACHE.get(cacheKey);
-		}
-
-		// Clean common repository prefix
-		const cleanName = rawName.replace(/^(dbs|ecc|claude|agent|tool|mcp|plugin|skill)[-_]+/i, "");
-		const text = `${cleanName} ${rawDisp} ${rawDesc} ${author}`.toLowerCase();
-
-		let badge = null;
-
-		// 1. Video / Editing / Animation
-		if (/\b(video|film|movie|clip|screen|record|obs|ffmpeg|render|capcut|premiere|vfx|motion|animation|reels|subtitle|caption)\b|视频|剪辑|影视|动画|录屏|特效|字幕/.test(text)) {
-			if (text.includes("cut") || text.includes("scissors") || text.includes("剪")) badge = LUCIDE_BADGES[4]; // Scissors
-			else if (text.includes("film") || text.includes("movie") || text.includes("影")) badge = LUCIDE_BADGES[3]; // Film
-			else if (text.includes("wand") || text.includes("effect") || text.includes("特效")) badge = LUCIDE_BADGES[5]; // Wand
-			else badge = LUCIDE_BADGES[2]; // Video
-		}
-
-		// 2. Audio / Voice / Music / Podcast
-		else if (/\b(audio|voice|speech|tts|whisper|sound|music|podcast|mic|vocal|listen|track|song|acoustic|elevenlabs)\b|音频|语音|配音|音乐|播客|声音/.test(text)) {
-			if (text.includes("music") || text.includes("song") || text.includes("曲") || text.includes("乐")) badge = LUCIDE_BADGES[9]; // Music
-			else if (text.includes("headphone") || text.includes("listen") || text.includes("听")) badge = LUCIDE_BADGES[8]; // Headphones
-			else if (text.includes("volume") || text.includes("speaker") || text.includes("声")) badge = LUCIDE_BADGES[10]; // Volume
-			else badge = LUCIDE_BADGES[7]; // Mic
-		}
-
-		// 3. Testing / QA / Standards / Diagnosis / Wrench
-		else if (/\b(diagnos|doctor|repair|fix|troubleshoot|healthcheck)\b|诊断|体检|排错|修复/.test(text)) badge = LUCIDE_BADGES[54]; // Wrench
-		else if (/\b(benchmark|standard|answer|compliant|quality|assert|eval|grading|audit)\b|对标|标准|答案|基准|质检|评估/.test(text)) badge = LUCIDE_BADGES[56]; // CheckCircle
-		else if (/\b(risk|vulnerabilit|guard|auth|safe|protect|firewall|exploit|penetrat|cve|owasp)\b|风控|安全|漏洞|防护|鉴权/.test(text)) badge = LUCIDE_BADGES[42]; // ShieldAlert
-		else if (/\b(security|safe|verify|certified|cert)\b|认证|合规/.test(text)) badge = LUCIDE_BADGES[41]; // ShieldCheck
-
-		// 4. Update / Sync / Bridge / Migration / Workflow / Hook
-		else if (/\b(update|refresh|renew|upgrade)\b|更新|刷新|升级/.test(text)) badge = LUCIDE_BADGES[60]; // RefreshCw
-		else if (/\b(migration|migrate|transfer|import|export|move|shift|relocat)\b|迁移|导入|导出|搬迁/.test(text)) badge = LUCIDE_BADGES[59]; // Truck
-		else if (/\b(bridge|gateway|adapter|connect|router|tunnel)\b|桥接|网关|连接|适配/.test(text)) badge = LUCIDE_BADGES[39]; // Link
-		else if (/\b(hook|interceptor|event|listener|signal)\b|钩子|拦截|触发器/.test(text)) badge = LUCIDE_BADGES[40]; // Anchor
-		else if (/\b(workflow|pipeline|orchestrat|dag|automat|flow)\b|工作流|流水线|编排|自动化/.test(text)) badge = LUCIDE_BADGES[61]; // Workflow
-		else if (/\b(schedule|cron|timer|clock|daily|interval)\b|定时|调度|周期|日历/.test(text)) badge = LUCIDE_BADGES[62]; // Clock
-
-		// 5. Writing / Content / Copywriting / Typography / Knowledge
-		else if (/\b(title|headline|xhs|typography|font)\b|标题|小红书|排版|字体|文案标题/.test(text)) badge = LUCIDE_BADGES[28]; // Type
-		else if (/\b(content|copywriting|writer|article|essay|story|draft)\b|写作|文案|内容|文章|创作/.test(text)) badge = LUCIDE_BADGES[24]; // PenTool
-		else if (/\b(knowledge|wiki|docs?|book|study|learn|manual|research)\b|知识|知识库|文档|百科|手册|研报/.test(text)) badge = LUCIDE_BADGES[26]; // BookOpen
-		else if (/\b(news|newsletter|rss|feed|press|bulletin)\b|新闻|快讯|简报|早报/.test(text)) badge = LUCIDE_BADGES[29]; // Newspaper
-		else if (/\b(social|share|wechat|weibo|twitter|discord|outreach)\b|微信|社交|分发|分享/.test(text)) badge = LUCIDE_BADGES[30]; // Share
-		else if (/\b(blog|post|feather|author)\b|博客|帖子/.test(text)) badge = LUCIDE_BADGES[27]; // Feather
-		else if (/\b(doc|file|summary|spec|resume)\b|总结|摘要|报告|文档/.test(text)) badge = LUCIDE_BADGES[25]; // FileText
-
-		// 6. Communication / Chat / Message
-		else if (/\b(chatroom|conversation|forum|discuss)\b|聊天室|群聊|讨论/.test(text)) badge = LUCIDE_BADGES[51]; // MessagesSquare
-		else if (/\b(chat|message|dialog|talk|im|room)\b|聊天|对话|会话|留言/.test(text)) badge = LUCIDE_BADGES[50]; // MessageSquare
-		else if (/\b(mail|email|inbox|smtp|sendgrid)\b|邮件|邮箱|信件/.test(text)) badge = LUCIDE_BADGES[52]; // Mail
-		else if (/\b(users|team|member|community|group)\b|团队|社区|成员|用户/.test(text)) badge = LUCIDE_BADGES[53]; // Users
-
-		// 7. Design / UI / UX / Graphics
-		else if (/\b(palette|paint|art|color|theme)\b|画板|艺术|色彩|配色/.test(text)) badge = LUCIDE_BADGES[31]; // Palette
-		else if (/\b(layout|dashboard|ui|ux|frontend|wireframe)\b|布局|仪表盘|界面|前端/.test(text)) badge = LUCIDE_BADGES[32]; // Layout
-		else if (/\b(image|photo|midjourney|dalle|draw|canvas)\b|图像|图片|海报|插画|照片/.test(text)) badge = LUCIDE_BADGES[33]; // Image
-		else if (/\b(eye|inspector|visual|preview|look)\b|检查|预览|视图/.test(text)) badge = LUCIDE_BADGES[34]; // Eye
-		else if (/\b(layer|stack|hierarchy|structure)\b|图层|分层|结构|架构/.test(text)) badge = LUCIDE_BADGES[35]; // Layers
-
-		// 8. Finance / Business / E-Commerce / Data
-		else if (/\b(finance|money|cash|invoice|billing|accounting|ledger|coin|crypto|tax)\b|金融|财务|商业|变现|发票|账单|货币/.test(text)) badge = LUCIDE_BADGES[46]; // Coins
-		else if (/\b(pay|stripe|payment|checkout|card)\b|支付|刷卡|结算/.test(text)) badge = LUCIDE_BADGES[45]; // CreditCard
-		else if (/\b(shop|store|cart|commerce|product|catalog)\b|电商|商店|购物|商品/.test(text)) badge = LUCIDE_BADGES[47]; // ShoppingCart
-		else if (/\b(growth|trend|metric|analytics|stats|bi)\b|增长|统计|分析|度量|行情/.test(text)) badge = LUCIDE_BADGES[48]; // TrendingUp
-		else if (/\b(chart|report|pie|dashboard)\b|图表|报表/.test(text)) badge = LUCIDE_BADGES[49]; // PieChart
-
-		// 9. Coding / Dev / Languages / Infrastructure
-		else if (/\b(database|sql|postgres|mysql|sqlite|mongo|redis|prisma|orm|airtable|snowflake|db)\b|数据库|数据表|存储/.test(text)) badge = LUCIDE_BADGES[16]; // Database
-		else if (/\b(server|host|backend|deploy|node|cluster)\b|服务器|后端|主机|集群/.test(text)) badge = LUCIDE_BADGES[17]; // Server
-		else if (/\b(container|docker|k8s|kubernetes|pod)\b|容器|镜像/.test(text)) badge = LUCIDE_BADGES[18]; // Container
-		else if (/\b(cpu|kernel|chip|processor|engine)\b|内核|处理器|核心|引擎/.test(text)) badge = LUCIDE_BADGES[14]; // Cpu
-		else if (/\b(bug|debug|trace|error|profiler|leak)\b|调试|修复|报错|异常/.test(text)) badge = LUCIDE_BADGES[11]; // Bug
-		else if (/\b(git|branch|pr|commit|repo)\b|仓库|分支|提交/.test(text)) badge = LUCIDE_BADGES[12]; // GitBranch
-		else if (/\b(json|ast|parse|syntax|braces|yaml|toml)\b|解析|语法|树/.test(text)) badge = LUCIDE_BADGES[15]; // Braces
-		else if (/\b(terminal|cli|shell|bash|cmd|console|command)\b|终端|控制台|命令行/.test(text)) badge = LUCIDE_BADGES[0]; // Terminal
-		else if (/\b(code|coding|dev|lsp|sdk|compiler|typescript|javascript|python|rust|golang|java|cpp|html|css)\b|代码|编程|开发|脚本/.test(text)) badge = LUCIDE_BADGES[1]; // Code
-
-		// 10. AI / LLM / Agents / Speed / Discovery
-		else if (/\b(brain|neural|cognitive|deeplearning|mind)\b|大脑|神经|深度学习/.test(text)) badge = LUCIDE_BADGES[19]; // Brain
-		else if (/\b(bot|agent|assistant|robot|automaton)\b|智能体|机器人|助手|助理/.test(text)) badge = LUCIDE_BADGES[20]; // Bot
-		else if (/\b(sparkles|magic|generate|prompt|ai|llm|gpt|claude)\b|智能|生成|大模型|提示词/.test(text)) badge = LUCIDE_BADGES[21]; // Sparkles
-		else if (/\b(vision|ocr|face|cv|detect)\b|视觉|识图|检测/.test(text)) badge = LUCIDE_BADGES[22]; // ScanFace
-		else if (/\b(speed|fast|superpower|turbo|accelerat|boost|quick)\b|快|加速|极速|超能|快速/.test(text)) badge = LUCIDE_BADGES[58]; // Zap
-		else if (/\b(flame|hot|power|fire|blazing)\b|火|强大|威力/.test(text)) badge = LUCIDE_BADGES[57]; // Flame
-		else if (/\b(search|find|query|lookup|retriev|rag)\b|搜索|查找|检索|查询/.test(text)) badge = LUCIDE_BADGES[37]; // Search
-		else if (/\b(explore|discover|compass|navigate|map)\b|探索|发现|指南|导航/.test(text)) badge = LUCIDE_BADGES[36]; // Compass
-		else if (/\b(globe|web|internet|browser|crawl|scrape|http|net)\b|网页|网络|抓取|浏览器|互联网/.test(text)) badge = LUCIDE_BADGES[38]; // Globe
-		else if (/\b(lock|crypto|encrypt|token|privacy|vault)\b|加密|隐私|保险库/.test(text)) badge = LUCIDE_BADGES[43]; // Lock
-		else if (/\b(key|secret|passkey|oauth|access)\b|密钥|凭证|钥匙/.test(text)) badge = LUCIDE_BADGES[44]; // Key
-		else if (/\b(package|module|bundle|lib|box|plugin)\b|插件|包|模块|工具箱/.test(text)) badge = LUCIDE_BADGES[63]; // Package
-
-		if (!badge) {
-			// 11. Deterministic FNV-1a Hash on clean name
-			let hash = 2166136261;
-			for (let i = 0; i < cleanName.length; i++) {
-				hash ^= cleanName.charCodeAt(i);
-				hash = Math.imul(hash, 16777619);
-			}
-			const idx = Math.abs(hash) % LUCIDE_BADGES.length;
-			badge = LUCIDE_BADGES[idx];
-		}
-
-		BADGE_CACHE.set(cacheKey, badge);
+		const name = String(plugin?.name || "").toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, " ");
+		const display = String(plugin?.displayName || "").toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, " ");
+		const description = String(plugin?.description || "").toLowerCase();
+		const key = JSON.stringify([name, display, description]);
+		if (BADGE_CACHE.has(key)) return BADGE_CACHE.get(key);
+		// Names are the strongest signal; incidental words in long descriptions
+		// must not turn a writing skill into an audio or transport icon.
+		const rule = FALLBACK_RULES.find(([match]) => match.test(name + " " + display))
+			|| FALLBACK_RULES.find(([match]) => match.test(description));
+		const badge = { icon: rule?.[1] || "puzzle-piece", ...FALLBACK_PALETTES[rule?.[2] || "violet"] };
+		if (BADGE_CACHE.size >= 1024) BADGE_CACHE.delete(BADGE_CACHE.keys().next().value);
+		BADGE_CACHE.set(key, badge);
 		return badge;
 	}
 
@@ -4490,26 +3679,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return h(AnthropicIcon, { isDark });
 		}
 
-		// 4. Universal 64-Theme Vector Icon Badge
+		// Compact, local duotone artwork; declared logos keep their existing path.
 		return h("div", {
-			className: "cpm-card-icon",
+			className: "cpm-card-icon cpm-fallback-icon",
+			"aria-hidden": true,
 			style: {
-				color: badge.color,
-				background: isDark ? badge.bgDark : badge.bgLight,
-				borderColor: isDark ? badge.borderDark : badge.borderLight,
+				color: isDark ? badge.dark : badge.color,
+				background: isDark ? `linear-gradient(145deg, #34343d, ${badge.deep})` : `linear-gradient(145deg, #fff 2%, ${badge.light})`,
+				borderColor: isDark ? "rgba(255,255,255,.1)" : "rgba(34,37,58,.09)",
+				boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,.04)" : "inset 0 1px 0 #fff, 0 1px 2px rgba(27,31,49,.06)",
 			},
 		},
 			h("svg", {
-				width: 20,
-				height: 20,
-				viewBox: "0 0 24 24",
-				fill: "none",
-				stroke: badge.color,
-				strokeWidth: 2,
-				strokeLinecap: "round",
-				strokeLinejoin: "round",
+				width: 26,
+				height: 26,
+				viewBox: "0 0 256 256",
+				fill: "currentColor",
+				"aria-hidden": true,
+				focusable: false,
 			},
-				badge.render(),
+				PHOSPHOR_ICONS[badge.icon].map(([d, opacity], key) => h("path", { key, d, opacity })),
 			),
 		);
 	}

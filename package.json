@@ -3,7 +3,7 @@
   "title": "Universal Plugin Hub",
   "displayName": "Universal Plugin Hub",
   "description": "DSH 插件市场：安装 Claude Code 与 Codex 插件、Skills 和命令，接入子代理、MCP、Hooks 与 LSP。",
-  "version": "1.0.17",
+  "version": "1.0.19",
   "type": "module",
   "main": "src/index.js",
   "license": "MIT",
@@ -67,7 +67,8 @@
     "client",
     "scripts/postinstall.js",
     "cordis.patch.yml",
-    "assets/hero.png"
+    "assets/hero.png",
+    "assets/licenses/phosphor-icons.txt"
   ],
   "devDependencies": {
     "react": "^19.2.0",
