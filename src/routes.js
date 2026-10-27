@@ -23,11 +23,11 @@ import { remoteConfigFromEntry } from './oauth-config.js'
 
 const API_PREFIX = '/universal-plugin-hub/api'
 
-export function mountRoutes(webServer) {
+export function mountRoutes(webServer, skills = null) {
   const r = webServer.register({
     kind: 'prefix',
     path: API_PREFIX,
-    handler: (req, res) => handle(req, res, API_PREFIX),
+    handler: (req, res) => handle(req, res, API_PREFIX, skills),
   })
   return () => {
     try { if (typeof r === 'function') r() } catch {}
@@ -54,7 +54,7 @@ function userMcpConfig(name, body) {
   }
 }
 
-async function handle(req, res, prefix = API_PREFIX) {
+async function handle(req, res, prefix = API_PREFIX, skills = null) {
   const url = new URL(req.url, 'http://localhost')
   const path = url.pathname.slice(prefix.length).replace(/\/+$/, '') || '/'
   const method = req.method ?? 'GET'
@@ -98,8 +98,20 @@ async function handle(req, res, prefix = API_PREFIX) {
     if (method === 'GET' && path === '/state') {
       const state = readState()
       const details = installedDetails()
+      let sources = state.sources.map((source) => source.id === 'local' ? { ...source, pluginCount: new Set([...readMarketplace('local').map(p => p.name), ...details.filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name))).map(p => p.name)]).size } : source)
+      if (skills && skills.entries().length) {
+        const skillSource = { id: 'skills-local', name: 'Skills', virtual: true }
+        const ordered = Array.isArray(state.tabOrder) ? state.tabOrder : []
+        if (ordered.includes(skillSource.id)) {
+          const order = new Map(ordered.map((id, index) => [id, index]))
+          sources = [...sources, skillSource].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9))
+        } else {
+          const anthropic = sources.findIndex(s => s.id === 'anthropic')
+          sources.splice(anthropic < 0 ? 0 : anthropic + 1, 0, skillSource)
+        }
+      }
       return sendJson(res, 200, {
-        sources: state.sources.map((source) => source.id === 'local' ? { ...source, pluginCount: readMarketplace('local').length } : source),
+        sources,
         plugins: details.map((p) => ({
           ...p,
           skillsEnabled: isScanDirRegistered(join(installedDir(p.name), 'skills')),
@@ -107,12 +119,38 @@ async function handle(req, res, prefix = API_PREFIX) {
       })
     }
 
+    if (path === '/skills' && method === 'GET' && skills) return sendJson(res, 200, { skills: await skills.list() })
+    if (path === '/skills/refresh' && method === 'POST' && skills) {
+      requireSameOrigin(req); skills.refresh()
+      return sendJson(res, 200, { skills: await skills.list() })
+    }
+    if (path === '/skills/toggle' && method === 'POST' && skills) {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      if (typeof body.enabled !== 'boolean') throw new Error('无效的开关状态')
+      return sendJson(res, 200, await skills.toggle(body.id, body.enabled))
+    }
+    if (path === '/skills/detail' && method === 'GET' && skills) return sendJson(res, 200, { skill: skills.detail(url.searchParams.get('id')) })
+    if (path === '/skills/resource' && method === 'GET' && skills) return sendJson(res, 200, { content: skills.resource(url.searchParams.get('id'), url.searchParams.get('path')) })
+    if (path === '/skills/icon' && method === 'GET' && skills) {
+      try {
+        const item = skills.detail(url.searchParams.get('id'), false)
+        const { buffer, contentType } = readLocalIcon(item.directory, item.iconPath)
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox" })
+        return res.end(buffer)
+      } catch { return sendJson(res, 404, { error: 'Icon not found' }) }
+    }
+
     // ── market listing / refresh ─────────────────────────────────────────
     if (method === 'GET' && path === '/market') {
       const rawSource = url.searchParams.get('sourceId') || url.searchParams.get('source') || 'anthropic'
       const sourceId = safeSegment(rawSource, 'source id')
       await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
-      const rows = readMarketplace(sourceId)
+      let rows = readMarketplace(sourceId)
+      if (sourceId === 'local') {
+        const names = new Set(rows.map(r => r.name))
+        rows = [...rows, ...installedDetails().filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name)) && !names.has(p.name)).map(p => ({ ...p, sourceMissing: true }))]
+      }
       return sendJson(res, 200, { plugins: rows })
     }
 
@@ -125,7 +163,12 @@ async function handle(req, res, prefix = API_PREFIX) {
       await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
       await pullSource(sourceId)
       invalidateMarketplaceCache(sourceId)
-      return sendJson(res, 200, { ok: true, plugins: readMarketplace(sourceId) })
+      let plugins = readMarketplace(sourceId)
+      if (sourceId === 'local') {
+        const names = new Set(plugins.map(p => p.name))
+        plugins = [...plugins, ...installedDetails().filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name)) && !names.has(p.name)).map(p => ({ ...p, sourceMissing: true }))]
+      }
+      return sendJson(res, 200, { ok: true, plugins })
     }
 
     // ── sources ──────────────────────────────────────────────────────────
@@ -226,6 +269,11 @@ async function handle(req, res, prefix = API_PREFIX) {
       const sourceIds = Array.isArray(body.sourceIds) ? body.sourceIds : []
       if (sourceIds.length === 0) throw new Error('无效的插件源列表')
       const state = readState()
+      const order = sourceIds.filter((id, index) => typeof id === 'string' && sourceIds.indexOf(id) === index)
+      if (!order.includes('skills-local') && state.tabOrder?.includes('skills-local')) {
+        order.splice(Math.min(state.tabOrder.indexOf('skills-local'), order.length), 0, 'skills-local')
+      }
+      state.tabOrder = order
       const sourceMap = new Map(state.sources.map((s) => [s.id, s]))
       const reordered = []
       for (const id of sourceIds) {

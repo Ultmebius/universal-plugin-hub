@@ -9,10 +9,17 @@
 import { mountRoutes } from './routes.js'
 import { cancelAllOAuthVerifications } from './oauth.js'
 import { syncAllInstalledSkillsToDsh, installProfilePackages, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
+import { createSkillsManager } from './skills.js'
 
 export const name = 'universal-plugin-hub'
 
 export function apply(ctx) {
+  const skills = createSkillsManager()
+  ctx.inject(['skills'], (hostCtx) => {
+    hostCtx.effect(() => skills.attach(hostCtx.skills, () => {
+      hostCtx.emit('plugin-manager/changed', { reason: 'skills' })
+    }), 'universal-plugin-hub: skills provider')
+  })
   // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
   try {
     syncAllInstalledSkillsToDsh()
@@ -29,7 +36,7 @@ export function apply(ctx) {
 
   ctx.inject(['webServer'], (hostCtx) => {
     hostCtx.effect(() => {
-      const unmount = mountRoutes(hostCtx.webServer)
+      const unmount = mountRoutes(hostCtx.webServer, skills)
       return () => { unmount(); cancelAllOAuthVerifications() }
     }, 'universal-plugin-hub: http routes')
   })

@@ -1985,6 +1985,9 @@ export async function updatePlugin(pluginName) {
   const state = readState()
   const rec = state.plugins.find((p) => p.name === pluginName)
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
+  if (rec.sourceId === 'local' && !readMarketplace('local').some(row => row.name === pluginName)) {
+    throw new Error('本地插件的原始来源不可用，请重新导入后再更新')
+  }
   const source = state.sources.find((s) => s.id === rec.sourceId)
   if (source && typeof source.url === 'string') {
     const cacheDir = sourceCacheDir(rec.sourceId)
