@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { readState, writeState } from './store.js'
+import { formatDisplayName } from './parser.js'
 
 const PROVIDER = 'universal-plugin-hub-skills'
 const EXCLUDED = new Set(['.git', 'node_modules', '__pycache__'])
@@ -54,7 +55,7 @@ function readSkill(file, root, isNested) {
   const icons = [meta.icon, meta.logo, 'assets/icon.svg', 'assets/logo.svg', 'assets/icon.png', 'assets/logo.png', 'icon.svg', 'icon.png', 'logo.png']
   const iconPath = icons.find(path => typeof path === 'string' && !path.includes('..') && existsSync(join(dirname(file), path)))
   return {
-    id: skillId(file), name, displayName: name, description: typeof meta.description === 'string' ? meta.description : '',
+    id: skillId(file), name, displayName: typeof meta.displayName === 'string' ? meta.displayName : formatDisplayName(name), description: typeof meta.description === 'string' ? meta.description : '',
     path: file, directory: dirname(file), relativePath: relative(root, file), nested: isNested,
     error, content: content || raw, metadata: meta, iconPath,
     invocation,
@@ -96,13 +97,14 @@ export function createSkillsManager(root) {
     const off = disabled()
     return scan().map(item => {
       const { content, metadata, ...summary } = item
-      return { ...summary, enabled: !off[item.id], available: !!registry, icons: [] }
+      const icon = item.iconPath ? `/universal-plugin-hub/api/skills/icon?id=${encodeURIComponent(item.id)}` : null
+      return { ...summary, sourceId: 'skills-local', enabled: !off[item.id], available: !!registry, icons: { light: icon ? [icon] : [], dark: icon ? [icon] : [] } }
     })
   }
   function candidate(item, isDisabled) {
     return {
       name: item.name, description: item.description, invocation: isDisabled ? { modelInvocable: false, userInvocable: false } : item.invocation,
-      provider: PROVIDER, source: 'user-agents', rank: isDisabled ? 499 : 500,
+      provider: PROVIDER, source: 'user-agents', rank: isDisabled ? 499 : 501,
       path: item.path, resourceBase: { kind: 'directory', path: item.directory }, locator: item.id,
     }
   }
@@ -110,7 +112,9 @@ export function createSkillsManager(root) {
     name: PROVIDER,
     async list() {
       const off = disabled()
-      return scan().filter(item => !item.error && !item.duplicate && (item.nested || off[item.id])).map(item => candidate(item, !!off[item.id]))
+      // The native filesystem provider (rank 500) wins whenever it discovers
+      // the skill. Profiles that omit that user root still get a fallback.
+      return scan().filter(item => !item.error && !item.duplicate).map(item => candidate(item, !!off[item.id]))
     },
     async get(entry) {
       const item = scan().find(s => s.id === entry.locator)

@@ -21,6 +21,7 @@ function add(dir, name, extra = '') {
 test('discovery, resources, provider control and persistence', async () => {
   try {
     const native = add('native', 'native')
+    add('unlisted-native-root', 'unlisted-native-root')
     const nested = add('collection/nested', 'nested', 'user-invocable: false\n')
     add('broken', 'bad name')
     write(join(root, 'collection/nested/scripts/run.py'), 'print("hello")')
@@ -51,6 +52,11 @@ test('discovery, resources, provider control and persistence', async () => {
     const first = items.find(s => s.name === 'native')
     const second = items.find(s => s.name === 'nested')
     assert.equal(first.available, true)
+    assert.equal((await registry.list()).find(s => s.name === 'native').rank, 500)
+    const fallback = items.find(s => s.name === 'unlisted-native-root')
+    assert.equal(fallback.available, true)
+    assert.equal(fallback.enabled, true)
+    assert.equal((await registry.list()).find(s => s.name === 'unlisted-native-root').rank, 501)
     assert.equal(second.available, true)
     assert.equal(second.actualInvocation.userInvocable, false)
     const definition = await provider.get((await provider.list()).find(s => s.name === 'nested'))

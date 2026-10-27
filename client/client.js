@@ -1207,17 +1207,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-meta .v { color: var(--cpm-text); font-weight: 500; }
 .cpm-meta .v a { color: var(--cpm-accent); text-decoration: none; }
-.cpm-skill-icon { width: 56px; height: 56px; flex: 0 0 56px; display: grid; place-items: center; border-radius: 14px; color: var(--cpm-accent); background: var(--cpm-icon-btn-hover); border: 1px solid var(--cpm-modal-border); }
 .cpm-skill-path { color: var(--cpm-muted); font-size: 12px; overflow-wrap: anywhere; margin: 12px 0; }
 .cpm-skill-warning { color: #c26a24; font-size: 13px; }
 .cpm-skill-content { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--cpm-modal-border); border-radius: 10px; color: var(--cpm-text); background: var(--cpm-icon-btn-hover); max-height: 480px; overflow: auto; font-size: 13px; line-height: 1.6; }
 .cpm-skill-files { display: flex; flex-wrap: wrap; gap: 8px; }
-.cpm-skill-open { border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.cpm-card-open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .cpm-skill-file { border: 1px solid var(--cpm-modal-border); color: var(--cpm-text); background: var(--cpm-icon-btn-hover); border-radius: 8px; padding: 6px 10px; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .cpm-toggle {
 	position: relative;
 	width: 40px;
+	flex: 0 0 40px;
+	min-width: 40px;
 	height: 22px;
+	padding: 0;
+	box-sizing: border-box;
 	border-radius: 999px;
 	background: var(--cpm-muted);
 	border: none;
@@ -4523,6 +4526,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		onClick,
 		onManage,
 		onInstall,
+		action,
 	}) {
 		return h("div", {
 			className: "cpm-card",
@@ -4531,13 +4535,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			onClick,
 		},
 				h(PluginIcon, { plugin, isDark, eager: eagerIcon }),
-			h("div", { className: "cpm-card-body" },
+			h(action ? "button" : "div", { className: "cpm-card-body" + (action ? " cpm-card-open" : ""), type: action ? "button" : undefined,
+				onClick: action ? (e) => { e.stopPropagation(); onClick?.(e); } : undefined },
 				h("div", { className: "cpm-card-name" },
 					h("span", { className: "cpm-card-name-text" }, plugin.displayName || plugin.name),
 				),
 				h("div", { className: "cpm-card-desc" }, plugin.description || (plugin.author ? `by ${plugin.author}` : "")),
 			),
-			installed
+			action || (installed
 				? h("button", {
 					className: "cpm-card-pill cpm-card-pill-installed",
 					onClick: onManage,
@@ -4545,20 +4550,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				: h("button", {
 					className: "cpm-card-pill",
 					onClick: onInstall,
-				}, "安装"),
+				}, "安装")),
 		);
 	}
 
-	function SkillIcon({ skill }) {
-		const [failed, setFailed] = useState(false);
-		if (skill?.iconPath && !failed) return h("div", { className: "cpm-skill-icon" }, h("img", { src: "/universal-plugin-hub/api/skills/icon?id=" + encodeURIComponent(skill.id), alt: "", loading: "lazy", onError: () => setFailed(true), style: { width: "100%", height: "100%", objectFit: "contain", borderRadius: 12 } }));
-		return h("div", { className: "cpm-skill-icon", "aria-hidden": "true" },
-			h("svg", { width: 25, height: 25, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" },
-				h("path", { d: "M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3z" }),
-				h("path", { d: "M19 16v4M17 18h4" })));
+	function SkillSwitch({ skill, busy, onToggle }) {
+		return h("button", { type: "button", className: "cpm-toggle" + (skill.enabled ? " on" : ""), role: "switch", "aria-checked": !!skill.enabled,
+			"aria-label": `${skill.enabled ? "关闭" : "开启"} ${skill.name}`, "data-cpm-tip": skill.statusMessage || `${skill.enabled ? "关闭" : "开启"} Skill`,
+			disabled: busy || !skill.available || !!skill.error || !!skill.duplicate,
+			onClick: e => { e.stopPropagation(); onToggle(skill); } });
 	}
 
-	function SkillDetail({ skill, onBack, onToggle, busy }) {
+	function SkillDetail({ skill, onBack, onToggle, busy, isDark }) {
 		const [detail, setDetail] = useState(null);
 		const [resource, setResource] = useState(null);
 		const [error, setError] = useState("");
@@ -4574,15 +4577,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 		return h("div", { className: "cpm-detail" },
 			h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "返回"),
-			h("div", { className: "cpm-title-row" }, h(SkillIcon, { skill }), h("div", { className: "cpm-title" }, skill.displayName || skill.name),
-				h("button", { className: "cpm-toggle" + (skill.enabled ? " on" : ""), role: "switch", "aria-checked": !!skill.enabled,
-					"aria-label": `${skill.enabled ? "关闭" : "开启"} ${skill.name}`, disabled: busy || !skill.available || !!skill.error || !!skill.duplicate, onClick: () => onToggle(skill) })),
+			h("div", { className: "cpm-title-row" }, h(PluginIcon, { plugin: skill, isDark }), h("div", { className: "cpm-title" }, skill.displayName || skill.name),
+				h(SkillSwitch, { skill, busy, onToggle })),
 			h("div", { className: "cpm-desc" }, skill.description),
 			h("div", { className: "cpm-skill-path" }, skill.path),
 			skill.actualInvocation && h("div", { className: "cpm-skill-path" }, `DSH 调用：命令${skill.actualInvocation.userInvocable ? "可用" : "不可用"} · 模型${skill.actualInvocation.modelInvocable ? "可用" : "不可用"}`),
 			(skill.statusMessage || skill.error || error) && h("p", { className: "cpm-skill-warning" }, error || skill.statusMessage || skill.error),
 			detail && h(React.Fragment, null,
-				h("h3", null, "Skill 指令"), h("pre", { className: "cpm-skill-content" }, detail.content),
+				h("h3", null, "Skill 指令"), h("div", { className: "cpm-desc" }, h(SmartMarkdown, { text: detail.content })),
 				h("h3", null, `脚本、Agent 与资源 (${detail.files.length})`),
 				detail.files.length === 0 ? h("div", { className: "cpm-desc" }, "没有其他资源文件") :
 					h("div", { className: "cpm-skill-files" }, detail.files.map(file => h("button", { className: "cpm-skill-file", key: file.path, onClick: () => openFile(file.path) }, file.path))),
@@ -7675,7 +7677,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			view.type === "skill-detail" && (() => {
 				const selected = ((rows && rows["skills-local"]) || []).find(s => s.id === view.skill.id) || view.skill;
-				return h(SkillDetail, { skill: selected, busy: skillBusy === selected.id, onToggle: toggleSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
+				return h(SkillDetail, { skill: selected, isDark, busy: skillBusy === selected.id, onToggle: toggleSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
 			})(),
 
 			// Detail view — 0ms instant transition without intermediate loading screen
@@ -7804,12 +7806,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			isBrowse && activeSourceId === "skills-local" && !mcpsOpen && h("div", { ref: gridRef, onWheel: onGridWheel, onScroll: onGridScroll, className: "cpm-grid" + gridMaskClass },
 				visible.length === 0 && h("div", { className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: 30 } }, loadingSourceId === activeSourceId ? "正在加载 Skills…" : "没有找到匹配的 Skills"),
-				visible.map(skill => h("div", { key: skill.id, className: "cpm-card", onClick: () => setView({ type: "skill-detail", sourceId: "skills-local", skill }) },
-					h(SkillIcon, { skill }), h("button", { className: "cpm-card-body cpm-skill-open", onClick: e => { e.stopPropagation(); setView({ type: "skill-detail", sourceId: "skills-local", skill }); } }, h("div", { className: "cpm-card-name" }, h("span", { className: "cpm-card-name-text" }, skill.displayName || skill.name)),
-						h("div", { className: "cpm-card-desc" }, skill.statusMessage || skill.description)),
-					h("button", { className: "cpm-toggle" + (skill.enabled ? " on" : ""), role: "switch", "aria-checked": !!skill.enabled,
-						"aria-label": `${skill.enabled ? "关闭" : "开启"} ${skill.name}`, disabled: skillBusy === skill.id || !skill.available || !!skill.error || !!skill.duplicate,
-						onClick: e => { e.stopPropagation(); toggleSkill(skill); } })))),
+				visible.map((skill, index) => h(PluginCard, { key: skill.id, plugin: skill, isDark, eagerIcon: index < 12,
+					onClick: () => setView({ type: "skill-detail", sourceId: "skills-local", skill }),
+					action: h(SkillSwitch, { skill, busy: skillBusy === skill.id, onToggle: toggleSkill }) }))),
 
 			isBrowse && mcpsOpen && h("div", {
 				className: "cpm-grid-container" + gridMaskClass,
