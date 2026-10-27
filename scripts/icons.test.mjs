@@ -93,6 +93,15 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       const single = buildPluginIcons({ logo: { light: 'https://example.com/light.svg' } })
       assert.deepEqual(single.light, single.dark)
     })
+    await t.test('small conventional icon precedes a large logo fallback', () => {
+      const dir = join(root, 'small-icon')
+      write(join(dir, 'assets/codex-icon.png'), svg)
+      write(join(dir, 'assets/logo.png'), svg)
+      const icons = buildPluginIcons({}, { sourceId: 's', name: 'n', dir })
+      assert.equal(new URL(icons.light[0], 'http://localhost').searchParams.get('path'), 'assets/codex-icon.png')
+      const declared = buildPluginIcons({ icon: 'assets/logo.png' }, { sourceId: 's', name: 'n', dir })
+      assert.equal(new URL(declared.light[0], 'http://localhost').searchParams.get('path'), 'assets/logo.png')
+    })
     await t.test('50 concurrent icon requests share one upstream fetch and warm memory', async () => {
       let count = 0
       globalThis.fetch = async () => { count++; return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } }) }
@@ -196,6 +205,27 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       tree = render()
       assert.equal(tree.children.length, 1)
       assert.equal(tree.children[0].props.style.opacity, 1)
+    })
+    await t.test('loaded icons remain ready after many icons and decode synchronously when remounted', () => {
+      const state = []
+      let cursor = 0
+      const context = vm.createContext({
+        useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (v) => { state[i] = v }] },
+        h: (type, props, ...children) => ({ type, props: props || {}, children: children.filter(Boolean) }),
+      })
+      const start = client.indexOf('const LOADED_AVATARS')
+      const end = client.indexOf('function PluginIconFallback', start)
+      vm.runInContext(client.slice(start, end) + '\nglobalThis.Icon = PluginIconImage; globalThis.track = trackLoadedAvatar;', context)
+      context.track('/first')
+      for (let i = 0; i < 400; i++) context.track(`/icon-${i}`)
+      const tree = context.Icon({ candidates: ['/first'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      assert.equal(tree.children[0].props.style.opacity, 0)
+      assert.equal(tree.children[1].props.decoding, 'sync')
+      tree.children[1].props.onError()
+      cursor = 0
+      state.length = 0
+      const retry = context.Icon({ candidates: ['/first'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      assert.equal(retry.children.length, 1)
     })
   } finally {
     globalThis.fetch = oldFetch

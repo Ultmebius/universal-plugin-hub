@@ -65,7 +65,7 @@ export function buildPluginIcons(meta, { sourceId, name, dir, source } = {}) {
   }
   const common = [ui.composerIcon, ui.icon, ui.iconSmall, ui.iconLarge, ui.logo, meta?.icon, meta?.iconUrl, meta?.logo]
   const values = (theme) => common.flatMap((v) => typeof v === 'object' && v ? [v[theme], v.default, v.url, v.src, v[theme === 'dark' ? 'light' : 'dark']] : [v])
-  const defaults = dir ? ['assets/icon.svg', 'assets/logo.svg', 'assets/icon.png', 'assets/logo.png', 'icon.svg', 'logo.svg', 'icon.png', 'logo.png'] : []
+  const defaults = dir ? ['assets/icon.svg', 'assets/logo.svg', 'assets/icon.png', 'assets/codex-icon.png', 'assets/logo.png', 'icon.svg', 'logo.svg', 'icon.png', 'logo.png'] : []
   const light = [...new Set([ui.iconLight, ui.logoLight, meta?.iconLight, ...values('light'), ...defaults].map(toUrl).filter(Boolean))]
   const dark = [...new Set([ui.iconDark, ui.logoDark, meta?.iconDark, ...values('dark'), ...defaults].map(toUrl).filter(Boolean))]
   return { light, dark }

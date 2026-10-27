@@ -3605,7 +3605,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const FAILED_ICON_URLS = new Map();
 	function trackLoadedAvatar(url) {
 		if (!url || url.startsWith("data:")) return;
-		if (LOADED_AVATARS.size > 300) LOADED_AVATARS.clear();
+		if (LOADED_AVATARS.size >= 2048 && !LOADED_AVATARS.has(url)) LOADED_AVATARS.delete(LOADED_AVATARS.values().next().value);
 		LOADED_AVATARS.add(url);
 	}
 
@@ -3623,10 +3623,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || LOADED_AVATARS.has(avatarUrl) || loaded === avatarUrl);
 			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
 				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, fallback),
-				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: "async", loading: eager ? "eager" : "lazy",
+				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: LOADED_AVATARS.has(avatarUrl) ? "sync" : "async", loading: eager ? "eager" : "lazy",
 					style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", borderRadius: "inherit", opacity: imgLoaded ? 1 : 0 },
 					onLoad: () => { trackLoadedAvatar(avatarUrl); setLoaded(avatarUrl); },
 					onError: () => {
+						LOADED_AVATARS.delete(avatarUrl);
 						if (FAILED_ICON_URLS.size >= 512) FAILED_ICON_URLS.delete(FAILED_ICON_URLS.keys().next().value);
 						FAILED_ICON_URLS.set(avatarUrl, Date.now() + 60_000);
 						setLoaded("");
@@ -4231,12 +4232,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// empty first render after Back dropped it for a frame and Anthropic
 		// took the leftmost slot, producing a visible tab-bar jump.
 		mcps: null,
-		// Per-source "installed-first" sort snapshots. Kept on SESSION_STORE
-		// (module-level, not a component ref) so they survive the BrowseView
-		// unmount that happens when the manage page opens — returning from
-		// manage must keep both scroll position AND plugin ordering where they
-		// were, including a plugin installed right before opening manage.
-		installedSnapshots: {},
 	};
 
 	// ────────────────────────────── Root App ──────────────────────────────
@@ -4480,10 +4475,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		useEffect(() => {
 			return () => {
 				if (SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-				// Panel close also resets sort snapshots, so a fresh open
-				// re-evaluates the "installed-first" default sort from the
-				// current plugin list.
-				if (SESSION_STORE.installedSnapshots) SESSION_STORE.installedSnapshots = {};
 				// Closing the panel is a fresh start: reopen on the plugin list,
 				// not on whichever MCP tab happened to be active.
 				SESSION_STORE.mcpsOpen = false;
@@ -5419,60 +5410,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const tabRefs = useRef({});
 		const [tabsMaskClass, setTabsMaskClass] = useState("");
 		const [gridMaskClass, setGridMaskClass] = useState("");
-		// Per-source snapshot of installed plugin names used by the default
-		// "installed-first" sort. Lives on module-level SESSION_STORE, not a
-		// component ref or state: it must survive the BrowseView unmount that
-		// happens when the manage page opens, and it must NOT re-run against
-		// live `state.plugins` on every re-render (which is what kept a
-		// freshly installed plugin in its alphabetical slot after install).
-		// A source's snapshot is built on its first visit this session, then
-		// stays sticky across the session UNLESS the actual installed set
-		// for the source changes (install / uninstall) — the useEffect below
-		// detects that and refreshes. Explicit re-sort (clicking the current
-		// tab, picking a filter/sort menu item, or market refresh) still goes
-		// through `refreshInstalledSnapshot` to promote plugins installed
-		// since the last visit even before the next state refresh lands.
-		const installedSnapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
-		const sortInstalledSnapshot = installedSnapshots[activeSourceId] || new Set();
-
-		// Bumped whenever the user explicitly re-selects a filter/sort menu
-		// item (even when the value didn't change, e.g. picking "全部插件"
-		// while already in "all"). Forces the `visible` memo to recompute so
-		// the "installed-first" sort picks up plugins installed since the
-		// snapshot was last refreshed.
-		const [sortTick, setSortTick] = useState(0);
-
-		// Explicitly rebuild the installed-snapshot for a source. Called when the
-		// user explicitly re-sorts: clicking the current source's own tab,
-		// picking a filter/sort menu item, or market refresh. This is the ONLY
-		// writer that promotes plugins installed since the last visit into the
-		// "installed-first" group (scroll-to-top and re-sort are bound — a
-		// programmatic scroll-to-top re-sorts; manual wheel scrolling does not).
-		const refreshInstalledSnapshot = useCallback((sourceId) => {
-			const sid = sourceId || activeSourceId;
-			if (!sid) return;
-			const snapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
-			snapshots[sid] = new Set(
-				(state.plugins || []).filter((p) => p.sourceId === sid).map((p) => p.name)
-			);
-		}, [activeSourceId, state.plugins]);
-
-		// Sync the installed-snapshot for the active source whenever the actual
-		// installed set for that source changes (install / uninstall). The
-		// `existing.size === current.size` + `every` check avoids touching the
-		// snapshot on renders that don't change the set, so the "installed-first"
-		// order stays stable for the user as they scroll/type/browse.
-		useEffect(() => {
-			if (!activeSourceId) return;
-			const snapshots = SESSION_STORE.installedSnapshots || (SESSION_STORE.installedSnapshots = {});
-			const current = new Set(
-				(state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)
-			);
-			const existing = snapshots[activeSourceId];
-			const sameMembers = existing && existing.size === current.size && [...existing].every((n) => current.has(n));
-			if (!sameMembers) snapshots[activeSourceId] = current;
-		}, [activeSourceId, state.plugins]);
-
 		// Detail View Data Fetching & LRU Cache
 		const [detail, setDetail] = useState(null);
 		const detailCacheRef = useRef({});
@@ -6166,17 +6103,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 					setActiveSourceId(s.id, targetFilter);
 				} else {
-					// Clicking the current source's own tab: this is the
-					// "scroll back to top" gesture. The scroll resets to top,
-					// and in lockstep the default sort re-runs so a plugin
-					// installed since the last refresh is promoted into the
-					// "installed-first" group at the top. (Only programmatic
-					// scroll-to-top re-sorts; manual wheel-scrolling never does.)
+					// Clicking the current source's tab scrolls its list back to the top.
 					scrollActiveTabIntoView(s.id, true);
 					if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 					SESSION_STORE.scrollTops[s.id] = 0;
-					refreshInstalledSnapshot(s.id);
-					setSortTick((t) => t + 1);
 					scrollContentToTop();
 				}
 			}
@@ -6575,17 +6505,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			} else if (sortBy === "name-desc") {
 				list = [...list].sort((a, b) => (b.displayName || b.name).localeCompare(a.displayName || a.name));
 			} else if (!query.trim()) {
-				// Default sort: Installed plugins (snapshot) first, then strictly alphabetical A-Z
+				// Use the same installed set for sorting and card actions on the first render.
 				list = [...list].sort((a, b) => {
-					const instA = sortInstalledSnapshot.has(a.name) ? 1 : 0;
-					const instB = sortInstalledSnapshot.has(b.name) ? 1 : 0;
+					const instA = currentSourceInstalledNames.has(a.name) ? 1 : 0;
+					const instB = currentSourceInstalledNames.has(b.name) ? 1 : 0;
 					if (instB !== instA) return instB - instA;
 					return (a.displayName || a.name).localeCompare(b.displayName || b.name);
 				});
 			}
 
 			return list;
-		}, [currentSourcePlugins, query, sortBy, sortInstalledSnapshot, sortTick]);
+		}, [currentSourcePlugins, query, sortBy, currentSourceInstalledNames]);
 
 		const refresh = async () => {
 			setIsRefreshing(true);
@@ -6603,11 +6533,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					body: JSON.stringify({ sourceId: activeSourceId }),
 				});
 				setRows((prev) => ({ ...(prev || {}), [activeSourceId]: body.plugins || [] }));
-				// Market refresh is an explicit re-sort of the current source:
-				// rebuild the snapshot so freshly-installed plugins land in the
-				// "installed-first" group, and bump sortTick to recompute.
-				refreshInstalledSnapshot(activeSourceId);
-				setSortTick((t) => t + 1);
 				showToast("已刷新", "市场清单已更新", { restart: false });
 			} catch (e) {
 				showToast("刷新失败", e.message, { restart: false });
@@ -6767,8 +6692,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setFilter("all");
 									setShowFilter(false);
-									refreshInstalledSnapshot(activeSourceId);
-									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6776,8 +6699,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setFilter("installed");
 									setShowFilter(false);
-									refreshInstalledSnapshot(activeSourceId);
-									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6793,8 +6714,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setSortBy("default");
 									setShowSort(false);
-									refreshInstalledSnapshot(activeSourceId);
-									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6802,8 +6721,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setSortBy("name-asc");
 									setShowSort(false);
-									refreshInstalledSnapshot(activeSourceId);
-									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -6811,8 +6728,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("div", { className: "cpm-menu-item", onClick: () => {
 									setSortBy("name-desc");
 									setShowSort(false);
-									refreshInstalledSnapshot(activeSourceId);
-									setSortTick((t) => t + 1);
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
@@ -7078,7 +6993,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									showToast("插件源已删除", `已移除分类「${toRemove.name}」`, { restart: false });
 									if (SESSION_STORE.sourceViews) delete SESSION_STORE.sourceViews[toRemove.id];
 									if (SESSION_STORE.scrollTops) delete SESSION_STORE.scrollTops[toRemove.id];
-									if (SESSION_STORE.installedSnapshots) delete SESSION_STORE.installedSnapshots[toRemove.id];
 									savedTabScrolls.delete(toRemove.id);
 									if (activeSourceId === toRemove.id) {
 										setActiveSourceId("anthropic");
