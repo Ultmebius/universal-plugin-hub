@@ -12,7 +12,7 @@ const MAX_FILE = 2 * 1024 * 1024
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function canonical(path) {
-  try { return realpathSync(path) } catch { return resolve(path) }
+  try { return realpathSync.native(path) } catch { return resolve(path) }
 }
 function samePath(a, b) {
   if (!a || !b) return false
@@ -130,7 +130,7 @@ export function createSkillsManager(root) {
     if (!registry) return { available: false, message: 'DSH Skills 服务不可用' }
     try {
       const current = (await registry.list()).find(s => s.name === item.name)
-      if (!current) return { available: false, message: 'DSH 尚未加载此 Skill' }
+      if (!current) return { available: false, message: '当前管理视图未查到此 Skill，无法确认调用状态' }
       if (!samePath(current.path, item.path)) return { available: false, message: '同名 Skill 已由其他来源加载' }
       return { available: true, invocation: current.invocation }
     } catch (e) { return { available: false, message: e.message } }
@@ -145,7 +145,7 @@ export function createSkillsManager(root) {
       const found = byName.get(item.name)
       const matching = found && samePath(found.path, item.path)
       return { ...item, enabled: matching ? item.enabled : null, available: !!matching, actualInvocation: matching ? found.invocation : null,
-        statusMessage: item.error || (item.duplicate ? '存在同名 Skill' : !found ? 'DSH 尚未加载此 Skill' : !matching ? '同名 Skill 已由其他来源加载' : '') }
+        statusMessage: item.error || (item.duplicate ? '存在同名 Skill' : !found ? '当前管理视图未查到此 Skill，无法确认调用状态' : !matching ? '同名 Skill 已由其他来源加载' : '') }
     })
   }
   async function toggle(id, enabled) {

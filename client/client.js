@@ -4585,9 +4585,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			(skill.statusMessage || skill.error || error) && h("p", { className: "cpm-skill-warning" }, error || skill.statusMessage || skill.error),
 			detail && h(React.Fragment, null,
 				h("h3", null, "Skill 指令"), h("div", { className: "cpm-desc" }, h(SmartMarkdown, { text: detail.content })),
-				h("h3", null, `脚本、Agent 与资源 (${detail.files.length})`),
-				detail.files.length === 0 ? h("div", { className: "cpm-desc" }, "没有其他资源文件") :
-					h("div", { className: "cpm-skill-files" }, detail.files.map(file => h("button", { className: "cpm-skill-file", key: file.path, onClick: () => openFile(file.path) }, file.path))),
+					detail.files.length > 0 && h(React.Fragment, null,
+						h("h3", null, `脚本、Agent 与资源 (${detail.files.length})`),
+						h("div", { className: "cpm-skill-files" }, detail.files.map(file => h("button", { className: "cpm-skill-file", key: file.path, onClick: () => openFile(file.path) }, file.path)))),
 				resource && h(React.Fragment, null, h("h3", null, resource.name), h("pre", { className: "cpm-skill-content" }, resource.content))));
 	}
 

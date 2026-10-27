@@ -40,3 +40,17 @@ test('skill detail displays instructions and loads resources only on request', a
   assert.match(JSON.stringify(view.toJSON()), /resource contents/)
   await act(async () => view.unmount())
 })
+
+test('skill detail omits the entire resources section when no files exist', async () => {
+  const context = { ...React, React, h: React.createElement, IconChevronLeft: () => null, PluginIcon: () => null,
+    SmartMarkdown: ({ text }) => React.createElement('div', null, text),
+    api: async () => ({ skill: { content: 'Instructions remain visible', files: [] } }),
+  }
+  vm.runInNewContext(source.slice(start, end) + '\nglobalThis.SkillDetail = SkillDetail;', context)
+  let view
+  await act(async () => { view = create(React.createElement(context.SkillDetail, { skill: { id: 'empty', name: 'empty', enabled: true, available: true }, onBack() {}, onToggle() {} })) })
+  const output = JSON.stringify(view.toJSON())
+  assert.match(output, /Instructions remain visible/)
+  assert.doesNotMatch(output, /脚本、Agent 与资源|没有其他资源文件|cpm-skill-files/)
+  await act(async () => view.unmount())
+})

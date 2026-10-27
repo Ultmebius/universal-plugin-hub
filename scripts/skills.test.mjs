@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
@@ -38,7 +38,9 @@ test('discovery, resources, provider control and persistence', async () => {
       registerProvider(factory) { provider = factory({ invalidate() {} }); return () => {} },
       async list() {
         const candidates = [
-          { name: 'native', path: native, invocation: { modelInvocable: true, userInvocable: true }, rank: 500 },
+          // DSH's async realpath expands Windows short paths; its summaries
+          // must match Skills scanned from the original short temp path.
+          { name: 'native', path: realpathSync.native(native), invocation: { modelInvocable: true, userInvocable: true }, rank: 500 },
           ...(foreignCandidate ? [foreignCandidate] : []),
           ...(await provider.list()).filter(p => !ignoreOverride || p.name !== 'native'),
         ].sort((a, b) => a.rank - b.rank)
