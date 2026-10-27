@@ -6,6 +6,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	const React = require("react");
 	const { createElement: h, useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } = React;
+		const { MarkdownText: NativeMarkdownText, PathLabel: NativePathLabel } = require("@deepseek-ai/dsh-client-ui-primitives");
+		const SKILL_MARKDOWN_LABELS = { code: { copyLabel: "复制", copiedLabel: "已复制", toolbarLabels: { codeLabel: "代码", wrapLabel: "自动换行", unwrapLabel: "不换行" } }, footnotes: "注释" };
 	// Manifests spell a remote transport three ways (`http`, `sse`,
 	// `streamable-http`). The editor only has two modes; anything unrecognised
 	// used to fall through to the stdio form and show an empty local command
@@ -940,6 +942,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 	align-items: center;
 	box-sizing: border-box;
+	/* Reserve the scrollbar track on every detail surface, so the centered
+	   content column — and the Back link at its left edge — stays put whether
+	   or not the open page happens to overflow. */
+	scrollbar-gutter: stable;
 }
 .cpm-detail > * {
 	width: 100%;
@@ -949,17 +955,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
 	-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
 }
+/* One Back affordance for every detail surface: font, size and rhythm are
+   pinned here so a detail page's own typography cannot restyle it. */
 .cpm-back {
 	color: var(--cpm-muted);
 	cursor: pointer;
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 13.5px;
+	font-weight: 500;
 	border: none;
 	background: none;
 	padding: 0 0 16px 0;
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	font-weight: 500;
 }
 .cpm-back:hover { color: var(--cpm-text); }
 .cpm-title-row {
@@ -1207,7 +1216,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-meta .v { color: var(--cpm-text); font-weight: 500; }
 .cpm-meta .v a { color: var(--cpm-accent); text-decoration: none; }
-.cpm-skill-path { color: var(--cpm-muted); font-size: 12px; overflow-wrap: anywhere; margin: 12px 0; }
 .cpm-skill-warning { color: #c26a24; font-size: 13px; }
 .cpm-card-open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .cpm-toggle {
@@ -2889,6 +2897,66 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	opacity: 0.75;
 	font-weight: 400;
 }
+/* Skill detail is a reading surface; compact popover Markdown stays unchanged. */
+.cpm-skill-detail {
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-size: 1rem;
+	padding: 16px 24px 56px;
+}
+.cpm-skill-detail > * { flex-shrink: 0; }
+.cpm-skill-detail > .cpm-back:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 2px; }
+.cpm-skill-header { container-type: inline-size; container-name: cpm-skill-header; padding: .75rem 0 1.5rem; border-bottom: 1px solid var(--cpm-border); }
+.cpm-skill-identity { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1rem; }
+.cpm-skill-identity > .cpm-toggle { grid-column: 2; grid-row: 1; justify-self: end; }
+.cpm-skill-identity > .cpm-card-icon { width: 3.5rem; height: 3.5rem; border-radius: .875rem; }
+.cpm-skill-title {
+	grid-column: 1 / -1; grid-row: 2; min-width: 0; margin: 0; color: var(--cpm-text);
+	font-size: clamp(1.5rem, 1.15rem + 1.2vw, 2rem); font-weight: 650;
+	line-height: 1.2; letter-spacing: -.025em; overflow-wrap: anywhere; text-wrap: balance;
+}
+@container cpm-skill-header (min-width: 28rem) {
+	.cpm-skill-identity { grid-template-columns: auto minmax(0, 1fr) auto; }
+	.cpm-skill-title, .cpm-skill-identity > .cpm-toggle { grid-column: auto; grid-row: auto; }
+}
+.cpm-skill-summary {
+	margin: 1.25rem 0 0; color: var(--cpm-text-sub); font-size: .9375rem;
+	line-height: 1.8; overflow-wrap: anywhere; text-wrap: pretty;
+}
+.cpm-skill-location {
+	display: flex; align-items: center; gap: .625rem; margin-top: 1.125rem;
+	min-width: 0; color: var(--cpm-muted); font-size: .75rem; line-height: 1.6;
+}
+.cpm-skill-location-label { flex-shrink: 0; padding: .125rem .5rem; background: var(--cpm-card-hover); border-radius: .375rem; }
+.cpm-skill-location [data-path-label] { min-width: 0; max-width: 100%; font-family: var(--cpm-mono, ui-monospace, monospace); user-select: text; }
+.cpm-skill-content { padding-top: 2rem; min-width: 0; }
+.cpm-root .cpm-skill-content > div {
+	font-size: .9375rem; line-height: 1.85; color: var(--cpm-text-sub);
+	word-break: normal; overflow-wrap: anywhere;
+}
+.cpm-root .cpm-skill-content p { margin: 0 0 1.1em; line-height: inherit; text-wrap: pretty; }
+.cpm-root .cpm-skill-content :is(h1, h2, h3, h4, h5, h6) {
+	margin: 1.75em 0 .75em; color: var(--cpm-text); font-size: 1rem; font-weight: 650; line-height: 1.4; letter-spacing: -.015em;
+}
+.cpm-root .cpm-skill-content h1 { font-size: 1.5rem; }
+.cpm-root .cpm-skill-content h2 { font-size: 1.25rem; }
+.cpm-root .cpm-skill-content h3 { font-size: 1.0625rem; }
+.cpm-root .cpm-skill-content > div > :first-child { margin-top: 0; }
+.cpm-root .cpm-skill-content :is(ul, ol) { margin: .5em 0 1.25em; padding-inline-start: 1.5em; }
+.cpm-root .cpm-skill-content li { margin-bottom: .5em; padding-inline-start: .2em; line-height: inherit; }
+.cpm-root .cpm-skill-content li::marker { color: var(--cpm-muted); }
+.cpm-root .cpm-skill-content blockquote { margin: 1.25em 0; padding: .75em 1.1em; border-inline-start-color: var(--cpm-border); background: var(--cpm-card-hover); border-radius: 0 .625rem .625rem 0; }
+.cpm-root .cpm-skill-content blockquote > :last-child { margin-bottom: 0; }
+.cpm-root .cpm-skill-content pre { font-size: .8125rem; line-height: 1.65; }
+.cpm-root .cpm-skill-content hr { margin: 2rem 0; border-color: var(--cpm-border); }
+.cpm-root .cpm-skill-content div:has(> table) { max-width: 100%; margin-block: 1.5rem; border: 1px solid var(--cpm-border); border-radius: .75rem; }
+.cpm-root .cpm-skill-content table { border-collapse: separate; border-spacing: 0; font-size: .875rem; line-height: 1.7; }
+.cpm-root .cpm-skill-content :is(th, td) { padding: .75rem 1rem; border: 0; border-bottom: 1px solid var(--cpm-border); vertical-align: top; font-size: .875rem; line-height: 1.7; overflow-wrap: anywhere; }
+.cpm-root .cpm-skill-content td code { font-size: .8125rem; }
+.cpm-root .cpm-skill-content th { color: var(--cpm-text); font-weight: 600; background: var(--cpm-card-hover); }
+.cpm-root .cpm-skill-content tbody tr:last-child td { border-bottom: 0; }
+.cpm-root .cpm-skill-content .md-table-wide:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 3px; }
+.cpm-skill-detail .cpm-skill-warning { margin: 1.5rem 0 0; font-size: .875rem; line-height: 1.6; overflow-wrap: anywhere; }
+.cpm-skill-loading { margin: 2rem 0; color: var(--cpm-muted); font-size: .875rem; }
 .cpm-mcp-tool-popover-params {
 	display: flex;
 	flex-wrap: wrap;
@@ -3731,28 +3799,54 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				onClick: e => e.stopPropagation(), onChange: e => onToggle(skill, e.currentTarget.checked) });
 	}
 
-	function SkillDetail({ skill, onBack, onToggle, busy, isDark }) {
+		function useDetailScrollMask(identity, containerRef, content) {
+			const localRef = useRef(null);
+			const detailRef = containerRef || localRef;
+			const [maskClass, setMaskClass] = useState(" mask-bottom");
+			const updateMask = useCallback(() => {
+				const el = detailRef.current;
+				if (!el) return;
+				setMaskClass(el.scrollHeight - el.clientHeight > 4 && el.scrollTop < el.scrollHeight - el.clientHeight - 4 ? " mask-bottom" : "");
+			}, [detailRef]);
+			useLayoutEffect(() => {
+				if (detailRef.current) detailRef.current.scrollTop = 0;
+				updateMask();
+			}, [identity, detailRef, updateMask]);
+			useLayoutEffect(() => {
+				updateMask();
+				const el = detailRef.current;
+				const observer = el && typeof ResizeObserver === "function" ? new ResizeObserver(updateMask) : null;
+				if (observer) { observer.observe(el); Array.from(el.children).forEach(child => observer.observe(child)); }
+				if (typeof window !== "undefined") window.addEventListener("resize", updateMask);
+				return () => { observer?.disconnect(); if (typeof window !== "undefined") window.removeEventListener("resize", updateMask); };
+			}, [content, detailRef, updateMask]);
+			return { detailRef, maskClass, updateMask };
+		}
+
+		function SkillDetail({ skill, onBack, onToggle, busy, isDark, containerRef }) {
 		const [detail, setDetail] = useState(null);
 		const [error, setError] = useState("");
+			const { detailRef, maskClass, updateMask } = useDetailScrollMask(skill.id, containerRef, detail || error);
 		useEffect(() => {
 			let live = true;
 			setDetail(null); setError("");
 			api("/skills/detail?id=" + encodeURIComponent(skill.id)).then(body => { if (live) setDetail(body.skill); }).catch(e => { if (live) setError(e.message); });
 			return () => { live = false; };
 		}, [skill.id]);
-		return h("div", { className: "cpm-detail" },
-			h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "返回"),
-			h("div", { className: "cpm-title-row" }, h(PluginIcon, { plugin: skill, isDark }), h("div", { className: "cpm-title" }, skill.displayName || skill.name),
-				h(SkillSwitch, { skill, busy, onToggle })),
-			h("div", { className: "cpm-desc" }, skill.description),
-				h("div", { className: "cpm-skill-path" }, skill.activePath || skill.path),
-				skill.enabled === false && h("div", { className: "cpm-skill-path" }, "已关闭，手动调用和自动调用均已停用。"),
-				skill.enabled && skill.invocation?.modelInvocable === false && skill.invocation?.userInvocable !== false && h("div", { className: "cpm-skill-path" }, `仅手动调用：输入 /${skill.name} 使用。此 Skill 自身设置为不允许模型自动调用。`),
-				skill.enabled && skill.invocation?.userInvocable === false && h("div", { className: "cpm-skill-path" }, skill.invocation?.modelInvocable === false ? "此 Skill 自身设置为不提供手动或自动调用入口。" : "由模型自动调用。此 Skill 自身设置为不显示在 / 命令菜单中。"),
-				skill.locations?.length > 1 && h("details", { className: "cpm-skill-path" }, h("summary", null, `相同指令的 ${skill.locations.length} 个位置已合并`), skill.locations.map(location => h("div", { key: location.id }, location.path))),
-			(skill.statusMessage || skill.error || error) && h("p", { className: "cpm-skill-warning" }, error || skill.statusMessage || skill.error),
-			detail && h(React.Fragment, null,
-				h("h3", null, "Skill 指令"), h("div", { className: "cpm-desc" }, h(SmartMarkdown, { text: detail.content }))));
+			return h("div", { ref: detailRef, onScroll: updateMask, className: "cpm-detail cpm-skill-detail" + maskClass },
+				h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "Back"),
+				h("header", { className: "cpm-skill-header" },
+					h("div", { className: "cpm-skill-identity" }, h(PluginIcon, { plugin: skill, isDark }),
+						h("h1", { className: "cpm-skill-title" }, skill.displayName || skill.name),
+						h(SkillSwitch, { skill, busy, onToggle })),
+					skill.description && h("p", { className: "cpm-skill-summary" }, skill.description),
+					(skill.activePath || skill.path) && h("div", { className: "cpm-skill-location" },
+						h("span", { className: "cpm-skill-location-label" }, "本地文件"),
+						h(NativePathLabel, { path: skill.activePath || skill.path }))),
+				(skill.statusMessage || skill.error || error) && h("p", { className: "cpm-skill-warning", role: "alert" }, error || skill.statusMessage || skill.error),
+				detail ? h("article", { className: "cpm-skill-content", "aria-label": skill.displayName || skill.name },
+					h(NativeMarkdownText, { text: detail.content, labels: SKILL_MARKDOWN_LABELS }))
+					: !error && h("p", { className: "cpm-skill-loading", role: "status" }, "正在加载…"));
 	}
 
 	// ────────────────────────────── Modern Vector SVG Icons ──────────────────────────────
@@ -4832,7 +4926,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return blocks;
 	}
 
-	function SmartMarkdown({ text, className }) {
+		function SmartMarkdown({ text, className }) {
 		if (!text) return null;
 		const blocks = parseSmartBlocks(text);
 
@@ -4852,7 +4946,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					return h("hr", { key: idx, className: "cpm-md-hr" });
 				}
 				if (b.type === "heading") {
-					return h("div", { key: idx, className: `cpm-md-heading cpm-md-h${b.level}` }, renderInlineMarkdownNodes(b.text));
+						return h("div", { key: idx, className: `cpm-md-heading cpm-md-h${b.level}` }, renderInlineMarkdownNodes(b.text));
 				}
 				if (b.type === "list") {
 					const Tag = b.ordered ? "ol" : "ul";
@@ -5416,7 +5510,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const gridMaskRafRef = useRef(null);
 
 		const prefetchDetail = useCallback((sourceId, pluginName) => {
-			if (!sourceId || !pluginName) return;
+				if (!sourceId || !pluginName || sourceId === "skills-local") return;
 			const cacheKey = `${sourceId}:${pluginName}`;
 			if (!detailCacheRef.current[cacheKey]) {
 				api("/plugins/" + encodeURIComponent(sourceId) + "/" + encodeURIComponent(pluginName))
@@ -6755,7 +6849,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			view.type === "skill-detail" && (() => {
 				const selected = ((rows && rows["skills-local"]) || []).find(s => s.id === view.skill.id) || view.skill;
-				return h(SkillDetail, { skill: selected, isDark, busy: skillBusy === selected.id, onToggle: toggleSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
+				return h(SkillDetail, { skill: selected, isDark, containerRef: detailContainerRef, busy: skillBusy === selected.id, onToggle: toggleSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
 			})(),
 
 			// Detail view — 0ms instant transition without intermediate loading screen
@@ -6885,7 +6979,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			isBrowse && activeSourceId === "skills-local" && !mcpsOpen && h("div", { ref: gridRef, onWheel: onGridWheel, onScroll: onGridScroll, className: "cpm-grid" + gridMaskClass },
 				visible.length === 0 && h("div", { className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: 30 } }, loadingSourceId === activeSourceId ? "正在加载 Skills…" : "没有找到匹配的 Skills"),
 				visible.map((skill, index) => h(PluginCard, { key: skill.id, plugin: skill, isDark, eagerIcon: index < 12,
-					onClick: () => setView({ type: "skill-detail", sourceId: "skills-local", skill }),
+						onMouseEnter: (e) => handleCardMouseEnter(skill, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
+						onMouseLeave: () => handleCardMouseLeave(skill),
+						onClick: () => { closePluginHover(); setView({ type: "skill-detail", sourceId: "skills-local", skill }); },
 					action: h(SkillSwitch, { skill, busy: skillBusy === skill.id, onToggle: toggleSkill }) }))),
 
 			isBrowse && mcpsOpen && h("div", {
@@ -8107,35 +8203,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [busy, setBusy] = useState(false);
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [toggling, setToggling] = useState(false);
-		const localDetailRef = useRef(null);
-		const detailRef = containerRef || localDetailRef;
-		const [detailMaskClass, setDetailMaskClass] = useState(" mask-bottom");
-
-		const updateDetailMask = useCallback(() => {
-			const el = detailRef.current;
-			if (!el) return;
-			const { scrollTop, scrollHeight, clientHeight } = el;
-			const maxScroll = scrollHeight - clientHeight;
-			if (maxScroll <= 4) {
-				setDetailMaskClass("");
-				return;
-			}
-			const canScrollDown = scrollTop < maxScroll - 4;
-			setDetailMaskClass(canScrollDown ? " mask-bottom" : "");
-		}, []);
-
-		useLayoutEffect(() => {
-			if (detailRef.current) {
-				detailRef.current.scrollTop = 0;
-			}
-			updateDetailMask();
-		}, [plugin?.name, updateDetailMask]);
-
-		useEffect(() => {
-			const handleResize = () => updateDetailMask();
-			window.addEventListener("resize", handleResize);
-			return () => window.removeEventListener("resize", handleResize);
-		}, [updateDetailMask]);
+			const { detailRef, maskClass: detailMaskClass, updateMask: updateDetailMask } = useDetailScrollMask(plugin?.name, containerRef, plugin);
 
 		if (!plugin) return null;
 

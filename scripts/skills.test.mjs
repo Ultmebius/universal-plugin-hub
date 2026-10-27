@@ -159,3 +159,70 @@ test('discovery, resources, provider control and persistence', async () => {
     dispose()
   } finally { rmSync(temp, { recursive: true, force: true }) }
 })
+
+test('disabled skills override preset scopes for existing and future agents', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'hub-scoped-skills-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(fixture, 'dsh')
+  const scopedRoot = join(fixture, 'skills'), file = join(scopedRoot, 'apple-design', 'SKILL.md')
+  write(file, '---\nname: apple-design\ndescription: Apple design\ndisable-model-invocation: true\n---\nInstructions\n')
+  const manager = createSkillsManager(scopedRoot), events = new Map(), scoped = new Map()
+  let globalProvider
+  const native = { name: 'apple-design', path: file, provider: 'filesystem', invocation: { userInvocable: true, modelInvocable: false } }
+  const registry = {
+    registerProvider(factory) { globalProvider = factory({ invalidate() {} }); return () => {} },
+    async list(options = {}) {
+      const globals = await globalProvider.list()
+      if (!options.scope) return globals
+      // A preset contribution replaces the global winner before rank matters.
+      const local = await scoped.get(options.scope)?.list() || []
+      return local.length ? local : [native]
+    },
+  }
+  const agent = () => {
+    const value = { session: { header: { cwd: fixture } } }
+    value.ctx = { skills: { registerProvider(factory) {
+      scoped.set(value, factory({ invalidate() {} }))
+      return () => { scoped.delete(value) }
+    } } }
+    return value
+  }
+  const first = agent(), future = agent()
+  const ctx = { agents: { list: () => [first] }, on(name, callback) { events.set(name, callback); return () => events.delete(name) } }
+  const dispose = manager.attach(registry)
+  let disposeAgents
+  try {
+    const item = (await manager.list())[0]
+    await manager.toggle(item.id, false)
+    assert.equal((await registry.list({ scope: first }))[0].invocation.userInvocable, true)
+    disposeAgents = manager.attachAgents(ctx)
+    assert.deepEqual((await registry.list({ scope: first }))[0].invocation, { userInvocable: false, modelInvocable: false })
+    assert.equal((await manager.list())[0].enabled, false)
+    assert.equal((await manager.list())[0].verifiedViews, 2)
+    events.get('agent/created')({ agent: future })
+    assert.deepEqual((await registry.list({ scope: future }))[0].invocation, { userInvocable: false, modelInvocable: false })
+    const futureProvider = scoped.get(future)
+    scoped.delete(future)
+    const inconsistent = (await manager.list())[0]
+    assert.equal(inconsistent.enabled, true)
+    assert.match(inconsistent.statusMessage, /尚未在所有会话中生效/)
+    scoped.set(future, futureProvider)
+    await manager.toggle(item.id, true)
+    for (const value of [first, future]) {
+      const restored = (await registry.list({ scope: value }))[0]
+      assert.equal(restored.provider, 'filesystem')
+      assert.deepEqual(restored.invocation, native.invocation)
+    }
+    // A stale or overridden session must be reported and prevent false success.
+    scoped.delete(future)
+    await assert.rejects(manager.toggle(item.id, false), /已恢复原状态/)
+    assert.equal((await manager.list())[0].enabled, true)
+    events.get('agent/disposed')({ agent: future })
+    events.get('agent/disposed')({ agent: first })
+    assert.equal(scoped.size, 0)
+  } finally {
+    await disposeAgents?.(); dispose()
+    process.env.DSH_HOME = previousHome
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})

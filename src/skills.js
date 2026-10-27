@@ -101,6 +101,38 @@ export function discoverSkills(root = join(process.env.DSH_AGENTS_HOME || join(h
 export function createSkillsManager(root) {
   root ||= join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')
   let cache = null, registry = null, invalidate = null, catalogChanged = null, watcher = null, watchTimer = null, toggling = false
+  const agentViews = new Map()
+  const scopePolicies = new Map(), presetProviders = new Map()
+  let createPolicyScope = null
+  function invalidateAll() {
+    invalidate?.()
+    for (const preset of presetProviders.values()) preset.invalidate?.()
+  }
+  function ensureScope(scope, service = registry) {
+    if (!scope || !createPolicyScope) return
+    const existing = scopePolicies.get(scope)
+    if (existing?.service === service) return existing.ready
+    if (!existing) {
+      const off = disabled()
+      if (!scan().some(item => !item.error && isDisabled(item, off))) return
+    }
+    existing?.dispose()
+    const owner = createPolicyScope(service.ctx, scope)
+    let ready, failed
+    const pending = new Promise((resolve, reject) => { ready = resolve; failed = reject })
+    scopePolicies.set(scope, { service, ready: pending, dispose: () => { ready(); return owner.dispose() } })
+    owner.ctx.inject(['skills'], target => {
+      try { target.skills.registerProvider(() => disabledProvider()); ready() }
+      catch (error) { failed(error); throw error }
+    })
+    // Cold catalog leases can mint scopes without live agents. Bound their
+    // policy lifetimes as well as cleaning up live scopes on agent disposal.
+    if (scopePolicies.size > 128) {
+      const oldest = scopePolicies.keys().next().value
+      scopePolicies.get(oldest).dispose(); scopePolicies.delete(oldest)
+    }
+    return pending
+  }
   const scan = (force = false) => {
     if (force || !cache) cache = discoverSkills(root)
     return cache
@@ -127,7 +159,8 @@ export function createSkillsManager(root) {
   }
   const provider = {
     name: PROVIDER,
-    async list() {
+    async list(options = {}) {
+      await ensureScope(options.scope)
       const off = disabled()
       // The native filesystem provider (rank 500) wins whenever it discovers
       // the skill. Profiles that omit that user root still get a fallback.
@@ -142,28 +175,42 @@ export function createSkillsManager(root) {
       return { ...summary, content: fresh.content, metadata: fresh.metadata.metadata }
     },
   }
-  function refresh() { cache = null; invalidate?.(); catalogChanged?.(); return entries() }
+  function disabledProvider() {
+    return { ...provider, async list() {
+      const off = disabled()
+      return scan().filter(item => !item.error && isDisabled(item, off)).map(item => candidate(item, true))
+    } }
+  }
+  function refresh() { cache = null; invalidateAll(); catalogChanged?.(); return entries() }
+  async function catalogs() {
+    return Promise.all([registry.list(), ...[...agentViews.values()].map(view => view.registry().list(view.lookup()))])
+  }
   async function status(item) {
     if (!registry) return { available: false, message: 'DSH Skills 服务不可用' }
     try {
-      const current = (await registry.list()).find(s => s.name === item.name)
-      if (!current) return { available: false, message: '当前管理视图未查到此 Skill，无法确认调用状态' }
-      if (!matches(item, current)) return { available: false, message: `/${item.name} 当前使用另一份 Skill：${current.path || current.provider}` }
-      return { available: true, invocation: current.invocation }
+      const current = (await catalogs()).map(list => list.find(s => s.name === item.name))
+      if (current.some(s => !s)) return { available: false, message: '部分会话未查到此 Skill，无法确认调用状态' }
+      const foreign = current.find(s => !matches(item, s))
+      if (foreign) return { available: false, message: `/${item.name} 当前使用另一份 Skill：${foreign.path || foreign.provider}` }
+      return { available: true, invocations: current.map(s => s.invocation) }
     } catch (e) { return { available: false, message: e.message } }
   }
   async function list() {
     const list = entries()
     if (!registry) return list.map(x => ({ ...x, enabled: null, statusMessage: x.error || 'DSH Skills 服务不可用' }))
     let current
-    try { current = await registry.list() } catch { return list.map(x => ({ ...x, enabled: null, available: false, statusMessage: x.error || '无法读取 DSH Skills 状态' })) }
-    const byName = new Map(current.map(s => [s.name, s]))
+    try { current = await catalogs() } catch { return list.map(x => ({ ...x, enabled: null, available: false, statusMessage: x.error || '无法读取 DSH Skills 状态' })) }
+    const catalogsByName = current.map(rows => new Map(rows.map(s => [s.name, s])))
     return list.map(item => {
-      const found = byName.get(item.name)
-      const matching = matches(item, found)
-      return { ...item, enabled: matching ? item.enabled : null, available: !!matching && !item.error, actualInvocation: matching ? found.invocation : null,
-        activePath: matching ? found.path : null,
-        statusMessage: item.error || (!found ? '当前管理视图未查到此 Skill，无法确认调用状态' : !matching ? `/${item.name} 当前使用另一份 Skill：${found.path || found.provider}` : '') }
+      const found = catalogsByName.map(rows => rows.get(item.name))
+      const missing = found.some(s => !s), foreign = found.find(s => s && !matches(item, s))
+      const matching = !missing && !foreign
+      const desired = item.enabled ? item.invocation : { modelInvocable: false, userInvocable: false }
+      const applied = matching && found.every(s => s.invocation.modelInvocable === desired.modelInvocable && s.invocation.userInvocable === desired.userInvocable)
+      const actualInvocation = matching ? { modelInvocable: found.some(s => s.invocation.modelInvocable), userInvocable: found.some(s => s.invocation.userInvocable) } : null
+      return { ...item, enabled: matching ? applied ? item.enabled : actualInvocation.modelInvocable || actualInvocation.userInvocable : null,
+        available: matching && !item.error, actualInvocation, verifiedViews: matching ? found.length : 0, activePath: matching ? found[0].path : null,
+        statusMessage: item.error || (missing ? '部分会话未查到此 Skill，无法确认调用状态' : foreign ? `/${item.name} 当前使用另一份 Skill：${foreign.path || foreign.provider}` : !applied ? '开关状态尚未在所有会话中生效，请重新切换' : '') }
     })
   }
   async function toggle(id, enabled) {
@@ -181,11 +228,11 @@ export function createSkillsManager(root) {
       if (enabled) delete state.disabledLocalSkills[location.id]
       else state.disabledLocalSkills[location.id] = true
     }
-    writeState(state); invalidate?.()
+    writeState(state); invalidateAll()
     const after = await status(item)
     const desired = enabled ? item.invocation : { modelInvocable: false, userInvocable: false }
-    if (!after.available || after.invocation?.modelInvocable !== desired.modelInvocable || after.invocation?.userInvocable !== desired.userInvocable) {
-      state.disabledLocalSkills = previous; writeState(state); invalidate?.()
+    if (!after.available || !after.invocations.every(policy => policy.modelInvocable === desired.modelInvocable && policy.userInvocable === desired.userInvocable)) {
+      state.disabledLocalSkills = previous; writeState(state); invalidateAll()
       catalogChanged?.()
       throw new Error(after.message || 'DSH 未确认开关状态，已恢复原状态')
     }
@@ -233,12 +280,59 @@ export function createSkillsManager(root) {
           if (event === 'change' && parts.length === 1 && !/\.md$/i.test(parts[0])) return
         }
         clearTimeout(watchTimer)
-        watchTimer = setTimeout(() => { cache = null; invalidate?.(); catalogChanged?.() }, 150)
+        watchTimer = setTimeout(() => { cache = null; invalidateAll(); catalogChanged?.() }, 150)
         watchTimer.unref?.()
       })
       watcher.on('error', () => {})
     } catch {}
     return () => { clearTimeout(watchTimer); watcher?.close(); watcher = null; registry = null; invalidate = null; catalogChanged = null; dispose() }
   }
-  return { attach, entries, list, toggle, detail, resource, refresh }
+  function attachAgents(ctx, createScope = null) {
+    createPolicyScope = createScope
+    const bind = (agent) => {
+      if (agentViews.has(agent)) return
+      // A preset's filesystem provider shadows the global layer regardless of
+      // rank. Explicit off choices must also live in the exact agent scope.
+      // Enabled skills continue to resolve through their native providers.
+      const serviceFor = () => ctx.get?.('agentPresets')?.serviceFor(agent, 'skills') ?? registry
+      const service = serviceFor()
+      if (service !== registry && !presetProviders.has(service)) {
+        let invalidatePreset
+        const dispose = service.registerProvider(control => { invalidatePreset = control.invalidate; return { ...disabledProvider(), async list(options = {}) {
+          await ensureScope(options.scope, service)
+          return disabledProvider().list(options)
+        } } })
+        presetProviders.set(service, { dispose, invalidate: invalidatePreset, users: 0 })
+      }
+      if (service !== registry) presetProviders.get(service).users++
+      const dispose = createScope ? (() => { const policy = scopePolicies.get(agent); scopePolicies.delete(agent); return policy?.dispose() })
+        : agent.ctx.skills.registerProvider(() => disabledProvider())
+      agentViews.set(agent, { dispose: () => {
+        const pending = dispose()
+        const preset = presetProviders.get(service)
+        if (preset && --preset.users === 0) { preset.dispose(); presetProviders.delete(service) }
+        return pending
+      }, registry: serviceFor, lookup: () => ({ scope: agent, cwd: ctx.get?.('workingDirectory')?.get(agent.session) ?? agent.session?.header?.cwd }) })
+    }
+    const unbind = (agent) => { const view = agentViews.get(agent); agentViews.delete(agent); return view?.dispose() }
+    const offCreated = ctx.on('agent/created', ({ agent }) => bind(agent))
+    const offDisposed = ctx.on('agent/disposed', ({ agent }) => unbind(agent))
+    const offPreset = ctx.on('agent-preset/selected', async id => {
+      const agent = ctx.agents.get(id)
+      if (agent) { await unbind(agent); bind(agent) }
+    })
+    for (const agent of ctx.agents.list()) bind(agent)
+    invalidateAll()
+    catalogChanged?.()
+    return () => {
+      offCreated(); offDisposed(); offPreset()
+      const pending = [...agentViews.keys()].map(unbind)
+      for (const policy of scopePolicies.values()) pending.push(policy.dispose())
+      scopePolicies.clear(); createPolicyScope = null
+      for (const { dispose } of presetProviders.values()) dispose()
+      presetProviders.clear()
+      return Promise.all(pending)
+    }
+  }
+  return { attach, attachAgents, entries, list, toggle, detail, resource, refresh }
 }

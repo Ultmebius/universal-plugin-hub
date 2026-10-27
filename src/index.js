@@ -8,8 +8,10 @@
  */
 import { mountRoutes } from './routes.js'
 import { cancelAllOAuthVerifications } from './oauth.js'
-import { syncAllInstalledSkillsToDsh, installProfilePackages, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
+import { syncAllInstalledSkillsToDsh, installProfilePackages, findDshMainNodeModules, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
 import { createSkillsManager } from './skills.js'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
 
 export const name = 'universal-plugin-hub'
 
@@ -17,8 +19,15 @@ export function apply(ctx) {
   const skills = createSkillsManager()
   ctx.inject(['skills'], (hostCtx) => {
     hostCtx.effect(() => skills.attach(hostCtx.skills, () => {
-      hostCtx.emit('plugin-manager/changed', { reason: 'skills' })
+      hostCtx.emit('plugin-manager/changed')
     }), 'universal-plugin-hub: skills provider')
+  })
+  ctx.inject(['skills', 'agents'], (hostCtx) => {
+    // Borrow DSH's own scope module so its opaque scope identity is shared.
+    const main = findDshMainNodeModules()
+    if (!main) throw new Error('无法定位 DSH 原生 Skills 作用域服务')
+    const { createScope } = createRequire(join(main, '.universal-plugin-hub-resolve.cjs'))('@deepseek-ai/dsh-scope')
+    hostCtx.effect(() => skills.attachAgents(hostCtx, createScope), 'universal-plugin-hub: scoped skill switches')
   })
   // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
   try {

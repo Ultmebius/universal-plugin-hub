@@ -3,7 +3,7 @@
   "title": "Universal Plugin Hub",
   "displayName": "Universal Plugin Hub",
   "description": "DSH 插件市场：安装 Claude Code 与 Codex 插件、Skills 和命令，接入子代理、MCP、Hooks 与 LSP。",
-  "version": "1.0.21",
+  "version": "1.0.24",
   "type": "module",
   "main": "src/index.js",
   "license": "MIT",
