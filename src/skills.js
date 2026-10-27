@@ -79,10 +79,21 @@ export function discoverSkills(root = join(process.env.DSH_AGENTS_HOME || join(h
     }
   }
   walk(root, 0)
+  // Packaged skills often contain another copy of themselves. Keep one card
+  // and one provider candidate, preferring the native, shallow location.
+  entries.sort((a, b) => a.relativePath.split(sep).length - b.relativePath.split(sep).length || a.path.localeCompare(b.path))
+  const identical = new Map(), merged = []
+  for (const item of entries) {
+    const key = JSON.stringify([item.name, item.metadata, item.content.replace(/\r\n/g, '\n')])
+    const existing = !item.error && identical.get(key)
+    const location = { id: item.id, path: item.path, relativePath: item.relativePath }
+    if (existing) existing.locations.push(location)
+    else { item.locations = [location]; merged.push(item); if (!item.error) identical.set(key, item) }
+  }
   const counts = new Map()
-  for (const item of entries) counts.set(item.name, (counts.get(item.name) || 0) + 1)
-  for (const item of entries) item.duplicate = counts.get(item.name) > 1
-  return entries.sort((a, b) => a.name.localeCompare(b.name))
+  for (const item of merged) counts.set(item.name, (counts.get(item.name) || 0) + 1)
+  for (const item of merged) item.duplicate = counts.get(item.name) > 1
+  return merged.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function createSkillsManager(root) {
@@ -93,18 +104,22 @@ export function createSkillsManager(root) {
     return cache
   }
   const disabled = () => readState().disabledLocalSkills || {}
+  const isDisabled = (item, off = disabled()) => item.locations.some(location => off[location.id])
+  const matches = (item, current) => current && item.locations.some(location => samePath(current.path, location.path))
   const entries = () => {
     const off = disabled()
     return scan().map(item => {
       const { content, metadata, ...summary } = item
       const icon = item.iconPath ? `/universal-plugin-hub/api/skills/icon?id=${encodeURIComponent(item.id)}` : null
-      return { ...summary, sourceId: 'skills-local', enabled: !off[item.id], available: !!registry, icons: { light: icon ? [icon] : [], dark: icon ? [icon] : [] } }
+      return { ...summary, sourceId: 'skills-local', enabled: !isDisabled(item, off), available: !!registry, icons: { light: icon ? [icon] : [], dark: icon ? [icon] : [] } }
     })
   }
   function candidate(item, isDisabled) {
     return {
       name: item.name, description: item.description, invocation: isDisabled ? { modelInvocable: false, userInvocable: false } : item.invocation,
-      provider: PROVIDER, source: 'user-agents', rank: isDisabled ? 499 : 501,
+      // The same ~/.agents file can be discovered as a project root (rank 200).
+      // An explicit off choice must precede every native filesystem rank.
+      provider: PROVIDER, source: 'user-agents', rank: isDisabled ? 99 : 501,
       path: item.path, resourceBase: { kind: 'directory', path: item.directory }, locator: item.id,
     }
   }
@@ -114,14 +129,14 @@ export function createSkillsManager(root) {
       const off = disabled()
       // The native filesystem provider (rank 500) wins whenever it discovers
       // the skill. Profiles that omit that user root still get a fallback.
-      return scan().filter(item => !item.error && !item.duplicate).map(item => candidate(item, !!off[item.id]))
+      return scan().filter(item => !item.error).map(item => candidate(item, isDisabled(item, off)))
     },
     async get(entry) {
       const item = scan().find(s => s.id === entry.locator)
       if (!item || item.error) return undefined
       const fresh = readSkill(item.path, root, item.nested)
       if (fresh.error || fresh.name !== item.name) return undefined
-      const { rank, locator, ...summary } = candidate(fresh, !!disabled()[item.id])
+      const { rank, locator, ...summary } = candidate(fresh, isDisabled(item))
       return { ...summary, content: fresh.content, metadata: fresh.metadata.metadata }
     },
   }
@@ -131,7 +146,7 @@ export function createSkillsManager(root) {
     try {
       const current = (await registry.list()).find(s => s.name === item.name)
       if (!current) return { available: false, message: '当前管理视图未查到此 Skill，无法确认调用状态' }
-      if (!samePath(current.path, item.path)) return { available: false, message: '同名 Skill 已由其他来源加载' }
+      if (!matches(item, current)) return { available: false, message: `/${item.name} 当前使用另一份 Skill：${current.path || current.provider}` }
       return { available: true, invocation: current.invocation }
     } catch (e) { return { available: false, message: e.message } }
   }
@@ -143,9 +158,10 @@ export function createSkillsManager(root) {
     const byName = new Map(current.map(s => [s.name, s]))
     return list.map(item => {
       const found = byName.get(item.name)
-      const matching = found && samePath(found.path, item.path)
-      return { ...item, enabled: matching ? item.enabled : null, available: !!matching, actualInvocation: matching ? found.invocation : null,
-        statusMessage: item.error || (item.duplicate ? '存在同名 Skill' : !found ? '当前管理视图未查到此 Skill，无法确认调用状态' : !matching ? '同名 Skill 已由其他来源加载' : '') }
+      const matching = matches(item, found)
+      return { ...item, enabled: matching ? item.enabled : null, available: !!matching && !item.error, actualInvocation: matching ? found.invocation : null,
+        activePath: matching ? found.path : null,
+        statusMessage: item.error || (!found ? '当前管理视图未查到此 Skill，无法确认调用状态' : !matching ? `/${item.name} 当前使用另一份 Skill：${found.path || found.provider}` : '') }
     })
   }
   async function toggle(id, enabled) {
@@ -154,13 +170,15 @@ export function createSkillsManager(root) {
     try {
     const item = scan().find(s => s.id === id)
     if (!item) throw new Error('Skill 不存在，请刷新列表')
-    if (item.error || item.duplicate) throw new Error(item.error || '存在同名 Skill，无法安全切换')
+    if (item.error) throw new Error(item.error)
     const before = await status(item)
     if (!before.available) throw new Error(before.message)
     const state = readState(), previous = { ...(state.disabledLocalSkills || {}) }
     state.disabledLocalSkills = { ...previous }
-    if (enabled) delete state.disabledLocalSkills[id]
-    else state.disabledLocalSkills[id] = true
+    for (const location of item.locations) {
+      if (enabled) delete state.disabledLocalSkills[location.id]
+      else state.disabledLocalSkills[location.id] = true
+    }
     writeState(state); invalidate?.()
     const after = await status(item)
     const desired = enabled ? item.invocation : { modelInvocable: false, userInvocable: false }
@@ -188,7 +206,7 @@ export function createSkillsManager(root) {
       }
     }
     if (includeFiles) walk(item.directory, 0)
-    return { ...item, enabled: !disabled()[id], files }
+    return { ...item, enabled: !isDisabled(item), files }
   }
   function resource(id, name) {
     const item = scan().find(s => s.id === id)

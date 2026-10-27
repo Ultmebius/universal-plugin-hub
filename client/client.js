@@ -1228,6 +1228,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	transition: background .15s;
 }
 .cpm-toggle.on { background: var(--cpm-toggle-on); }
+.cpm-toggle:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 3px; }
 .cpm-toggle::after {
 	content: "";
 	position: absolute;
@@ -4555,10 +4556,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	function SkillSwitch({ skill, busy, onToggle }) {
-		return h("button", { type: "button", className: "cpm-toggle" + (skill.enabled ? " on" : ""), role: "switch", "aria-checked": !!skill.enabled,
-			"aria-label": `${skill.enabled ? "关闭" : "开启"} ${skill.name}`, "data-cpm-tip": skill.statusMessage || `${skill.enabled ? "关闭" : "开启"} Skill`,
-			disabled: busy || !skill.available || !!skill.error || !!skill.duplicate,
-			onClick: e => { e.stopPropagation(); onToggle(skill); } });
+			return h("input", { type: "checkbox", switch: "", className: "cpm-toggle" + (skill.enabled ? " on" : ""), role: "switch", checked: !!skill.enabled,
+				"aria-label": `启用 ${skill.name}`, style: { appearance: "none", margin: 0 },
+				disabled: busy || !skill.available || !!skill.error,
+				onClick: e => e.stopPropagation(), onChange: e => onToggle(skill, e.currentTarget.checked) });
 	}
 
 	function SkillDetail({ skill, onBack, onToggle, busy, isDark }) {
@@ -4580,8 +4581,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			h("div", { className: "cpm-title-row" }, h(PluginIcon, { plugin: skill, isDark }), h("div", { className: "cpm-title" }, skill.displayName || skill.name),
 				h(SkillSwitch, { skill, busy, onToggle })),
 			h("div", { className: "cpm-desc" }, skill.description),
-			h("div", { className: "cpm-skill-path" }, skill.path),
-			skill.actualInvocation && h("div", { className: "cpm-skill-path" }, `DSH 调用：命令${skill.actualInvocation.userInvocable ? "可用" : "不可用"} · 模型${skill.actualInvocation.modelInvocable ? "可用" : "不可用"}`),
+				h("div", { className: "cpm-skill-path" }, skill.activePath || skill.path),
+				skill.enabled === false && h("div", { className: "cpm-skill-path" }, "已关闭，手动调用和自动调用均已停用。"),
+				skill.enabled && skill.invocation?.modelInvocable === false && skill.invocation?.userInvocable !== false && h("div", { className: "cpm-skill-path" }, `仅手动调用：输入 /${skill.name} 使用。此 Skill 自身设置为不允许模型自动调用。`),
+				skill.enabled && skill.invocation?.userInvocable === false && h("div", { className: "cpm-skill-path" }, skill.invocation?.modelInvocable === false ? "此 Skill 自身设置为不提供手动或自动调用入口。" : "由模型自动调用。此 Skill 自身设置为不显示在 / 命令菜单中。"),
+				skill.locations?.length > 1 && h("details", { className: "cpm-skill-path" }, h("summary", null, `相同指令的 ${skill.locations.length} 个位置已合并`), skill.locations.map(location => h("div", { key: location.id }, location.path))),
 			(skill.statusMessage || skill.error || error) && h("p", { className: "cpm-skill-warning" }, error || skill.statusMessage || skill.error),
 			detail && h(React.Fragment, null,
 				h("h3", null, "Skill 指令"), h("div", { className: "cpm-desc" }, h(SmartMarkdown, { text: detail.content })),
@@ -7453,13 +7457,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		const toggleSkill = async (skill) => {
+			const toggleSkill = async (skill, enabled) => {
 			if (skillBusy) return;
 			setSkillBusy(skill.id);
 			try {
-				const body = await api("/skills/toggle", { method: "POST", body: JSON.stringify({ id: skill.id, enabled: !skill.enabled }) });
+					const body = await api("/skills/toggle", { method: "POST", body: JSON.stringify({ id: skill.id, enabled }) });
 				setRows(prev => ({ ...(prev || {}), "skills-local": body.skills || [] }));
-				showToast(skill.enabled ? "Skill 已关闭" : "Skill 已开启", skill.name, { restart: false });
+					showToast(enabled ? "Skill 已开启" : "Skill 已关闭", skill.name, { restart: false });
 			} catch (e) { showToast("操作失败", e.message, { restart: false }); }
 			finally { setSkillBusy(null); }
 		};

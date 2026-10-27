@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import { createSkillsManager, discoverSkills } from '../src/skills.js'
-import { installedDir, writeState } from '../src/store.js'
+import { installedDir, readState, writeState } from '../src/store.js'
 import { mountRoutes } from '../src/routes.js'
 
 const temp = mkdtempSync(join(tmpdir(), 'hub-skills-'))
@@ -21,6 +21,10 @@ function add(dir, name, extra = '') {
 test('discovery, resources, provider control and persistence', async () => {
   try {
     const native = add('native', 'native')
+    const repeated = add('repeated', 'repeated')
+    write(join(root, 'repeated/plugins/repeated/skills/repeated/SKILL.md'), readFileSync(repeated))
+    const collision = add('collision-a', 'collision')
+    write(add('collision-b', 'collision'), readFileSync(collision, 'utf8') + 'Different instructions.\n')
     add('unlisted-native-root', 'unlisted-native-root')
     const nested = add('collection/nested', 'nested', 'user-invocable: false\n')
     add('broken', 'bad name')
@@ -31,16 +35,24 @@ test('discovery, resources, provider control and persistence', async () => {
     assert.equal(discovered.filter(s => s.name === 'native').length, 1)
     assert.equal(discovered.find(s => s.name === 'nested').nested, true)
     assert.ok(discovered.find(s => s.name === 'bad name').error)
+    const combined = discovered.filter(s => s.name === 'repeated')
+    assert.equal(combined.length, 1)
+    assert.equal(combined[0].path, repeated)
+    assert.equal(combined[0].locations.length, 2)
+    assert.equal(combined[0].duplicate, false)
+    assert.equal(discovered.filter(s => s.name === 'collision').length, 2)
     const original = readFileSync(native, 'utf8')
 
     let provider, foreignCandidate = null, ignoreOverride = false
     const registry = {
       registerProvider(factory) { provider = factory({ invalidate() {} }); return () => {} },
-      async list() {
+      async list(options = {}) {
         const candidates = [
           // DSH's async realpath expands Windows short paths; its summaries
           // must match Skills scanned from the original short temp path.
-          { name: 'native', path: realpathSync.native(native), invocation: { modelInvocable: true, userInvocable: true }, rank: 500 },
+          { name: 'native', path: realpathSync.native(native), invocation: { modelInvocable: true, userInvocable: true }, rank: options.cwd ? 200 : 500 },
+          { name: 'repeated', path: realpathSync.native(repeated), invocation: { modelInvocable: true, userInvocable: true }, rank: 500 },
+          { name: 'collision', path: realpathSync.native(collision), invocation: { modelInvocable: true, userInvocable: true }, rank: 500 },
           ...(foreignCandidate ? [foreignCandidate] : []),
           ...(await provider.list()).filter(p => !ignoreOverride || p.name !== 'native'),
         ].sort((a, b) => a.rank - b.rank)
@@ -70,6 +82,7 @@ test('discovery, resources, provider control and persistence', async () => {
     let active = (await registry.list()).find(s => s.name === 'native')
     assert.deepEqual(active.invocation, { modelInvocable: false, userInvocable: false })
     assert.equal((await registry.list()).filter(s => s.invocation.userInvocable).some(s => s.name === 'native'), false)
+    assert.equal((await registry.list({ cwd: temp })).find(s => s.name === 'native').invocation.userInvocable, false)
     assert.equal((await manager.list()).find(s => s.id === first.id).enabled, false)
     assert.equal(createSkillsManager(root).entries().find(s => s.id === first.id).enabled, false)
     await manager.toggle(first.id, true)
@@ -77,7 +90,7 @@ test('discovery, resources, provider control and persistence', async () => {
     active = (await registry.list()).find(s => s.name === 'native')
     assert.deepEqual(active.invocation, { modelInvocable: true, userInvocable: true })
     foreignCandidate = { name: 'native', path: join(temp, 'other', 'SKILL.md'), invocation: { modelInvocable: true, userInvocable: true }, rank: 400 }
-    await assert.rejects(manager.toggle(first.id, false), /同名 Skill/)
+    await assert.rejects(manager.toggle(first.id, false), /当前使用另一份 Skill/)
     assert.equal(catalogChanges, 2)
     assert.equal((await manager.list()).find(s => s.id === first.id).enabled, null)
     assert.equal(manager.entries().find(s => s.id === first.id).enabled, true)
@@ -90,6 +103,24 @@ test('discovery, resources, provider control and persistence', async () => {
     await manager.toggle(second.id, false)
     await manager.toggle(second.id, true)
     assert.equal((await registry.list()).find(s => s.name === 'nested').invocation.userInvocable, false)
+    const duplicate = (await manager.list()).find(s => s.name === 'repeated')
+    assert.equal(duplicate.available, true)
+    await manager.toggle(duplicate.id, false)
+    assert.equal((await manager.list()).find(s => s.name === 'repeated').enabled, false)
+    assert.deepEqual((await registry.list()).find(s => s.name === 'repeated').invocation, { modelInvocable: false, userInvocable: false })
+    // A saved choice for the nested copy survives merging; enabling clears it.
+    writeState({ ...readState(), disabledLocalSkills: { [duplicate.locations[1].id]: true } })
+    assert.equal(manager.entries().find(s => s.name === 'repeated').enabled, false)
+    await manager.toggle(duplicate.id, true)
+    assert.equal((await manager.list()).find(s => s.name === 'repeated').enabled, true)
+    assert.deepEqual(readState().disabledLocalSkills, {})
+    const variants = (await manager.list()).filter(s => s.name === 'collision')
+    const winner = variants.find(s => s.available)
+    assert.ok(winner)
+    assert.equal(winner.statusMessage, '')
+    assert.match(variants.find(s => !s.available).statusMessage, /当前使用另一份 Skill/)
+    await manager.toggle(winner.id, false)
+    await manager.toggle(winner.id, true)
     assert.equal(readFileSync(native, 'utf8'), original)
     const detail = manager.detail(second.id)
     assert.deepEqual(detail.files.map(f => f.path).sort(), ['agents/worker.md', 'scripts/run.py'])

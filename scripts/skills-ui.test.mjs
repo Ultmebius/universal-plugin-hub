@@ -31,13 +31,34 @@ test('skill detail displays instructions and loads resources only on request', a
   assert.match(JSON.stringify(view.toJSON()), /Skill instructions/)
   assert.match(JSON.stringify(view.toJSON()), /agents\/reviewer.md/)
   const toggle = view.root.findByProps({ role: 'switch' })
-  assert.equal(toggle.props['aria-checked'], true)
-  await act(async () => { toggle.props.onClick({ stopPropagation() {} }) })
+  assert.equal(toggle.props.checked, true)
+  assert.equal(toggle.props['data-cpm-tip'], undefined)
+  assert.equal(toggle.props.title, undefined)
+  await act(async () => { toggle.props.onChange({ currentTarget: { checked: false } }) })
   assert.deepEqual(toggled, ['abc'])
   const resource = view.root.findAllByType('button').find(button => button.children.includes('scripts/check.py'))
   await act(async () => { await resource.props.onClick() })
   assert.equal(requests.length, 2)
   assert.match(JSON.stringify(view.toJSON()), /resource contents/)
+  await act(async () => view.unmount())
+})
+
+test('manual-only policy explains author intent and duplicate flag does not lock the active switch', async () => {
+  const toggled = []
+  const context = { ...React, React, h: React.createElement, IconChevronLeft: () => null, PluginIcon: () => null,
+    SmartMarkdown: ({ text }) => React.createElement('div', null, text),
+    api: async () => ({ skill: { content: 'Instructions', files: [] } }),
+  }
+  vm.runInNewContext(source.slice(start, end) + '\nglobalThis.SkillDetail = SkillDetail;', context)
+  let view
+  const skill = { id: 'manual', name: 'manual', enabled: true, available: true, duplicate: true, invocation: { userInvocable: true, modelInvocable: false } }
+  await act(async () => { view = create(React.createElement(context.SkillDetail, { skill, onBack() {}, onToggle: (_skill, enabled) => toggled.push(enabled) })) })
+  assert.match(JSON.stringify(view.toJSON()), /仅手动调用：输入 \/manual 使用/)
+  assert.doesNotMatch(JSON.stringify(view.toJSON()), /模型不可用|命令可用/)
+  const toggle = view.root.findByProps({ role: 'switch' })
+  assert.equal(toggle.props.disabled, false)
+  await act(async () => toggle.props.onChange({ currentTarget: { checked: false } }))
+  assert.deepEqual(toggled, [false])
   await act(async () => view.unmount())
 })
 
