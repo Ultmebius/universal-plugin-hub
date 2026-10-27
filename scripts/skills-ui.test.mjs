@@ -13,7 +13,7 @@ const end = source.indexOf('\n\t// ───────────────
 assert.ok(start >= 0 && end > start)
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-test('skill detail displays instructions and loads resources only on request', async () => {
+test('skill detail displays instructions without showing or requesting resources', async () => {
   const requests = [], toggled = []
   const context = { ...React, React, h: React.createElement, IconChevronLeft: () => null, PluginIcon: () => null, SmartMarkdown: ({ text }) => React.createElement('div', null, text),
     api: async path => {
@@ -29,17 +29,14 @@ test('skill detail displays instructions and loads resources only on request', a
   await act(async () => { view = create(React.createElement(context.SkillDetail, { skill, onBack() {}, onToggle(s) { toggled.push(s.id) } })) })
   assert.equal(requests.length, 1)
   assert.match(JSON.stringify(view.toJSON()), /Skill instructions/)
-  assert.match(JSON.stringify(view.toJSON()), /agents\/reviewer.md/)
+  assert.doesNotMatch(JSON.stringify(view.toJSON()), /agents\/reviewer.md|scripts\/check.py|脚本、Agent 与资源/)
   const toggle = view.root.findByProps({ role: 'switch' })
   assert.equal(toggle.props.checked, true)
   assert.equal(toggle.props['data-cpm-tip'], undefined)
   assert.equal(toggle.props.title, undefined)
   await act(async () => { toggle.props.onChange({ currentTarget: { checked: false } }) })
   assert.deepEqual(toggled, ['abc'])
-  const resource = view.root.findAllByType('button').find(button => button.children.includes('scripts/check.py'))
-  await act(async () => { await resource.props.onClick() })
-  assert.equal(requests.length, 2)
-  assert.match(JSON.stringify(view.toJSON()), /resource contents/)
+  assert.equal(requests.length, 1)
   await act(async () => view.unmount())
 })
 

@@ -1209,10 +1209,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-meta .v a { color: var(--cpm-accent); text-decoration: none; }
 .cpm-skill-path { color: var(--cpm-muted); font-size: 12px; overflow-wrap: anywhere; margin: 12px 0; }
 .cpm-skill-warning { color: #c26a24; font-size: 13px; }
-.cpm-skill-content { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--cpm-modal-border); border-radius: 10px; color: var(--cpm-text); background: var(--cpm-icon-btn-hover); max-height: 480px; overflow: auto; font-size: 13px; line-height: 1.6; }
-.cpm-skill-files { display: flex; flex-wrap: wrap; gap: 8px; }
 .cpm-card-open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.cpm-skill-file { border: 1px solid var(--cpm-modal-border); color: var(--cpm-text); background: var(--cpm-icon-btn-hover); border-radius: 8px; padding: 6px 10px; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
 .cpm-toggle {
 	position: relative;
 	width: 40px;
@@ -4564,18 +4561,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	function SkillDetail({ skill, onBack, onToggle, busy, isDark }) {
 		const [detail, setDetail] = useState(null);
-		const [resource, setResource] = useState(null);
 		const [error, setError] = useState("");
 		useEffect(() => {
 			let live = true;
-			setDetail(null); setResource(null); setError("");
+			setDetail(null); setError("");
 			api("/skills/detail?id=" + encodeURIComponent(skill.id)).then(body => { if (live) setDetail(body.skill); }).catch(e => { if (live) setError(e.message); });
 			return () => { live = false; };
 		}, [skill.id]);
-		const openFile = async (file) => {
-			try { const body = await api("/skills/resource?id=" + encodeURIComponent(skill.id) + "&path=" + encodeURIComponent(file)); setResource({ name: file, content: body.content }); }
-			catch (e) { setResource({ name: file, content: e.message }); }
-		};
 		return h("div", { className: "cpm-detail" },
 			h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "返回"),
 			h("div", { className: "cpm-title-row" }, h(PluginIcon, { plugin: skill, isDark }), h("div", { className: "cpm-title" }, skill.displayName || skill.name),
@@ -4588,11 +4580,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				skill.locations?.length > 1 && h("details", { className: "cpm-skill-path" }, h("summary", null, `相同指令的 ${skill.locations.length} 个位置已合并`), skill.locations.map(location => h("div", { key: location.id }, location.path))),
 			(skill.statusMessage || skill.error || error) && h("p", { className: "cpm-skill-warning" }, error || skill.statusMessage || skill.error),
 			detail && h(React.Fragment, null,
-				h("h3", null, "Skill 指令"), h("div", { className: "cpm-desc" }, h(SmartMarkdown, { text: detail.content })),
-					detail.files.length > 0 && h(React.Fragment, null,
-						h("h3", null, `脚本、Agent 与资源 (${detail.files.length})`),
-						h("div", { className: "cpm-skill-files" }, detail.files.map(file => h("button", { className: "cpm-skill-file", key: file.path, onClick: () => openFile(file.path) }, file.path)))),
-				resource && h(React.Fragment, null, h("h3", null, resource.name), h("pre", { className: "cpm-skill-content" }, resource.content))));
+				h("h3", null, "Skill 指令"), h("div", { className: "cpm-desc" }, h(SmartMarkdown, { text: detail.content }))));
 	}
 
 	// ────────────────────────────── Modern Vector SVG Icons ──────────────────────────────

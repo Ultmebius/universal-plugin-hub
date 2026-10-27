@@ -130,7 +130,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       if (typeof body.enabled !== 'boolean') throw new Error('无效的开关状态')
       return sendJson(res, 200, await skills.toggle(body.id, body.enabled))
     }
-    if (path === '/skills/detail' && method === 'GET' && skills) return sendJson(res, 200, { skill: skills.detail(url.searchParams.get('id')) })
+    if (path === '/skills/detail' && method === 'GET' && skills) return sendJson(res, 200, { skill: skills.detail(url.searchParams.get('id'), false) })
     if (path === '/skills/resource' && method === 'GET' && skills) return sendJson(res, 200, { content: skills.resource(url.searchParams.get('id'), url.searchParams.get('path')) })
     if (path === '/skills/icon' && method === 'GET' && skills) {
       try {
