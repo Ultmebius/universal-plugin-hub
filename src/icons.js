@@ -10,6 +10,8 @@ const CACHE_TTL = 7 * 24 * 60 * 60 * 1000
 const memory = new Map()
 const pending = new Map()
 const failures = new Map()
+const bundledIconRoot = new URL('../assets/fluent-3d/', import.meta.url)
+const bundledIconFiles = new Map(Object.values(JSON.parse(readFileSync(new URL('manifest.json', bundledIconRoot), 'utf8')).icons).map(icon => [icon.url, icon.file]))
 
 export function imageContentType(buffer) {
   if (!buffer?.length) return null
@@ -86,6 +88,8 @@ export async function getOrFetchIcon(url) {
   }
   const cached = memory.get(url)
   if (cached && Date.now() - cached.time < CACHE_TTL) return cached
+  const bundledFile = bundledIconFiles.get(url)
+  if (bundledFile) return remember(url, { buffer: readFileSync(new URL(bundledFile, bundledIconRoot)), contentType: 'image/png' })
   if (failures.get(url) > Date.now()) throw new Error('Icon temporarily unavailable')
   if (pending.has(url)) return pending.get(url)
   const task = (async () => {

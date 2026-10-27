@@ -3,10 +3,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import * as acorn from 'acorn'
+import { createHash } from 'node:crypto'
+import { getOrFetchIcon } from '../src/icons.js'
 
 const source = fs.readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
 const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script' })
-const wanted = new Set(['PHOSPHOR_ICONS', 'FALLBACK_PALETTES', 'FALLBACK_RULES', 'BADGE_CACHE', 'getPluginBadge', 'PluginIconFallback', 'PluginIcon'])
+const wanted = new Set(['FLUENT_3D_ICONS', 'FALLBACK_RULES', 'BADGE_CACHE', 'getPluginBadge', 'PluginIconFallback', 'PluginIcon'])
 const pieces = new Map()
 function walk(node) {
   if (!node || typeof node !== 'object') return
@@ -21,7 +23,7 @@ walk(ast)
 const context = vm.createContext({ h: (type, props, ...children) => ({ type, props, children }),
   useMemo: fn => fn(), getPluginIconCandidates: p => p.icons?.light || [], PluginIconImage() {},
 })
-vm.runInContext([...wanted].map(name => pieces.get(name)).join('\n') + '\nglobalThis.badge = getPluginBadge; globalThis.render = PluginIconFallback; globalThis.icon = PluginIcon; globalThis.paths = PHOSPHOR_ICONS; globalThis.cache = BADGE_CACHE;', context)
+vm.runInContext([...wanted].map(name => pieces.get(name)).join('\n') + '\nglobalThis.badge = getPluginBadge; globalThis.render = PluginIconFallback; globalThis.icon = PluginIcon; globalThis.images = FLUENT_3D_ICONS; globalThis.cache = BADGE_CACHE;', context)
 
 test('fallback icons follow skill names before incidental description keywords', () => {
   const cases = [
@@ -43,20 +45,17 @@ test('fallback icons follow skill names before incidental description keywords',
   assert.equal(context.badge({ name: 'unclassified-item' }).icon, 'puzzle-piece')
 })
 
-test('local duotone artwork supports both themes and stays decorative', () => {
-  for (const [name, paths] of Object.entries(context.paths)) {
-    assert.ok(paths.length >= 2, name)
-    assert.ok(paths.some(([, opacity]) => opacity > 0 && opacity < 1), name)
-  }
+test('original 3D PNGs remain decorative and fit both themes', () => {
   const light = context.render({ plugin: { name: 'research', sourceId: 'skills-local' }, isDark: false })
   const dark = context.render({ plugin: { name: 'research', sourceId: 'skills-local' }, isDark: true })
   assert.equal(light.props['aria-hidden'], true)
-  assert.notEqual(light.props.style.color, dark.props.style.color)
-  const svg = light.children[0]
-  assert.equal(svg.props.viewBox, '0 0 256 256')
-  assert.equal(svg.props.width, 26)
-  assert.equal(svg.props.focusable, false)
-  assert.ok(svg.children[0].every(path => path.type === 'path'))
+  assert.notEqual(light.props.style.background, dark.props.style.background)
+  const image = light.children[0]
+  assert.equal(image.type, 'img')
+  assert.equal(image.props.width, 34)
+  assert.equal(image.props.alt, '')
+  assert.equal(image.props.loading, 'lazy')
+  assert.match(new URL(image.props.src, 'http://localhost').searchParams.get('u'), /^https:\/\/raw\.githubusercontent\.com\/microsoft\/fluentui-emoji\/[^/]+\/assets\/.+\.png$/)
 })
 
 test('declared logos retain priority and the semantic cache includes descriptions', () => {
@@ -67,5 +66,24 @@ test('declared logos retain priority and the semantic cache includes description
   assert.equal(context.badge({ name: 'unclassified', description: 'database' }).icon, 'database')
   for (let i = 0; i < 1100; i++) context.badge({ name: `unknown-${i}` })
   assert.equal(context.cache.size, 1024)
-  assert.match(fs.readFileSync(new URL('../assets/licenses/phosphor-icons.txt', import.meta.url), 'utf8'), /MIT License[\s\S]*Phosphor Icons/)
+  assert.match(fs.readFileSync(new URL('../assets/licenses/fluent-emoji.txt', import.meta.url), 'utf8'), /MIT License[\s\S]*Microsoft Corporation/)
+})
+
+test('bundled originals match their source hashes and need no network', async () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../assets/fluent-3d/manifest.json', import.meta.url), 'utf8'))
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = () => { throw new Error('Bundled icons must not fetch the network') }
+  try {
+    for (const [name, item] of Object.entries(manifest.icons)) {
+      const buffer = fs.readFileSync(new URL('../assets/fluent-3d/' + item.file, import.meta.url))
+      assert.equal(createHash('sha256').update(buffer).digest('hex'), item.sha256)
+      assert.equal(buffer.subarray(1, 4).toString(), 'PNG')
+      assert.equal(buffer.readUInt32BE(16), 256)
+      assert.equal(buffer.readUInt32BE(20), 256)
+      assert.equal(new URL(context.images[name], 'http://localhost').searchParams.get('u'), item.url)
+      const delivered = await getOrFetchIcon(item.url)
+      assert.equal(delivered.contentType, 'image/png')
+      assert.deepEqual(delivered.buffer, buffer)
+    }
+  } finally { globalThis.fetch = previousFetch }
 })
