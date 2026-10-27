@@ -51,7 +51,7 @@ function readSkill(file, root, isNested) {
     if (!meta.name) meta.name = raw.match(/^name:\s*([^\r\n]+)/m)?.[1]?.trim().replace(/^['"]|['"]$/g, '')
     if (!meta.description) meta.description = raw.match(/^description:\s*([^\r\n]+)/m)?.[1]?.trim().replace(/^['"]|['"]$/g, '') || raw.match(/^#\s+(.+)/m)?.[1] || ''
   }
-  const name = typeof meta.name === 'string' && meta.name.trim() ? meta.name : basename(dirname(file))
+  const name = typeof meta.name === 'string' && meta.name.trim() ? meta.name : /^skill\.md$/i.test(basename(file)) ? basename(dirname(file)) : basename(file).replace(/\.md$/i, '')
   const icons = [meta.icon, meta.logo, 'assets/icon.svg', 'assets/logo.svg', 'assets/icon.png', 'assets/logo.png', 'icon.svg', 'icon.png', 'logo.png']
   const iconPath = icons.find(path => typeof path === 'string' && !path.includes('..') && existsSync(join(dirname(file), path)))
   return {
@@ -63,25 +63,27 @@ function readSkill(file, root, isNested) {
 }
 
 export function discoverSkills(root = join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')) {
-  const entries = [], visited = new Set(), seen = new Set()
-  function walk(dir, depth) {
-    let actual, children
-    try { actual = canonical(dir); if (visited.has(actual)) return; visited.add(actual); children = readdirSync(dir, { withFileTypes: true }) } catch { return }
-    const manifest = children.find(e => /^skill\.md$/i.test(e.name) && (e.isFile() || (e.isSymbolicLink() && (() => { try { return statSync(join(dir, e.name)).isFile() } catch { return false } })())))
-    if (manifest) {
-      const file = join(dir, manifest.name), id = skillId(file)
-      if (!seen.has(id)) { seen.add(id); entries.push(readSkill(file, root, depth > 1)) }
-    }
-    for (const entry of children) {
-      if (EXCLUDED.has(entry.name)) continue
-      const path = join(dir, entry.name)
-      try { if (entry.isDirectory() || (entry.isSymbolicLink() && statSync(path).isDirectory())) walk(path, depth + 1) } catch {}
-    }
+  const entries = [], seen = new Set()
+  let children
+  try { children = readdirSync(root, { withFileTypes: true }) } catch { return entries }
+  // Match DSH's native boundary: <root>/<name>/SKILL.md or <root>/<name>.md.
+  for (const entry of children) {
+    if (EXCLUDED.has(entry.name)) continue
+    const path = join(root, entry.name)
+    try {
+      const stat = entry.isSymbolicLink() ? statSync(path) : entry
+      let file
+      if (stat.isDirectory()) {
+        const manifest = readdirSync(path).find(name => /^skill\.md$/i.test(name) && statSync(join(path, name)).isFile())
+        if (manifest) file = join(path, manifest)
+      } else if (stat.isFile() && /\.md$/i.test(entry.name)) file = path
+      if (!file) continue
+      const id = skillId(file)
+      if (!seen.has(id)) { seen.add(id); entries.push(readSkill(file, root, false)) }
+    } catch {}
   }
-  walk(root, 0)
-  // Packaged skills often contain another copy of themselves. Keep one card
-  // and one provider candidate, preferring the native, shallow location.
-  entries.sort((a, b) => a.relativePath.split(sep).length - b.relativePath.split(sep).length || a.path.localeCompare(b.path))
+  // Identical direct entries share one card and one provider candidate.
+  entries.sort((a, b) => a.path.localeCompare(b.path))
   const identical = new Map(), merged = []
   for (const item of entries) {
     const key = JSON.stringify([item.name, item.metadata, item.content.replace(/\r\n/g, '\n')])
@@ -225,7 +227,11 @@ export function createSkillsManager(root) {
     const dispose = service.registerProvider(control => { invalidate = control.invalidate; return provider })
     try {
       watcher = watch(root, { recursive: true }, (event, filename) => {
-        if (event === 'change' && filename && !/^skill\.md$/i.test(basename(String(filename)))) return
+        if (filename) {
+          const parts = String(filename).split(/[\\/]/)
+          if (parts.length > 2 || (parts.length === 2 && !/^skill\.md$/i.test(parts[1]))) return
+          if (event === 'change' && parts.length === 1 && !/\.md$/i.test(parts[0])) return
+        }
         clearTimeout(watchTimer)
         watchTimer = setTimeout(() => { cache = null; invalidate?.(); catalogChanged?.() }, 150)
         watchTimer.unref?.()
