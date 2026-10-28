@@ -899,6 +899,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: #3f3f46;
 	border-color: rgba(255, 255, 255, 0.3);
 }
+/* Pin the row's trailing control to the right edge of its card. The pill and
+   the switch have different intrinsic widths, so the text column would
+   otherwise end short of one and long of the other, putting the description's
+   ellipsis at a different place on each source. Right-aligning both keeps the
+   rows of every source on one column. */
+.cpm-card > :last-child {
+	flex: 0 0 auto;
+	margin-left: auto;
+}
 .cpm-card-pill-installed {
 	background: #ffffff;
 	border-color: rgba(16, 185, 129, 0.35);
@@ -1252,6 +1261,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	transition: left .15s;
 }
 .cpm-toggle.on::after { left: 20px; }
+/* In a list row the switch matches the manage/install pill it stands in for:
+   50×25 with a 20px knob, so a skills row and a plugin row end in the same
+   slot. Only the card's own switch scales; detail headers keep 40×22. */
+.cpm-card > .cpm-toggle {
+	width: 50px;
+	flex: 0 0 50px;
+	min-width: 50px;
+	height: 25px;
+}
+.cpm-card > .cpm-toggle::after {
+	top: 2.5px;
+	left: 2.5px;
+	width: 20px;
+	height: 20px;
+}
+.cpm-card > .cpm-toggle.on::after { left: 27.5px; }
 .cpm-menu { position: relative; }
 .cpm-menu-pop {
 	position: absolute;
@@ -6937,58 +6962,73 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			// Browse View — Mode B: Normal Source Browser Grid
-			isBrowse && activeSourceId !== "skills-local" && filter !== "installed" && !mcpsOpen && h("div", {
+			//
+			// Skills share this very element instead of rendering a second grid.
+			// Two sibling `.cpm-grid` blocks meant React unmounted the plugin
+			// grid and mounted a fresh one on every switch to or from Skills:
+			// a new scroll container and a full set of re-created cards, which
+			// read as a flash. One element keeps the container, its scroll
+			// position and the card nodes alive across sources — only the rows
+			// change, exactly like switching between two plugin sources.
+			isBrowse && (activeSourceId === "skills-local" || filter !== "installed") && !mcpsOpen && h("div", {
 				ref: gridRef,
 				onWheel: onGridWheel,
 				onScroll: onGridScroll,
 				className: "cpm-grid" + gridMaskClass,
 			},
-				visible.length === 0 && h("div", { className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: "30px" } },
-					loadingSourceId === activeSourceId ? "正在加载插件…" : (query.trim() ? "没有找到匹配的插件" : "该插件源暂无插件")
-				),
-				visible.map((p, index) => {
-					const installed = currentSourceInstalledNames.has(p.name);
-					return h(PluginCard, {
-						key: p.id,
-						plugin: p,
-						eagerIcon: index < 12,
-						installed,
-						isDark,
-						onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
-						onMouseLeave: () => handleCardMouseLeave(p),
-						onClick: () => {
-							closePluginHover();
-							if (gridRef.current) {
-								if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-								SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-							}
-							setView({ type: "detail", sourceId: activeSourceId, plugin: p });
-						},
-						onManage: (e) => {
-							e.stopPropagation();
-							closePluginHover();
-							if (gridRef.current) {
-								if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-								SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-							}
-							openManage(state.plugins.find((r) => r.name === p.name && (r.sourceId === activeSourceId || r.sourceId === p.sourceId)) || state.plugins.find((r) => r.name === p.name), { type: "browse" });
-						},
-						onInstall: (e) => {
-							e.stopPropagation();
-							closePluginHover();
-							setInstallFor(p);
-						},
-					});
-				}),
+				activeSourceId === "skills-local"
+					? [
+						visible.length === 0 && h("div", { key: "empty", className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: 30 } },
+							loadingSourceId === activeSourceId ? "正在加载 Skills…" : "没有找到匹配的 Skills"),
+						// A skill's identity is its file path, a plugin's its name; the
+						// `skill:` prefix keeps the two from ever colliding while they
+						// share one grid.
+						visible.map((skill, index) => h(PluginCard, { key: "skill:" + skill.id, plugin: skill, isDark, eagerIcon: index < 12,
+							onMouseEnter: (e) => handleCardMouseEnter(skill, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
+							onMouseLeave: () => handleCardMouseLeave(skill),
+							onClick: () => { closePluginHover(); setView({ type: "skill-detail", sourceId: "skills-local", skill }); },
+							action: h(SkillSwitch, { skill, busy: skillBusy === skill.id, onToggle: toggleSkill }) })),
+					]
+					: [
+						visible.length === 0 && h("div", { key: "empty", className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: "30px" } },
+							loadingSourceId === activeSourceId ? "正在加载插件…" : (query.trim() ? "没有找到匹配的插件" : "该插件源暂无插件")
+						),
+						visible.map((p, index) => {
+							const installed = currentSourceInstalledNames.has(p.name);
+							return h(PluginCard, {
+								key: "plugin:" + p.id,
+								plugin: p,
+								eagerIcon: index < 12,
+								installed,
+								isDark,
+								onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
+								onMouseLeave: () => handleCardMouseLeave(p),
+								onClick: () => {
+									closePluginHover();
+									if (gridRef.current) {
+										if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
+										SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
+									}
+									setView({ type: "detail", sourceId: activeSourceId, plugin: p });
+								},
+								onManage: (e) => {
+									e.stopPropagation();
+									closePluginHover();
+									if (gridRef.current) {
+										if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
+										SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
+									}
+									openManage(state.plugins.find((r) => r.name === p.name && (r.sourceId === activeSourceId || r.sourceId === p.sourceId)) || state.plugins.find((r) => r.name === p.name), { type: "browse" });
+								},
+								onInstall: (e) => {
+									e.stopPropagation();
+									closePluginHover();
+									setInstallFor(p);
+								},
+							});
+						}),
+					],
 			),
-
-			isBrowse && activeSourceId === "skills-local" && !mcpsOpen && h("div", { ref: gridRef, onWheel: onGridWheel, onScroll: onGridScroll, className: "cpm-grid" + gridMaskClass },
-				visible.length === 0 && h("div", { className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: 30 } }, loadingSourceId === activeSourceId ? "正在加载 Skills…" : "没有找到匹配的 Skills"),
-				visible.map((skill, index) => h(PluginCard, { key: skill.id, plugin: skill, isDark, eagerIcon: index < 12,
-						onMouseEnter: (e) => handleCardMouseEnter(skill, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
-						onMouseLeave: () => handleCardMouseLeave(skill),
-						onClick: () => { closePluginHover(); setView({ type: "skill-detail", sourceId: "skills-local", skill }); },
-					action: h(SkillSwitch, { skill, busy: skillBusy === skill.id, onToggle: toggleSkill }) }))),
 
 			isBrowse && mcpsOpen && h("div", {
 				className: "cpm-grid-container" + gridMaskClass,
