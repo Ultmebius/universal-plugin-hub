@@ -711,6 +711,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
 	box-sizing: border-box;
 	width: 100%;
+	/* Reserve the scrollbar track on every list surface. Centered columns are
+	   laid out inside the content box, so without this a source whose list is
+	   short enough to scrollbar-free sits a scrollbar-width to the right of the
+	   others and every tab switch shifts the whole grid sideways. */
+	scrollbar-gutter: stable;
 }
 .cpm-grid {
 	display: grid;
@@ -1176,6 +1181,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 	align-items: center;
 	box-sizing: border-box;
+	scrollbar-gutter: stable;
 }
 .cpm-manage > * {
 	width: 100%;
