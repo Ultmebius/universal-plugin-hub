@@ -6,8 +6,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	const React = require("react");
 	const { createElement: h, useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } = React;
-		const { MarkdownText: NativeMarkdownText, PathLabel: NativePathLabel } = require("@deepseek-ai/dsh-client-ui-primitives");
 		const SKILL_MARKDOWN_LABELS = { code: { copyLabel: "复制", copiedLabel: "已复制", toolbarLabels: { codeLabel: "代码", wrapLabel: "自动换行", unwrapLabel: "不换行" } }, footnotes: "注释" };
+		// The host's own Markdown and path primitives are the preferred renderer
+		// for a skill body, but they are an internal DSH package with no
+		// compatibility promise: requiring it unguarded would take the whole
+		// panel down on a host that renames or drops it. Fall back to this
+		// plugin's own Markdown renderer and a plain path label instead.
+		const NativeUI = (() => {
+			try { return require("@deepseek-ai/dsh-client-ui-primitives") || {}; } catch { return {}; }
+		})();
+		const NativeMarkdownText = NativeUI.MarkdownText || (({ text }) => h("div", { className: "cpm-skill-content-native" }, h(SmartMarkdown, { text: String(text ?? "") })));
+		const NativePathLabel = NativeUI.PathLabel || (({ path }) => h("span", { "data-path-label": true }, path));
 	// Manifests spell a remote transport three ways (`http`, `sse`,
 	// `streamable-http`). The editor only has two modes; anything unrecognised
 	// used to fall through to the stdio form and show an empty local command

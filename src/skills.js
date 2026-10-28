@@ -117,19 +117,31 @@ export function createSkillsManager(root) {
       if (!scan().some(item => !item.error && isDisabled(item, off))) return
     }
     existing?.dispose()
-    const owner = createPolicyScope(service.ctx, scope)
-    let ready, failed
-    const pending = new Promise((resolve, reject) => { ready = resolve; failed = reject })
-    scopePolicies.set(scope, { service, ready: pending, dispose: () => { ready(); return owner.dispose() } })
+    scopePolicies.delete(scope)
+    let owner
+    try { owner = createPolicyScope(service.ctx, scope) }
+    catch { return }
+    let settle
+    const pending = new Promise(resolve => { settle = resolve })
+    scopePolicies.set(scope, { service, ready: pending, dispose: () => { settle(); return owner.dispose() } })
+    // Never reject: failing to register only means this one scope gets no
+    // disabled-skill overlay. A rejected promise would be cached here and
+    // re-thrown on every later read of this scope, and because catalogs()
+    // reads through Promise.all it would blank the entire skills list rather
+    // than just this scope.
     owner.ctx.inject(['skills'], target => {
-      try { target.skills.registerProvider(() => disabledProvider()); ready() }
-      catch (error) { failed(error); throw error }
+      try { target.skills.registerProvider(() => disabledProvider()) }
+      catch { scopePolicies.delete(scope); try { owner.dispose() } catch {} }
+      finally { settle() }
     })
     // Cold catalog leases can mint scopes without live agents. Bound their
-    // policy lifetimes as well as cleaning up live scopes on agent disposal.
+    // policy lifetimes — but only those: evicting a live agent's policy would
+    // quietly report its switched-off skills as enabled again.
     if (scopePolicies.size > 128) {
-      const oldest = scopePolicies.keys().next().value
-      scopePolicies.get(oldest).dispose(); scopePolicies.delete(oldest)
+      for (const key of scopePolicies.keys()) {
+        if (agentViews.has(key)) continue
+        scopePolicies.get(key).dispose(); scopePolicies.delete(key); break
+      }
     }
     return pending
   }
@@ -188,11 +200,14 @@ export function createSkillsManager(root) {
   async function status(item) {
     if (!registry) return { available: false, message: 'DSH Skills 服务不可用' }
     try {
-      const current = (await catalogs()).map(list => list.find(s => s.name === item.name))
-      if (current.some(s => !s)) return { available: false, message: '部分会话未查到此 Skill，无法确认调用状态' }
-      const foreign = current.find(s => !matches(item, s))
+      // A session that never surfaced this skill has nothing to enforce, and
+      // must not veto the switch: requiring every agent catalogue to list it
+      // would revert every toggle as soon as one preset scopes it away.
+      const present = (await catalogs()).map(list => list.find(s => s.name === item.name)).filter(Boolean)
+      if (!present.length) return { available: false, message: '当前管理视图未查到此 Skill，无法确认调用状态' }
+      const foreign = present.find(s => !matches(item, s))
       if (foreign) return { available: false, message: `/${item.name} 当前使用另一份 Skill：${foreign.path || foreign.provider}` }
-      return { available: true, invocations: current.map(s => s.invocation) }
+      return { available: true, invocations: present.map(s => s.invocation) }
     } catch (e) { return { available: false, message: e.message } }
   }
   async function list() {
@@ -202,15 +217,18 @@ export function createSkillsManager(root) {
     try { current = await catalogs() } catch { return list.map(x => ({ ...x, enabled: null, available: false, statusMessage: x.error || '无法读取 DSH Skills 状态' })) }
     const catalogsByName = current.map(rows => new Map(rows.map(s => [s.name, s])))
     return list.map(item => {
-      const found = catalogsByName.map(rows => rows.get(item.name))
-      const missing = found.some(s => !s), foreign = found.find(s => s && !matches(item, s))
-      const matching = !missing && !foreign
+      // Only the catalogues that actually surface this skill have a say, the
+      // same rule status() uses, so a preset that scopes a skill away does not
+      // show it as unavailable or reverted.
+      const found = catalogsByName.map(rows => rows.get(item.name)).filter(Boolean)
+      const foreign = found.find(s => !matches(item, s))
+      const matching = found.length > 0 && !foreign
       const desired = item.enabled ? item.invocation : { modelInvocable: false, userInvocable: false }
       const applied = matching && found.every(s => s.invocation.modelInvocable === desired.modelInvocable && s.invocation.userInvocable === desired.userInvocable)
       const actualInvocation = matching ? { modelInvocable: found.some(s => s.invocation.modelInvocable), userInvocable: found.some(s => s.invocation.userInvocable) } : null
       return { ...item, enabled: matching ? applied ? item.enabled : actualInvocation.modelInvocable || actualInvocation.userInvocable : null,
         available: matching && !item.error, actualInvocation, verifiedViews: matching ? found.length : 0, activePath: matching ? found[0].path : null,
-        statusMessage: item.error || (missing ? '部分会话未查到此 Skill，无法确认调用状态' : foreign ? `/${item.name} 当前使用另一份 Skill：${foreign.path || foreign.provider}` : !applied ? '开关状态尚未在所有会话中生效，请重新切换' : '') }
+        statusMessage: item.error || (!matching && !foreign ? '当前管理视图未查到此 Skill，无法确认调用状态' : foreign ? `/${item.name} 当前使用另一份 Skill：${foreign.path || foreign.provider}` : !applied ? '开关状态尚未在所有会话中生效，请重新切换' : '') }
     })
   }
   async function toggle(id, enabled) {
@@ -289,6 +307,12 @@ export function createSkillsManager(root) {
   }
   function attachAgents(ctx, createScope = null) {
     createPolicyScope = createScope
+    // Every per-agent registration is best effort: one agent whose context
+    // lacks a skills service (or already holds this provider name) must not
+    // abort the loop and leave the remaining agents unbound.
+    function guard(what, run) {
+      try { return run() } catch (error) { ctx.logger?.warn?.(`[universal-plugin-hub] ${what} skipped: ${error.message}`); return null }
+    }
     const bind = (agent) => {
       if (agentViews.has(agent)) return
       // A preset's filesystem provider shadows the global layer regardless of
@@ -298,15 +322,18 @@ export function createSkillsManager(root) {
       const service = serviceFor()
       if (service !== registry && !presetProviders.has(service)) {
         let invalidatePreset
-        const dispose = service.registerProvider(control => { invalidatePreset = control.invalidate; return { ...disabledProvider(), async list(options = {}) {
+        const dispose = guard('preset provider', () => service.registerProvider(control => { invalidatePreset = control.invalidate; return { ...disabledProvider(), async list(options = {}) {
           await ensureScope(options.scope, service)
           return disabledProvider().list(options)
-        } } })
-        presetProviders.set(service, { dispose, invalidate: invalidatePreset, users: 0 })
+        } } }))
+        // A provider that failed to register has no invalidation hook, so it
+        // must not be tracked: doing so would hand out a users count for a
+        // registration that does not exist.
+        if (dispose) presetProviders.set(service, { dispose, invalidate: invalidatePreset, users: 0 })
       }
-      if (service !== registry) presetProviders.get(service).users++
-      const dispose = createScope ? (() => { const policy = scopePolicies.get(agent); scopePolicies.delete(agent); return policy?.dispose() })
-        : agent.ctx.skills.registerProvider(() => disabledProvider())
+      if (service !== registry && presetProviders.has(service)) presetProviders.get(service).users++
+      const dispose = (createScope ? (() => { const policy = scopePolicies.get(agent); scopePolicies.delete(agent); return policy?.dispose() })
+        : guard('agent provider', () => agent.ctx.skills.registerProvider(() => disabledProvider()))) || (() => {})
       agentViews.set(agent, { dispose: () => {
         const pending = dispose()
         const preset = presetProviders.get(service)

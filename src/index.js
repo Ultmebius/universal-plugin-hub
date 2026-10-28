@@ -24,9 +24,17 @@ export function apply(ctx) {
   })
   ctx.inject(['skills', 'agents'], (hostCtx) => {
     // Borrow DSH's own scope module so its opaque scope identity is shared.
-    const main = findDshMainNodeModules()
-    if (!main) throw new Error('无法定位 DSH 原生 Skills 作用域服务')
-    const { createScope } = createRequire(join(main, '.universal-plugin-hub-resolve.cjs'))('@deepseek-ai/dsh-scope')
+    // A profile that cannot resolve it only loses the *scoped* half of the
+    // skill switches; throwing here would take the whole plugin down with it,
+    // so degrade to the global provider and say so once.
+    let createScope = null
+    try {
+      const main = findDshMainNodeModules()
+      if (!main) throw new Error('无法定位 DSH 原生 node_modules')
+      createScope = createRequire(join(main, '.universal-plugin-hub-resolve.cjs'))('@deepseek-ai/dsh-scope').createScope
+    } catch (err) {
+      ctx.logger?.warn?.(`[universal-plugin-hub] scoped skill switches unavailable: ${err.message}`)
+    }
     hostCtx.effect(() => skills.attachAgents(hostCtx, createScope), 'universal-plugin-hub: scoped skill switches')
   })
   // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
