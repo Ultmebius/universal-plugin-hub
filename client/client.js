@@ -722,9 +722,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	width: 100%;
 	/* Reserve the scrollbar track on every list surface. Centered columns are
 	   laid out inside the content box, so without this a source whose list is
-	   short enough to scrollbar-free sits a scrollbar-width to the right of the
-	   others and every tab switch shifts the whole grid sideways. */
-	scrollbar-gutter: stable;
+	   short enough to be scrollbar-free sits a scrollbar-width to the right of
+	   the others and every tab switch shifts the whole grid sideways.
+	   "both-edges" is required, not cosmetic: a one-sided stable gutter is
+	   taken from the inline-end edge only, which pushes the centered columns
+	   half a scrollbar left of the top bar's 1000px baseline (and of the 1010px
+	   rule under it). Reserving both edges keeps the content box symmetric and
+	   the columns back on that same axis. */
+	scrollbar-gutter: stable both-edges;
 }
 .cpm-grid {
 	display: grid;
@@ -908,14 +913,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: #3f3f46;
 	border-color: rgba(255, 255, 255, 0.3);
 }
-/* Pin the row's trailing control to the right edge of its card. The pill and
-   the switch have different intrinsic widths, so the text column would
-   otherwise end short of one and long of the other, putting the description's
-   ellipsis at a different place on each source. Right-aligning both keeps the
-   rows of every source on one column. */
+/* The row's trailing control owns one fixed slot. A two-character pill
+   measures ~43px on its own and the row's switch is 50px, so right-aligning
+   alone still left the description's ellipsis 7px short on plugin rows. Giving
+   both the same width pins every source's text column to one edge. */
 .cpm-card > :last-child {
 	flex: 0 0 auto;
 	margin-left: auto;
+	min-width: 50px;
 }
 .cpm-card-pill-installed {
 	background: #ffffff;
@@ -967,8 +972,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-sizing: border-box;
 	/* Reserve the scrollbar track on every detail surface, so the centered
 	   content column — and the Back link at its left edge — stays put whether
-	   or not the open page happens to overflow. */
-	scrollbar-gutter: stable;
+	   or not the open page happens to overflow. Both edges, so the column keeps
+	   the same axis as the list grid and the top bar rather than sitting half a
+	   scrollbar to the left of them. */
+	scrollbar-gutter: stable both-edges;
 }
 .cpm-detail > * {
 	width: 100%;
@@ -1199,7 +1206,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 	align-items: center;
 	box-sizing: border-box;
-	scrollbar-gutter: stable;
+	scrollbar-gutter: stable both-edges;
 }
 .cpm-manage > * {
 	width: 100%;
@@ -4261,6 +4268,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	let currentScrollTopAnim = null;
+	function stopScrollTopAnim() {
+		if (currentScrollTopAnim) cancelAnimationFrame(currentScrollTopAnim);
+		currentScrollTopAnim = null;
+	}
 	function smoothScrollToTop(container, duration = 280, onUpdate) {
 		if (!container) return;
 		if (currentScrollTopAnim) {
@@ -6412,6 +6423,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const target = pending.type === "restore"
 				? ((SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[activeSourceId]) || 0)
 				: 0;
+			// A scroll-to-top still animating from the source we are leaving
+			// writes this shared container's scrollTop on every frame. It used
+			// to stop itself by detecting that its container had been detached
+			// — but the container now survives a source switch, so it would
+			// keep dragging the new source to the old one's top (and each
+			// intermediate value lands in that source's stored scrollTop).
+			// Cancel it before restoring this source's own position.
+			stopScrollTopAnim();
 			// Capture sourceId so the follow-up rAF can re-validate against
 			// this source's store value instead of a stale closure.
 			appliedScrollTopRef.current = { sourceId: activeSourceId, target };
