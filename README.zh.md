@@ -25,7 +25,7 @@ Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claud
 
 - **浏览多个插件市场**：内置 Claude 官方插件源（`anthropics/claude-plugins-official`），支持添加 Claude 与 Codex 插件市场，以及包含独立插件的 Git 仓库。目录和图标会缓存，再次打开时可以复用。
 - **上传插件和 Skills**：支持上传插件或技能压缩包、单个 `SKILL.md`，也可以通过本地目录和 Git 地址导入；技能集合可以按独立技能解析和导入，插件声明的 MCP 连接器随插件接入。
-- **自动扫描本地 Skills**：读取 `~/.agents/skills` 中的技能，在 **Skills** 标签中集中查看，无需逐个导入。
+- **自动扫描本地 Skills**：默认扫描用户主目录下的 `~/.agents/skills`（Windows：`~\.agents\skills`），在 **Skills** 标签中集中查看，无需逐个导入。
 - **逐个开关本地 Skills**：在列表或详情页启用、停用技能。关闭后，该技能不再出现在 DSH 输入框的 `/` 菜单中，模型也不能调用；重新开启后恢复技能原有的调用设置，文件保留在原处。
 - **管理已安装插件**：安装、更新、启用、停用和卸载插件时，同步处理对应的技能、MCP 连接器、Hooks 与 LSP 注册。
 - **集中管理 MCP 服务器**：添加自己的 MCP 服务器，在同一页面查看手动添加的服务器与插件提供的连接器，配置地址、鉴权和环境变量，展开工具列表，并管理服务器与单个工具的开关。
@@ -42,7 +42,7 @@ Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claud
 
 ![插件详情与 MCP 连接器管理](assets/Plugin-management.png)
 
-**本地 Skills**：自动扫描本地技能，查看说明，并逐个启用或停用。
+**本地 Skills**：自动扫描 `~/.agents/skills` 中的技能，查看说明，并逐个启用或停用。
 
 ![本地 Skills 列表与启用开关](assets/Skills.png)
 

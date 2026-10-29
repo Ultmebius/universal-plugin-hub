@@ -2,7 +2,7 @@
   "name": "universal-plugin-hub",
   "title": "Universal Plugin Hub",
   "displayName": "Universal Plugin Hub",
-  "description": "在 DSH 中使用 Claude Code、Codex 等软件生态的插件，一站式管理插件、Skills 与 MCP。支持添加自己的 Git 插件源、上传插件和 Skills、添加 MCP 服务器，自动扫描并开关本地 Skills，接入插件提供的子代理、MCP、Hooks 与 LSP。",
+  "description": "在 DSH 中使用 Claude Code、Codex 等软件生态的插件，一站式管理插件、Skills 与 MCP。支持添加 Git 插件源和 marketplace、上传插件和 Skills、添加 MCP 服务器，自动扫描并开关本地 Skills，接入插件提供的子代理、MCP、Hooks 与 LSP。",
   "version": "1.0.25",
   "engines": {
     "dsh": ">=0.1.5-rc.1"

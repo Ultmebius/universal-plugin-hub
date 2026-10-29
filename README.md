@@ -25,7 +25,7 @@ After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP,
 
 - **Browse multiple marketplaces**: Start with the official Claude catalog (`anthropics/claude-plugins-official`), then add Claude or Codex marketplaces and Git repositories containing standalone plugins. Catalogs and icons are cached for reuse on return visits.
 - **Upload plugins and skills**: Upload plugin or skill archives and individual `SKILL.md` files, or import from local directories and Git URLs. Skill collections can be parsed into individual skills, and plugin-declared MCP connectors are brought in with their plugins.
-- **Automatically discover local skills**: Skills in `~/.agents/skills` appear in the **Skills** tab without importing them individually.
+- **Automatically discover local skills**: By default, scan `~/.agents/skills` under your home directory (`~\.agents\skills` on Windows) and show the skills in the **Skills** tab without importing them individually.
 - **Toggle individual local skills**: Enable or disable skills from the list or detail page. Disabling a skill removes it from the DSH composer's `/` menu and prevents model invocation. Enabling it again restores its original invocation settings, with its files kept in place.
 - **Manage installed plugins**: Install, update, enable, disable, or uninstall plugins, along with their associated skills, MCP connectors, Hooks, and LSP registrations.
 - **Manage MCP servers together**: Add your own MCP servers and view them alongside plugin connectors. Configure addresses, authentication, and environment variables, inspect tool lists, and control servers and individual tools.
@@ -42,7 +42,7 @@ Plugin cards show descriptions and installation states, with source tabs, search
 
 ![Plugin details and MCP connector management](assets/Plugin-management.png)
 
-**Local skills**: Automatically discover local skills, read their instructions, and enable or disable them individually.
+**Local skills**: Automatically discover skills in `~/.agents/skills`, read their instructions, and enable or disable them individually.
 
 ![Local skills list and enable switches](assets/Skills.png)
 
