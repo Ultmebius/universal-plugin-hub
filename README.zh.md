@@ -34,7 +34,25 @@ Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claud
 
 插件以图标卡片展示，配合来源标签、搜索、筛选和排序，方便查找插件与查看安装状态。界面跟随 DSH 切换浅色和深色主题；插件及工具的悬停预览支持滚动阅读与文字选择，展开的 MCP 工具以状态标签排列。目录和图标缓存让再次浏览时能更快看到内容。
 
-![主界面预览](assets/hero.png)
+**官方插件目录**：浏览 Claude 官方插件，搜索并查看说明，一键安装。
+
+![官方插件目录与插件悬停预览](assets/Plugins-official.png)
+
+**本地 Skills**：自动扫描本地技能，查看说明，并逐个启用或停用。
+
+![本地 Skills 列表与启用开关](assets/Skills.png)
+
+**MCP 管理**：集中查看手动添加的服务器和插件连接器，展开工具说明，管理服务器与工具的开关。
+
+![MCP 服务器、连接器与工具管理](assets/MCP.png)
+
+**插件详情**：查看来源、版本和功能说明，管理插件及其 MCP 连接器。
+
+![插件详情与 MCP 连接器管理](assets/Plugin-management.png)
+
+**添加插件源**：添加自己的 Git 仓库，导入 Claude 或 Codex 插件市场及插件。
+
+![通过 Git 仓库添加插件源](assets/Add-plugin-source.png)
 
 ## 安装
 

@@ -34,7 +34,25 @@ After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP,
 
 Icon cards show plugin descriptions and installation states, with source tabs, search, filters, and sorting to help you find what you need. The interface follows DSH's light and dark themes. Hover previews let you scroll descriptions and select text, while expanded MCP tools appear as compact status pills. Catalog and icon caching help content appear quickly on return visits.
 
-![Overview](assets/hero.png)
+**Official plugin catalog**: Browse official Claude plugins, search and preview descriptions, and install with one click.
+
+![Official plugin catalog and description preview](assets/Plugins-official.png)
+
+**Local skills**: Automatically discover local skills, read their instructions, and enable or disable them individually.
+
+![Local skills list and enable switches](assets/Skills.png)
+
+**MCP management**: View your own servers alongside plugin connectors, inspect tool descriptions, and control servers and individual tools.
+
+![MCP servers, connectors, and tool management](assets/MCP.png)
+
+**Plugin details**: Review a plugin's source, version, and capabilities, and manage the plugin and its MCP connectors.
+
+![Plugin details and MCP connector management](assets/Plugin-management.png)
+
+**Add plugin sources**: Add your own Git repositories to import Claude or Codex marketplaces and plugins.
+
+![Add a plugin source from a Git repository](assets/Add-plugin-source.png)
 
 ## Installation
 

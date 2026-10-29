@@ -1570,6 +1570,37 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
+	.cpm-upload-dialog {
+		display: grid;
+		gap: 20px;
+		padding: 26px 24px 22px;
+		box-sizing: border-box;
+		max-height: calc(100dvh - 32px);
+		overflow-y: auto;
+	}
+	.cpm-upload-dialog .cpm-dialog-title,
+	.cpm-upload-dialog .cpm-field,
+	.cpm-upload-dialog .cpm-dialog-actions { margin: 0; }
+	.cpm-upload-dialog .cpm-dropzone {
+		width: 100%;
+		min-width: 0;
+		margin: 0;
+		padding: 24px 16px;
+		gap: 8px;
+		font: inherit;
+		color: inherit;
+		appearance: none;
+	}
+	.cpm-upload-dialog .cpm-dropzone-sub { line-height: 1.6; }
+	.cpm-upload-dialog .cpm-dropzone-icon { margin-bottom: 4px; }
+	.cpm-upload-dialog .cpm-field { min-width: 0; }
+	.cpm-upload-dialog .cpm-field label { margin-bottom: 8px; }
+	.cpm-upload-dialog .cpm-input { box-sizing: border-box; min-width: 0; }
+	.cpm-upload-dialog .cpm-dialog-actions { gap: 10px; padding-top: 4px; }
+	.cpm-upload-dialog :is(.cpm-dropzone, .cpm-input):focus-visible {
+		outline: 2px solid var(--cpm-accent);
+		outline-offset: 3px;
+	}
 .cpm-dropzone {
 	display: flex;
 	flex-direction: column;
@@ -7524,7 +7555,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				role: "dialog",
 				"aria-modal": "true",
 				"aria-labelledby": "cpm-dialog-title",
-				className: "cpm-dialog-box cpm-source-dialog-box" + (isDragging ? " is-dragging" : ""),
+					className: "cpm-dialog-box cpm-source-dialog-box" + (phase === "upload" ? " cpm-upload-dialog" : "") + (isDragging ? " is-dragging" : ""),
 				style: { position: "relative" },
 				onClick: (e) => e.stopPropagation(),
 				onDragOver: (e) => { e.preventDefault(); setIsDragging(true); },
@@ -7559,15 +7590,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 				phase === "upload" && [
 					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "上传插件 / Skills"),
-					h("div", {
+					h("button", {
 						className: "cpm-dropzone",
+						type: "button",
 						key: "dz",
 						style: { cursor: "pointer" },
 						onClick: () => uploadInputRef.current && uploadInputRef.current.click(),
 					},
-						h("div", { className: "cpm-dropzone-icon" }, h(UploadDropIcon)),
-						h("div", { className: "cpm-dropzone-title" }, "拖入插件 / Skills，或点击上传"),
-						h("div", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件及市场、Skills；.zip / .tgz / .tar.gz / SKILL.md，上限 22MB"),
+						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
+						h("span", { className: "cpm-dropzone-title" }, "拖入插件 / Skills，或点击上传"),
+						h("span", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件、插件市场和 Skills",
+							h("br"), ".zip / .tgz / .tar.gz / SKILL.md · 上限 22MB"),
 					),
 					h("input", {
 						key: "file",
