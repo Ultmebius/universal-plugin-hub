@@ -313,12 +313,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 	align-items: center;
 	gap: 12px;
-	/* 24px inset plus the scrollbar width the grid reserves on each side.
-	   The list below is a scroll container with a symmetric gutter, while this
-	   bar is not scrollable, so it has to match that reserve by hand — without
-	   it the search box stays wider than the columns and its edges sit outside
-	   theirs on any panel too narrow for both to hit their 1000px cap. */
-	padding: 14px 39px 10px 39px;
+	/* 24px inset, matching the list's own padding. The search row's width is
+	   then pinned to the columns' measured span (--cpm-column-span), so it
+	   lines up with them whatever the platform's scrollbar width is — an
+	   arithmetic guess at the gutter kept coming up short. */
+	padding: 14px 24px 10px 24px;
 	background: var(--cpm-bg);
 	width: 100%;
 	box-sizing: border-box;
@@ -335,7 +334,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: flex;
 	align-items: center;
 	width: 100%;
-	max-width: 1000px;
+	/* The measured span of the two list columns, so the search box ends where
+	   they do instead of where an arithmetic guess about the scrollbar says.
+	   Falls back to the shared 1000px baseline before the first measurement. */
+	max-width: var(--cpm-column-span, 1000px);
 }
 .cpm-search {
 	flex: 1;
@@ -5557,6 +5559,37 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const gridRef = useRef(null);
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
+		// How wide the two list columns actually span, including the gap between
+		// them and excluding the scrollbar gutter the list reserves. Measured
+		// from a real card rather than derived from padding plus a guessed
+		// scrollbar width — that sum is what kept leaving the search box longer
+		// than the columns.
+		const [columnSpan, setColumnSpan] = useState(0);
+		useSafeLayoutEffect(() => {
+			const measure = () => {
+				const grid = gridRef.current;
+				if (!grid) return;
+				const cards = Array.from(grid.querySelectorAll(":scope > .cpm-card"));
+				if (!cards.length) return;
+				// The first row defines the span: take the leftmost and rightmost
+				// card edges among the cards sharing the topmost offset. Measuring
+				// only first-card-to-last-card collapses to one column whenever the
+				// list happens to hold a single row, and misses the inter-column
+				// gap when it holds many.
+				const tops = cards.map((card) => card.getBoundingClientRect().top);
+				const top = Math.min(...tops);
+				const row = cards.filter((_, index) => Math.abs(tops[index] - top) < 1)
+					.map((card) => card.getBoundingClientRect());
+				if (!row.length) return;
+				const left = Math.min(...row.map((rect) => rect.left));
+				const right = Math.max(...row.map((rect) => rect.right));
+				const span = Math.round(right - left);
+				setColumnSpan((current) => (current === span ? current : span));
+			};
+			measure();
+			window.addEventListener("resize", measure);
+			return () => window.removeEventListener("resize", measure);
+		}, [activeSourceId, mcpsOpen, filter, rows]);
 		const tabRefs = useRef({});
 		const [tabsMaskClass, setTabsMaskClass] = useState("");
 		const [gridMaskClass, setGridMaskClass] = useState("");
@@ -6738,7 +6771,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		return h("div", { className: "cpm-main" },
 			// Top bar matching Claude official: Row 1 (Full width search) & Row 2 (Tabs on Left + Filter & Sort on Right)
-			h("div", { className: "cpm-topbar" },
+			h("div", { className: "cpm-topbar", style: columnSpan ? { "--cpm-column-span": columnSpan + "px" } : undefined },
 				h("div", { className: "cpm-topbar-row1" },
 					h("div", { className: "cpm-search" },
 						h(IconSearch),

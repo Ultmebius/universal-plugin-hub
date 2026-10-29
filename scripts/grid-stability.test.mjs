@@ -102,8 +102,18 @@ test('the search box spans exactly the grid columns', () => {
   const topbar = client.match(/\.cpm-topbar \{([\s\S]*?)\n\}/)
   assert.ok(topbar, 'top bar rule is missing')
   assert.match(topbar[1], /box-sizing: border-box/)
-  // 24px content inset + 15px of reserved scrollbar per side.
-  assert.match(topbar[1], /padding: 14px 39px 10px 39px;/)
+  assert.match(topbar[1], /padding: 14px 24px 10px 24px;/)
+  // The width must come from the columns' measured span, not from arithmetic
+  // over the padding and a guessed scrollbar width — that sum kept leaving the
+  // search box longer than the columns it was meant to match.
+  const row1 = client.match(/\.cpm-topbar-row1 \{([\s\S]*?)\n\}/)
+  assert.ok(row1, 'search row rule is missing')
+  assert.match(row1[1], /max-width: var\(--cpm-column-span, 1000px\)/)
+  assert.match(client, /--cpm-column-span": columnSpan \+ "px"/)
+  // The span is taken across the first row's outermost card edges, so it keeps
+  // the inter-column gap and does not collapse to a single column.
+  assert.match(client, /Math\.min\(\.\.\.row\.map\(\(rect\) => rect\.left\)\)/)
+  assert.match(client, /Math\.max\(\.\.\.row\.map\(\(rect\) => rect\.right\)\)/)
 })
 
 test('the first card sits tight under the top bar rule', () => {
