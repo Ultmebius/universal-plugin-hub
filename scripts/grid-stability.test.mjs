@@ -110,10 +110,14 @@ test('the search box spans exactly the grid columns', () => {
   assert.ok(row1, 'search row rule is missing')
   assert.match(row1[1], /max-width: var\(--cpm-column-span, 1000px\)/)
   assert.match(client, /--cpm-column-span": columnSpan \+ "px"/)
-  // The span is taken across the first row's outermost card edges, so it keeps
-  // the inter-column gap and does not collapse to a single column.
-  assert.match(client, /Math\.min\(\.\.\.row\.map\(\(rect\) => rect\.left\)\)/)
-  assert.match(client, /Math\.max\(\.\.\.row\.map\(\(rect\) => rect\.right\)\)/)
+  // The measured content box must be clamped to the columns' real ceiling.
+  // Without the clamp a wide panel reports the grid's whole (partly empty)
+  // content box and the search box runs far past the columns.
+  assert.match(client, /const GRID_COLUMNS_MAX = 2 \* 476 \+ 48;/)
+  assert.match(client, /Math\.min\(content, GRID_COLUMNS_MAX\)/)
+  // Both halves of the content box are the grid's own, so its padding and the
+  // reserved gutter are excluded without any guessed scrollbar width.
+  assert.match(client, /grid\.clientWidth - parseFloat\(style\.paddingLeft\) - parseFloat\(style\.paddingRight\)/)
 })
 
 test('the first card sits tight under the top bar rule', () => {

@@ -185,6 +185,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return { pending, start, cancel };
 	}
 	const useSafeLayoutEffect = typeof useLayoutEffect === "function" ? useLayoutEffect : useEffect;
+	// Two 476px columns plus the 48px gap. The grid stops growing here even in
+	// a wider panel; keep it in one place so the search row can match it.
+	const GRID_COLUMNS_MAX = 2 * 476 + 48;
 
 	// ────────────────────────────── Styles ──────────────────────────────
 	const CSS = `
@@ -5559,36 +5562,30 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const gridRef = useRef(null);
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
-		// How wide the two list columns actually span, including the gap between
-		// them and excluding the scrollbar gutter the list reserves. Measured
-		// from a real card rather than derived from padding plus a guessed
-		// scrollbar width — that sum is what kept leaving the search box longer
-		// than the columns.
+		// The width the two list columns actually occupy. `clientWidth` is the
+		// grid's content box — padding and the reserved scrollbar gutter are
+		// already excluded — but on a wide panel that box is wider than the
+		// columns themselves, which stop at two 476px tracks plus their 48px
+		// gap. Clamping to that 1000px is what keeps the search box from being
+		// measured against empty space beside the columns.
 		const [columnSpan, setColumnSpan] = useState(0);
 		useSafeLayoutEffect(() => {
 			const measure = () => {
 				const grid = gridRef.current;
 				if (!grid) return;
-				const cards = Array.from(grid.querySelectorAll(":scope > .cpm-card"));
-				if (!cards.length) return;
-				// The first row defines the span: take the leftmost and rightmost
-				// card edges among the cards sharing the topmost offset. Measuring
-				// only first-card-to-last-card collapses to one column whenever the
-				// list happens to hold a single row, and misses the inter-column
-				// gap when it holds many.
-				const tops = cards.map((card) => card.getBoundingClientRect().top);
-				const top = Math.min(...tops);
-				const row = cards.filter((_, index) => Math.abs(tops[index] - top) < 1)
-					.map((card) => card.getBoundingClientRect());
-				if (!row.length) return;
-				const left = Math.min(...row.map((rect) => rect.left));
-				const right = Math.max(...row.map((rect) => rect.right));
-				const span = Math.round(right - left);
+				const style = getComputedStyle(grid);
+				const content = grid.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+				const span = Math.round(Math.min(content, GRID_COLUMNS_MAX));
+				if (!(span > 0)) return;
 				setColumnSpan((current) => (current === span ? current : span));
 			};
 			measure();
+			// The grid can mount after this effect (it is absent while the MCP
+			// page or a detail page is open), and a source switch swaps its
+			// content, so re-measure on the next frame as well as on resize.
+			const frame = requestAnimationFrame(measure);
 			window.addEventListener("resize", measure);
-			return () => window.removeEventListener("resize", measure);
+			return () => { cancelAnimationFrame(frame); window.removeEventListener("resize", measure); };
 		}, [activeSourceId, mcpsOpen, filter, rows]);
 		const tabRefs = useRef({});
 		const [tabsMaskClass, setTabsMaskClass] = useState("");
