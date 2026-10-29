@@ -23,16 +23,16 @@ After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP,
 
 ### Discover, install, and manage plugins
 
-- **Browse multiple marketplaces**: Start with the official Claude catalog (`anthropics/claude-plugins-official`), then add Claude or Codex marketplaces and Git repositories containing standalone plugins.
+- **Browse multiple marketplaces**: Start with the official Claude catalog (`anthropics/claude-plugins-official`), then add Claude or Codex marketplaces and Git repositories containing standalone plugins. Catalogs and icons are cached for reuse on return visits.
 - **Upload plugins and skills**: Upload plugin or skill archives and individual `SKILL.md` files, or import from local directories and Git URLs. Skill collections can be parsed into individual skills, and plugin-declared MCP connectors are brought in with their plugins.
 - **Automatically discover local skills**: Skills in `~/.agents/skills` appear in the **Skills** tab without importing them individually.
 - **Toggle individual local skills**: Enable or disable skills from the list or detail page. Disabling a skill removes it from the DSH composer's `/` menu and prevents model invocation. Enabling it again restores its original invocation settings, with its files kept in place.
-- **Manage the plugin lifecycle**: Installation, updates, enabling, disabling, and removal also manage the associated skills, MCP connectors, Hooks, and LSP registrations.
+- **Manage installed plugins**: Install, update, enable, disable, or uninstall plugins, along with their associated skills, MCP connectors, Hooks, and LSP registrations.
 - **Manage MCP servers together**: Add your own MCP servers and view them alongside plugin connectors. Configure addresses, authentication, and environment variables, inspect tool lists, and control servers and individual tools.
 
 ## Interface preview
 
-Icon cards show plugin descriptions and installation states, with source tabs, search, filters, and sorting to help you find what you need. The interface follows DSH's light and dark themes. Hover previews let you scroll descriptions and select text, while expanded MCP tools appear as compact status pills. Catalog and icon caching help content appear quickly on return visits.
+Plugin cards show descriptions and installation states, with source tabs, search, filters, and sorting. The interface follows DSH's light and dark themes. Hover previews let you scroll descriptions and select or copy text, while expanded MCP tools appear as compact status pills.
 
 **Official plugin catalog**: Browse official Claude plugins, search and preview descriptions, and install with one click.
 
@@ -57,8 +57,6 @@ Icon cards show plugin descriptions and installation states, with source tabs, s
 ## Installation
 
 Supports DeepSeek Harness Desktop and the CLI web profile.
-
-The declared minimum DSH host version is `0.1.5-rc.1`, the earliest official release candidate containing the desktop app.
 
 ### DeepSeek Harness Desktop
 
