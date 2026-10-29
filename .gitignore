@@ -27,3 +27,59 @@ package-lock.json
 
 # 本地 Claude 配置
 .claude/
+
+# 本地提示词与输出风格
+/DSH-Harness-输出风格.md
+/DSH-极简模式提示词.md
+/DSH-标准模式提示词.md
+/coding-workflow.md
+
+# 本地环境变量与包管理器凭据（可提交不含真实凭据的示例）
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.npmrc
+.netrc
+_netrc
+
+# 私钥、证书容器及授权缓存
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+credentials.json
+credentials.*.json
+auth.json
+tokens.json
+secrets.json
+secrets.*.json
+*.credentials.json
+*.tokens.json
+oauth-credentials/
+.auth/
+.credentials/
+.secrets/
+.ssh/
+.aws/
+.azure/
+
+# 误放入仓库的本地 DSH 数据与配置
+/.dsh/
+/agent-skills/
+/state.json
+/mcp-tools-state.json
+/cordis.yml
+/cordis.local.yml
+
+# 本地备份及发布产物
+/backups/
+*.bak
+*.backup
+*.tgz
+*.zip

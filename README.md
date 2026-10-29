@@ -38,6 +38,10 @@ Icon cards show plugin descriptions and installation states, with source tabs, s
 
 ![Official plugin catalog and description preview](assets/Plugins-official.png)
 
+**Plugin details**: Review a plugin's source, version, and capabilities, and manage the plugin and its MCP connectors.
+
+![Plugin details and MCP connector management](assets/Plugin-management.png)
+
 **Local skills**: Automatically discover local skills, read their instructions, and enable or disable them individually.
 
 ![Local skills list and enable switches](assets/Skills.png)
@@ -45,10 +49,6 @@ Icon cards show plugin descriptions and installation states, with source tabs, s
 **MCP management**: View your own servers alongside plugin connectors, inspect tool descriptions, and control servers and individual tools.
 
 ![MCP servers, connectors, and tool management](assets/MCP.png)
-
-**Plugin details**: Review a plugin's source, version, and capabilities, and manage the plugin and its MCP connectors.
-
-![Plugin details and MCP connector management](assets/Plugin-management.png)
 
 **Add plugin sources**: Add your own Git repositories to import Claude or Codex marketplaces and plugins.
 

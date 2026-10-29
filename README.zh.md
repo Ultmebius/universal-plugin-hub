@@ -38,6 +38,10 @@ Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claud
 
 ![官方插件目录与插件悬停预览](assets/Plugins-official.png)
 
+**插件详情**：查看来源、版本和功能说明，管理插件及其 MCP 连接器。
+
+![插件详情与 MCP 连接器管理](assets/Plugin-management.png)
+
 **本地 Skills**：自动扫描本地技能，查看说明，并逐个启用或停用。
 
 ![本地 Skills 列表与启用开关](assets/Skills.png)
@@ -45,10 +49,6 @@ Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claud
 **MCP 管理**：集中查看手动添加的服务器和插件连接器，展开工具说明，管理服务器与工具的开关。
 
 ![MCP 服务器、连接器与工具管理](assets/MCP.png)
-
-**插件详情**：查看来源、版本和功能说明，管理插件及其 MCP 连接器。
-
-![插件详情与 MCP 连接器管理](assets/Plugin-management.png)
 
 **添加插件源**：添加自己的 Git 仓库，导入 Claude 或 Codex 插件市场及插件。
 
