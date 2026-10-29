@@ -64,36 +64,53 @@ test('the browse list is one grid element that skills and plugins share', () => 
 })
 
 test('a skill row and a plugin row end in the same control slot', () => {
-  // The switch stands in for the manage/install pill, so it must take the
-  // pill's box rather than its own compact 40x22 one.
+  // A row's switch keeps its familiar compact proportions and merely sits
+  // centred inside the pill's 50px slot; scaling the switch itself up to the
+  // pill's box made it read as oversized.
   const toggle = client.match(/\.cpm-card > \.cpm-toggle \{([\s\S]*?)\n\t?\}/)
   assert.ok(toggle, 'card-row switch sizing rule is missing')
-  // Anchored per declaration: a bare /width: 50px/ also matches the sibling
+  // Anchored per declaration: a bare /width: 40px/ also matches the sibling
   // `min-width` line, so shrinking the real width would slip through.
-  assert.match(toggle[1], /(^|\n)\s*width: 50px;/)
-  assert.match(toggle[1], /(^|\n)\s*flex: 0 0 50px;/)
-  assert.match(toggle[1], /(^|\n)\s*height: 25px;/)
+  assert.match(toggle[1], /(^|\n)\s*width: 40px;/)
+  assert.match(toggle[1], /(^|\n)\s*flex: 0 0 40px;/)
+  assert.match(toggle[1], /(^|\n)\s*height: 22px;/)
+  // Centred in the slot, so both sides read as one column of controls.
+  assert.match(toggle[1], /(^|\n)\s*margin-right: 5px;/)
   // The pill's real height comes from its padding; 3px + 12px line box * 1.4
   // + 3px + borders lands on the switch's 25px.
   const pill = client.match(/\.cpm-card-pill \{([\s\S]*?)\n\}/)
   assert.match(pill[1], /padding: 3px 12px/)
-  // Both are pinned to the same right edge, which is what puts every source's
-  // description ellipsis on one column.
-  // Both are pinned to the same right edge and the same width, which is what
-  // puts every source's description ellipsis on one column. Right-aligning
-  // alone still left a ~43px two-character pill narrower than the 50px switch.
+  // Both are pinned to the same right edge and the same slot width, which is
+  // what puts every source's description ellipsis on one column. Right-aligning
+  // alone still left a ~43px two-character pill narrower than the switch.
   const trailing = client.match(/\.cpm-card > :last-child \{([\s\S]*?)\n\}/)
   assert.ok(trailing, 'trailing-control slot rule is missing')
   assert.match(trailing[1], /margin-left: auto/)
   assert.match(trailing[1], /min-width: 50px/)
-  // The detail header keeps the compact knob; only the card row scales up.
+  // The detail header keeps the compact knob too.
   assert.match(client, /\.cpm-skill-identity > \.cpm-toggle/)
-  // The bare rule (detail headers, MCP rows) must keep its compact width; only
-  // the card-row override above widens it.
   const base = client.match(/(?:^|\n)\.cpm-toggle \{([\s\S]*?)\n\}/)
   assert.ok(base)
   assert.match(base[1], /width: 40px/)
   assert.match(base[1], /height: 22px/)
+})
+
+test('the search box spans exactly the grid columns', () => {
+  // The grid reserves a scrollbar gutter on both edges; the top bar is not a
+  // scroll container, so it must reserve the same amount by hand or its search
+  // box runs wider than the columns below it.
+  const topbar = client.match(/\.cpm-topbar \{([\s\S]*?)\n\}/)
+  assert.ok(topbar, 'top bar rule is missing')
+  assert.match(topbar[1], /box-sizing: border-box/)
+  // 24px content inset + 15px of reserved scrollbar per side.
+  assert.match(topbar[1], /padding: 14px 39px 10px 39px;/)
+})
+
+test('the first card sits tight under the top bar rule', () => {
+  // A full 16px inset left the list floating well clear of the 1010px rule.
+  const grid = client.match(/\.cpm-grid, \.cpm-grid-container \{([\s\S]*?)\n\}/)
+  assert.ok(grid, 'list surface rule is missing')
+  assert.match(grid[1], /padding: 10px 24px 28px 24px;/)
 })
 
 test('list surfaces reserve a symmetric scrollbar gutter', () => {

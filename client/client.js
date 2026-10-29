@@ -313,9 +313,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 	align-items: center;
 	gap: 12px;
-	padding: 14px 24px 10px 24px;
+	/* 24px inset plus the scrollbar width the grid reserves on each side.
+	   The list below is a scroll container with a symmetric gutter, while this
+	   bar is not scrollable, so it has to match that reserve by hand — without
+	   it the search box stays wider than the columns and its edges sit outside
+	   theirs on any panel too narrow for both to hit their 1000px cap. */
+	padding: 14px 39px 10px 39px;
 	background: var(--cpm-bg);
 	width: 100%;
+	box-sizing: border-box;
 }
 .cpm-topbar::after {
 	content: "";
@@ -716,7 +722,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-grid, .cpm-grid-container {
 	flex: 1;
 	overflow-y: auto;
-	padding: 16px 24px 28px 24px;
+	/* The top bar's last row already ends ~10px above the 1010px rule, so the
+	   full 16px grid inset left the first card floating well clear of it. */
+	padding: 10px 24px 28px 24px;
 	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
 	box-sizing: border-box;
 	width: 100%;
@@ -1277,22 +1285,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	transition: left .15s;
 }
 .cpm-toggle.on::after { left: 20px; }
-/* In a list row the switch matches the manage/install pill it stands in for:
-   50×25 with a 20px knob, so a skills row and a plugin row end in the same
-   slot. Only the card's own switch scales; detail headers keep 40×22. */
+/* A list row's switch only needs to occupy the same *slot* as the pill it
+   stands in for; blowing the switch itself up to the pill's size made it read
+   as oversized. It keeps its familiar 40x22 proportions and is centred in the
+   50px slot reserved by the trailing-control rule above. */
 .cpm-card > .cpm-toggle {
-	width: 50px;
-	flex: 0 0 50px;
-	min-width: 50px;
-	height: 25px;
+	width: 40px;
+	flex: 0 0 40px;
+	min-width: 40px;
+	height: 22px;
+	/* 50px slot minus the 40px track, split evenly. */
+	margin-left: auto;
+	margin-right: 5px;
 }
-.cpm-card > .cpm-toggle::after {
-	top: 2.5px;
-	left: 2.5px;
-	width: 20px;
-	height: 20px;
-}
-.cpm-card > .cpm-toggle.on::after { left: 27.5px; }
 .cpm-menu { position: relative; }
 .cpm-menu-pop {
 	position: absolute;
