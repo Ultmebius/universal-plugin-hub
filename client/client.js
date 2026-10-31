@@ -1020,12 +1020,30 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 12px;
 	flex-wrap: wrap;
 }
+.cpm-title-group {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex: 1;
+	min-width: 0;
+}
+.cpm-title-group .cpm-card-icon {
+	width: 38px;
+	height: 38px;
+	flex: 0 0 38px;
+	border-radius: 12px;
+}
 .cpm-title {
 	font-size: 22px;
 	font-weight: 700;
 	color: var(--cpm-text);
 	flex: 1;
-	min-width: 180px;
+	min-width: 0;
+	line-height: 1.25;
+	letter-spacing: -0.015em;
+	font-optical-sizing: auto;
+	overflow-wrap: break-word;
+	text-wrap: balance;
 }
 .cpm-btn {
 	height: 32px;
@@ -1107,7 +1125,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-by {
 	color: var(--cpm-muted);
 	font-size: 13px;
-	margin-top: 3px;
+	margin-top: 8px;
 }
 .cpm-desc {
 	color: var(--cpm-text-sub);
@@ -3323,6 +3341,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		} catch {}
 
+		// 5. Check OS/browser media query
+		try {
+			if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+				return true;
+			}
+		} catch {}
+
 		return false;
 	}
 
@@ -4715,6 +4740,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				record: state.plugins.find((p) => p.name === manageFor) || null,
 				state,
 				rows,
+				isDark,
 				refreshState,
 				showToast,
 				initialTab: manageTab,
@@ -6985,6 +7011,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					enabled: state.plugins.find((r) => r.name === currentDetailPlugin.name)?.enabled !== false,
 				},
 				pluginRecord: state.plugins.find((r) => r.name === currentDetailPlugin.name),
+				isDark,
 				containerRef: detailContainerRef,
 				onBack: () => setView({ type: "browse", sourceId: activeSourceId }),
 				onInstall: () => setInstallFor(currentDetailPlugin),
@@ -8341,13 +8368,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Detail View ──────────────────────────────
-	function DetailView({ plugin, pluginRecord, onBack, onInstall, onRemove, onManage, onTogglePlugin, showToast, containerRef }) {
+	function DetailView({ plugin, pluginRecord, isDark, onBack, onInstall, onRemove, onManage, onTogglePlugin, showToast, containerRef }) {
 		const [busy, setBusy] = useState(false);
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [toggling, setToggling] = useState(false);
 			const { detailRef, maskClass: detailMaskClass, updateMask: updateDetailMask } = useDetailScrollMask(plugin?.name, containerRef, plugin);
 
 		if (!plugin) return null;
+		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
 
 		const installed = !!plugin.installed;
 		const isEnabled = (pluginRecord?.enabled !== false && plugin?.enabled !== false);
@@ -8408,7 +8436,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			},
 				h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "Back"),
 				h("div", { className: "cpm-title-row" },
-					h("div", { className: "cpm-title" }, plugin.displayName || plugin.name),
+					h("div", { className: "cpm-title-group" },
+						h(PluginIcon, {
+							plugin: pluginRecord ? {
+								...pluginRecord,
+								...plugin,
+								icons: (plugin?.icons && (plugin.icons.light?.length || plugin.icons.dark?.length)) ? plugin.icons : pluginRecord.icons,
+								author: plugin?.author || plugin?.detail?.author || pluginRecord.author,
+								homepage: plugin?.homepage || plugin?.detail?.homepage || pluginRecord.homepage,
+								description: plugin?.description || plugin?.detail?.description || pluginRecord.description,
+								displayName: plugin?.displayName || plugin?.detail?.displayName || pluginRecord.displayName,
+								source: plugin?.source || pluginRecord.source,
+							} : plugin,
+							isDark: dark,
+							eager: true,
+						}),
+						h("div", { className: "cpm-title" }, plugin.displayName || pluginRecord?.displayName || plugin.name),
+					),
 					plugin.homepage && h("button", {
 						className: "cpm-icon-btn",
 						style: { width: 32, height: 32, padding: 0 },
@@ -8711,7 +8755,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Manage Page ──────────────────────────────
-	function ManagePage({ record, state, rows, refreshState, showToast, onBack, onClose, initialTab, initialConnector }) {
+	function ManagePage({ record, state, rows, isDark, refreshState, showToast, onBack, onClose, initialTab, initialConnector }) {
+		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
 		const [tab, setTab] = useState(initialTab || "skills");
 		const [searchOpen, setSearchOpen] = useState(false);
 		const [tabQuery, setTabQuery] = useState("");
@@ -8850,7 +8895,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		} : null);
 		const oauthFlow = useOauthVerification({
 			form: authDialog,
-			verifyPath: `/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`,
+			verifyPath: `/plugins/${encodeURIComponent(record?.name || "")}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`,
 			onFinished: async (res) => {
 				setAuthDialog((prev) => prev ? { ...prev, testing: false, status: res.ok ? "success" : "error", statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"), lastResult: res } : null);
 				// A successful sign-in is also the moment the connector becomes
@@ -8971,14 +9016,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [marketPlugin, setMarketPlugin] = useState(() => {
 			if (!record) return null;
 			const sourceRows = (rows && rows[record.sourceId]) || [];
-			return sourceRows.find((p) => p.name === record.name) || null;
+			return sourceRows.find((p) => p.name === record.name)
+				|| Object.values(rows || {}).flat().find((p) => p && p.name === record.name)
+				|| null;
 		});
 
 		useEffect(() => {
 			if (!record) return;
 			let alive = true;
 			const sourceRows = (rows && rows[record.sourceId]) || [];
-			const found = sourceRows.find((p) => p.name === record.name);
+			const found = sourceRows.find((p) => p.name === record.name)
+				|| Object.values(rows || {}).flat().find((p) => p && p.name === record.name);
 			if (found) {
 				setMarketPlugin(found);
 			} else {
@@ -9321,7 +9369,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 
 			h("div", { className: "cpm-title-row", style: { marginTop: 8 } },
-				h("div", { className: "cpm-title" }, record.displayName || record.name),
+				h("div", { className: "cpm-title-group" },
+					h(PluginIcon, {
+						plugin: marketPlugin ? {
+							...marketPlugin,
+							...record,
+							icons: (record?.icons && (record.icons.light?.length || record.icons.dark?.length)) ? record.icons : marketPlugin.icons,
+							author: record?.author || marketPlugin.author,
+							homepage: record?.homepage || marketPlugin.homepage,
+							description: record?.description || marketPlugin.description,
+							displayName: record?.displayName || marketPlugin.displayName,
+							source: record?.source || marketPlugin.source,
+						} : record,
+						isDark: dark,
+						eager: true,
+					}),
+					h("div", { className: "cpm-title" }, record.displayName || marketPlugin?.displayName || record.name),
+				),
 				h("button", {
 					className: "cpm-btn cpm-btn-secondary",
 					disabled: updating || toggling || busy || !hasUpdate,
@@ -10131,21 +10195,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return h(ErrorBoundary, null, h(MarketApp, { ctx }));
 	}
 
-	function SidebarIcon({ size = 18 }) {
+	// Filled squircle + U cut-out, one evenodd path: the body is a Lamé superellipse
+	// (exponent 3.1) so curvature falls to zero at the edge midpoints — no corner
+	// straight-to-arc seam. The U is an elliptical bowl, 0.55 × 0.252 of the body
+	// side with 0.115-thick arms and round caps, centred 0.255 down the body.
+	const SIDEBAR_ICON_PATH = "M21.75 12C21.75 15.81 21.67 16.03 21.2 17.46C20.56 19.36 19.36 20.56 17.46 21.2C16.03 21.67 15.81 21.75 12 21.75C8.19 21.75 7.97 21.67 6.54 21.2C4.64 20.56 3.44 19.36 2.8 17.46C2.33 16.03 2.25 15.81 2.25 12C2.25 8.19 2.33 7.97 2.8 6.54C3.44 4.64 4.64 3.44 6.54 2.8C7.97 2.33 8.19 2.25 12 2.25C15.81 2.25 16.03 2.33 17.46 2.8C19.36 3.44 20.56 4.64 21.2 6.54C21.67 7.97 21.75 8.19 21.75 12ZM6.64 5.09A5.36 4.06 0 0 0 17.36 5.09A1.12 0.85 0 0 0 15.12 5.09A3.12 2.37 0 0 1 8.88 5.09A1.12 0.85 0 0 0 6.64 5.09Z";
+
+	function SidebarIcon({ size = 18 } = {}) {
 		return h("svg", {
 			width: size,
 			height: size,
 			viewBox: "0 0 24 24",
-			fill: "none",
-			stroke: "currentColor",
-			strokeWidth: 2,
-			strokeLinecap: "round",
-			strokeLinejoin: "round",
+			fill: "currentColor",
+			fillRule: "evenodd",
 			style: { display: "block" },
+			"aria-hidden": "true",
 		},
-			h("path", { d: "M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" }),
-			h("line", { x1: "3", y1: "6", x2: "21", y2: "6" }),
-			h("path", { d: "M16 10a4 4 0 0 1-8 0" })
+			h("path", { d: SIDEBAR_ICON_PATH })
 		);
 	}
 
@@ -10158,7 +10224,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			name: "sidebar.panellist",
 			id: "universal-plugin-hub",
 			order: 5,
-			label: () => "Agent 插件市场",
+			label: () => "Plugin Hub",
 		}, SidebarIcon));
 
 		ctx.slots.inject("main", () => ctx.slots.register({
