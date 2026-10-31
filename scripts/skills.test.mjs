@@ -226,3 +226,53 @@ test('disabled skills override preset scopes for existing and future agents', as
     rmSync(fixture, { recursive: true, force: true })
   }
 })
+
+test('a duplicated metadata block is stripped from the rendered body', () => {
+  // Template copies that were never removed put a second `--- name: … ---`
+  // above the real one. Only the first block was cut, so the copy rendered as
+  // a stray table at the top of the detail page. The body now starts after the
+  // last leading block, and a `---` rule further down stays content.
+  const root = mkdtempSync(join(tmpdir(), 'hub-skills-fm-'))
+  try {
+    const doubled = join(root, 'doubled', 'SKILL.md')
+    write(doubled, [
+      '---',
+      'name: "doubled-template"',
+      'description: "Header that was left behind"',
+      '---',
+      '',
+      '---',
+      'name: doubled',
+      'description: Real description',
+      '---',
+      '',
+      '# Doubled',
+      '',
+      'Body text.',
+      '',
+      '---',
+      '',
+      '| Intent | Skill |',
+      '| --- | --- |',
+      '| Offer | salary |',
+      '',
+    ].join('\n'))
+    // The card is named by the real block's `name`; the leftover template
+    // header above it must not decide the entry's identity either.
+    const found = discoverSkills(root)[0]
+    assert.equal(found.error, '')
+    assert.equal(found.description, 'Real description')
+    assert.equal(found.content.trimStart().startsWith('---'), false)
+    assert.equal(found.content.trimStart().startsWith('# Doubled'), true)
+    // The table below the page's own rule survives untouched.
+    assert.match(found.content, /\|\s*Intent\s*\|\s*Skill\s*\|/)
+    // A CRLF file takes the same path.
+    const crlf = join(root, 'crlf', 'SKILL.md')
+    write(crlf, '---\r\nname: "old"\r\ndescription: "old"\r\n---\r\n\r\n---\r\nname: crlf\r\ndescription: CRLF body\r\n---\r\n\r\n# CRLF\r\n')
+    const line = discoverSkills(root).find(item => item.name === 'crlf')
+    assert.equal(line.description, 'CRLF body')
+    assert.equal(line.content.trimStart().startsWith('# CRLF'), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

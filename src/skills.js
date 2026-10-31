@@ -31,17 +31,49 @@ function policyValue(value, fallback) {
   if (['false', 'no', 'off', '0'].includes(normalized)) return false
   throw new Error('调用策略必须是布尔值')
 }
+function parseYamlObject(source) {
+  try {
+    const value = parseYaml(source)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined
+  } catch { return undefined }
+}
+// Some SKILL.md files carry the metadata block twice: a template header that
+// was never removed sits above the real one. Only the first block was read and
+// cut, so the copy rendered as a `--- name: … ---` table at the top of the
+// detail page — and the card took the template's name. The body starts after
+// the last leading block instead; a `---` rule further down is page content.
+function splitFrontmatter(raw) {
+  // Both ends of a block pin the same line terminator: with `\r?` on only one
+  // side, an LF file matches a range running from line 1's `---` to line 2's
+  // closing one plus its leading `\r`, and the leftover `\n` throws the next
+  // round off by a line — the second copy then never matched.
+  const block = /^---[ \t]*(\r?\n)([\s\S]*?)\1---[ \t]*\1/
+  // The blank line a copy sits under is skipped with it, so the check below
+  // lands on the next block instead of stopping at the gap.
+  const gap = /^(?:[ \t]*\r?\n)*/
+  let yaml = '', end = 0
+  while (end < raw.length) {
+    const skip = raw.slice(end).match(gap)[0].length
+    const next = raw.slice(end + skip).match(block)
+    // Only consecutive metadata counts. A block further down sits under page
+    // content, where it is a horizontal rule and a table, not a header.
+    if (!next || parseYamlObject(next[2]) === undefined) break
+    yaml = next[2]
+    end += skip + next[0].length
+  }
+  return yaml ? { yaml, body: raw.slice(end) } : null
+}
 function readSkill(file, root, isNested) {
   let raw = '', meta = {}, content = '', error = ''
   let invocation = { modelInvocable: true, userInvocable: true }
   try {
     if (statSync(file).size > MAX_FILE) throw new Error('SKILL.md 文件过大')
     raw = readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
-    const match = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/)
-    if (!match) throw new Error('缺少完整的 YAML 元数据')
-    meta = parseYaml(match[1]) || {}
+    const parsed = splitFrontmatter(raw)
+    if (!parsed) throw new Error('缺少完整的 YAML 元数据')
+    meta = parseYaml(parsed.yaml) || {}
     if (typeof meta !== 'object' || Array.isArray(meta)) throw new Error('YAML 元数据必须是对象')
-    content = raw.slice(match[0].length)
+    content = parsed.body
     if (typeof meta.name !== 'string' || !NAME.test(meta.name)) throw new Error('名称不符合 DSH 的小写连字符格式')
     if (typeof meta.description !== 'string' || !meta.description.trim()) throw new Error('缺少 description')
     invocation = { modelInvocable: !policyValue(meta['disable-model-invocation'], false), userInvocable: policyValue(meta['user-invocable'], true) }

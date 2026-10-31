@@ -185,14 +185,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return { pending, start, cancel };
 	}
 	const useSafeLayoutEffect = typeof useLayoutEffect === "function" ? useLayoutEffect : useEffect;
-	// Two 476px columns plus the 48px gap. The grid stops growing here even in
-	// a wider panel; keep it in one place so the search row can match it.
-	const GRID_COLUMNS_MAX = 2 * 476 + 48;
 
 	// ────────────────────────────── Styles ──────────────────────────────
 	const CSS = `
 /* ────────────────────────────── Light Theme (Default) ────────────────────────────── */
 .cpm-root {
+	/* A damped spring (damping 0.62, ~8.4% overshoot) sampled into linear().
+	   cubic-bezier() is structurally monotonic and cannot reproduce a settle,
+	   so the knob would just ease across and stop dead. */
+	--cpm-spring: linear(0 0%, 0.049 2.9%, 0.1685 5.9%, 0.3235 8.8%, 0.4877 11.8%, 0.6428 14.7%, 0.7778 17.6%, 0.8871 20.6%, 0.9694 23.5%, 1.0265 26.5%, 1.0617 29.4%, 1.0792 32.4%, 1.0835 35.3%, 1.0787 38.2%, 1.0683 41.2%, 1.0551 44.1%, 1.0414 47.1%, 1.0286 50%, 1.0176 52.9%, 1.0086 55.9%, 1.002 58.8%, 0.9974 61.8%, 0.9946 64.7%, 0.9933 67.6%, 0.993 70.6%, 0.9935 73.5%, 0.9944 76.5%, 0.9955 79.4%, 0.9966 82.4%, 0.9977 85.3%, 0.9986 88.2%, 0.9993 91.2%, 0.9999 94.1%, 1 100%);
+	/* One width baseline for the whole list area: two equal columns and the
+	   gutter between them. 2 × 464 + 72 = 1000. The column size derives from
+	   the pair, so widening the gutter narrows both sides by exactly the same
+	   amount and the bar, the rule and the columns stay on one span. */
+	--cpm-grid-width: 1000px;
+	--cpm-grid-gap: 72px;
+	--cpm-grid-col: calc((var(--cpm-grid-width) - var(--cpm-grid-gap)) / 2);
 	--cpm-bg: transparent;
 	--cpm-main-bg: transparent;
 	--cpm-card-bg: transparent;
@@ -224,8 +232,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-icon-btn-border: rgba(0, 0, 0, 0.12);
 	--cpm-icon-btn-hover: rgba(0, 0, 0, 0.05);
 	--cpm-accent: #2563eb;
-	--cpm-toggle-off: #d4d4d8;
+	--cpm-toggle-off: rgba(0, 0, 0, 0.06);
+	--cpm-toggle-off-border: rgba(0, 0, 0, 0.14);
+	--cpm-toggle-knob: #ffffff;
+	/* Two stops: a tight contact shadow plus a soft one, which is what makes
+	   the knob read as lifted off the track rather than pasted onto it. */
+	--cpm-toggle-knob-shadow: 0 1px 4px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.18);
 	--cpm-toggle-on: #2563eb;
+	--cpm-toggle-on-border: #2563eb;
 	--cpm-modal-bg: #ffffff;
 	--cpm-modal-border: rgba(0, 0, 0, 0.12);
 	--cpm-shadow: 0 10px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -279,8 +293,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-icon-btn-border: rgba(255, 255, 255, 0.14);
 	--cpm-icon-btn-hover: rgba(255, 255, 255, 0.12);
 	--cpm-accent: #3b82f6;
-	--cpm-toggle-off: #3f3f46;
+	--cpm-toggle-off: rgba(255, 255, 255, 0.08);
+	--cpm-toggle-off-border: rgba(255, 255, 255, 0.16);
+	--cpm-toggle-knob: #f4f4f5;
+	/* Measured off the mockup: the knob sits on a ~3px soft falloff plus a
+	   tight contact line. Without it the knob reads as a flat sticker. */
+	--cpm-toggle-knob-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.35);
 	--cpm-toggle-on: #2563eb;
+	--cpm-toggle-on-border: #2563eb;
 	--cpm-modal-bg: #373739;
 	--cpm-modal-border: rgba(255, 255, 255, 0.14);
 	--cpm-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
@@ -316,10 +336,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 	align-items: center;
 	gap: 12px;
-	/* 24px inset, matching the list's own padding. The search row's width is
-	   then pinned to the columns' measured span (--cpm-column-span), so it
-	   lines up with them whatever the platform's scrollbar width is — an
-	   arithmetic guess at the gutter kept coming up short. */
+	/* 24px inset, matching the list's own padding. The bar is not a scroll
+	   container, so it carries no scrollbar reserve of its own; the list's
+	   symmetric gutter below keeps the two on one axis instead. */
 	padding: 14px 24px 10px 24px;
 	background: var(--cpm-bg);
 	width: 100%;
@@ -329,7 +348,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	content: "";
 	display: block;
 	width: 100%;
-	max-width: 1010px;
+	/* The rule runs 10px past the content span, 5px on each side, as before. */
+	max-width: calc(var(--cpm-grid-width) + 10px);
 	border-bottom: 1px solid var(--cpm-border);
 	margin-top: 2px;
 }
@@ -337,10 +357,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: flex;
 	align-items: center;
 	width: 100%;
-	/* The measured span of the two list columns, so the search box ends where
-	   they do instead of where an arithmetic guess about the scrollbar says.
-	   Falls back to the shared 1000px baseline before the first measurement. */
-	max-width: var(--cpm-column-span, 1000px);
+	/* The same span the columns occupy below, read from the one baseline. */
+	max-width: var(--cpm-grid-width);
 }
 .cpm-search {
 	flex: 1;
@@ -378,7 +396,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: space-between;
 	gap: 10px;
 	width: 100%;
-	max-width: 1000px;
+	max-width: var(--cpm-grid-width);
 	position: relative;
 	z-index: 10;
 }
@@ -727,7 +745,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-grid, .cpm-grid-container {
 	flex: 1;
 	overflow-y: auto;
-	/* The top bar's last row already ends ~10px above the 1010px rule, so the
+	/* The top bar's last row already ends ~10px above the rule under it, so the
 	   full 16px grid inset left the first card floating well clear of it. */
 	padding: 10px 24px 28px 24px;
 	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
@@ -746,9 +764,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 476px));
+	grid-template-columns: repeat(2, minmax(0, var(--cpm-grid-col)));
 	justify-content: center;
-	gap: 10px 48px;
+	gap: 10px var(--cpm-grid-gap);
 	align-content: start;
 	contain: content;
 }
@@ -761,13 +779,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-grid-installed {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 476px));
+	grid-template-columns: repeat(2, minmax(0, var(--cpm-grid-col)));
 	justify-content: center;
-	gap: 10px 48px;
+	gap: 10px var(--cpm-grid-gap);
 	align-content: start;
 }
 .cpm-installed-group {
-	max-width: 1000px;
+	max-width: var(--cpm-grid-width);
 	margin: 0 auto 22px auto;
 }
 .cpm-installed-group:last-child {
@@ -917,7 +935,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border-color: rgba(0, 0, 0, 0.25);
 }
 .cpm-dark .cpm-card-pill {
-	background: #27272a;
+	/* The mockup's pill fill, measured at rgb(42,42,45) — a touch lighter
+	   than the zinc-800 it used, so the button reads as a raised chip rather
+	   than a hole in the panel. */
+	background: rgb(42, 42, 45);
 	border: 1px solid rgba(255, 255, 255, 0.15);
 	color: #f4f4f5;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -927,9 +948,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border-color: rgba(255, 255, 255, 0.3);
 }
 /* The row's trailing control owns one fixed slot. A two-character pill
-   measures ~43px on its own and the row's switch is 50px, so right-aligning
-   alone still left the description's ellipsis 7px short on plugin rows. Giving
-   both the same width pins every source's text column to one edge. */
+   measures ~43px on its own, so every row takes that same width and pins every
+   source's text column to one edge. The switch below reads this width. */
 .cpm-card > :last-child {
 	flex: 0 0 auto;
 	margin-left: auto;
@@ -941,7 +961,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: #059669;
 }
 .cpm-dark .cpm-card-pill-installed {
-	background: #27272a;
+	background: rgb(42, 42, 45);
 	border-color: rgba(16, 185, 129, 0.4);
 	color: #34d399;
 }
@@ -992,7 +1012,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-detail > * {
 	width: 100%;
-	max-width: 1000px;
+	max-width: var(--cpm-grid-width);
 }
 .cpm-detail.mask-bottom {
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
@@ -1241,7 +1261,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-manage > * {
 	width: 100%;
-	max-width: 1000px;
+	max-width: var(--cpm-grid-width);
 }
 .cpm-manage.mask-bottom {
 	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 60px), rgba(0,0,0,0.98) calc(100% - 50px), rgba(0,0,0,0.92) calc(100% - 40px), rgba(0,0,0,0.76) calc(100% - 30px), rgba(0,0,0,0.52) calc(100% - 20px), rgba(0,0,0,0.28) calc(100% - 12px), rgba(0,0,0,0.12) calc(100% - 6px), rgba(0,0,0,0.03) calc(100% - 2px), transparent 100%);
@@ -1280,46 +1300,111 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-meta .v a { color: var(--cpm-accent); text-decoration: none; }
 .cpm-skill-warning { color: #c26a24; font-size: 13px; }
 .cpm-card-open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* The switch geometry and motion come from one place. Track 40x22 with a 16px
+   knob at 2px inset; the row variant below re-states the same ratios at the
+   pill's size.
+
+   Motion is a damped spring sampled into linear(): a cubic-bezier is
+   structurally monotonic, so it can overshoot once but cannot settle the way
+   real spring physics does. The knob travels on the translate property rather
+   than animating left, so the browser keeps the whole move on the compositor
+   instead of re-laying-out the track on every frame. */
 .cpm-toggle {
+	/* Geometry, expressed as the mockup's ratios rather than loose numbers:
+	   a 36px track, a 25px knob and a 5.5px inset -> the knob is 69% of the
+	   track with the gap split evenly. An 18/24 knob (75%) with a 3px inset
+	   read cramped next to it, which is most of what made the panel version
+	   look like a cut-down copy. */
+	--sw-w: 40px;
+	--sw-h: 22px;
+	--sw-knob: calc(var(--sw-h) * 0.7);
+	--sw-inset: calc((var(--sw-h) - var(--sw-knob)) / 2);
 	position: relative;
-	width: 40px;
-	flex: 0 0 40px;
-	min-width: 40px;
-	height: 22px;
+	width: var(--sw-w);
+	flex: 0 0 var(--sw-w);
+	min-width: var(--sw-w);
+	max-width: var(--sw-w);
+	/* Pinned on both axes: as a grid/flex child, auto sizing let the host's
+	   font metrics stretch the box (one surface rendered it 81px tall in a
+	   66px track). */
+	height: var(--sw-h);
+	max-height: var(--sw-h);
+	align-self: center;
 	padding: 0;
 	box-sizing: border-box;
-	border-radius: 999px;
-	background: var(--cpm-muted);
+	border-radius: 9999px;
+	background: var(--cpm-toggle-off);
+	/* The hairline is an inset box-shadow, not a border and not an outline.
+	   A border pushes the box unless border-box survives a host reset; an
+	   outline renders with visibly worse corner antialiasing than a shadow
+	   and cannot sit inside a rounded edge cleanly. An inset shadow paints
+	   inside the element's own box, follows border-radius, and costs the
+	   layout nothing. */
 	border: none;
+	box-shadow: inset 0 0 0 1px var(--cpm-toggle-off-border);
+	appearance: none;
+	-webkit-appearance: none;
 	cursor: pointer;
-	transition: background .15s;
+	transition: background-color .28s ease, box-shadow .28s ease;
 }
-.cpm-toggle.on { background: var(--cpm-toggle-on); }
-.cpm-toggle:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 3px; }
+.cpm-toggle.on {
+	background: var(--cpm-toggle-on);
+	box-shadow: inset 0 0 0 1px var(--cpm-toggle-on-border);
+}
+.cpm-toggle:focus-visible {
+	box-shadow: inset 0 0 0 1px var(--cpm-toggle-off-border), 0 0 0 2px var(--cpm-toggle-on);
+}
+/* The knob.
+ *
+ * Its silhouette comes from border-radius. In the host a radius declaration
+ * was being clamped (a 27px knob painted with a ~3px radius), and clip-path
+ * was the workaround — but clip-path clips the element's own box-shadow too,
+ * which silently deleted the lift under the knob that makes the mockup read
+ * as a physical control. The radius is kept here (Browsers honour it in every
+ * panel surface now that the switch is out of the host's generic input rules)
+ * so the drop shadow survives.
+ */
 .cpm-toggle::after {
 	content: "";
 	position: absolute;
-	top: 2px;
-	left: 2px;
-	width: 18px;
-	height: 18px;
+	/* Centred on the track's own axis. A bare top:50% would put the knob's TOP
+	   edge on the axis; the half-knob correction has to live in the same
+	   property. */
+	top: calc(50% - var(--sw-knob) / 2);
+	left: var(--sw-inset);
+	width: var(--sw-knob);
+	height: var(--sw-knob);
 	border-radius: 50%;
-	background: #fff;
-	transition: left .15s;
+	background: var(--cpm-toggle-knob);
+	/* Two stops, the same construction as the mockup: a tight contact shadow
+	   under the knob plus a soft ambient one. This is the detail that reads
+	   as "lifted", and it is why the knob must not be clipped. */
+	box-shadow: var(--cpm-toggle-knob-shadow);
+	translate: 0 0;
+	transition-property: translate;
+	transition-duration: .44s;
+	transition-timing-function: var(--cpm-spring);
 }
-.cpm-toggle.on::after { left: 20px; }
-/* A list row's switch only needs to occupy the same *slot* as the pill it
-   stands in for; blowing the switch itself up to the pill's size made it read
-   as oversized. It keeps its familiar 40x22 proportions and is centred in the
-   50px slot reserved by the trailing-control rule above. */
+/* Travel is pixels against the track's declared width.
+ *
+ * Never a percentage: in the translate property a percentage resolves against
+ * the element's OWN width, not the containing block, so calc(100% - ...)
+ * collapsed to a negative number and threw the knob out of the track. */
+.cpm-toggle.on::after {
+	translate: calc(var(--sw-w) - var(--sw-knob) - var(--sw-inset) * 2) 0;
+}
+/* A list row's switch restates the mockup's ratios at the pill's size: the
+   pill is 24px tall, so the track is 24 and the knob 70% of it. The same
+   trade at every size is what makes it read as one family with the
+   manage/install button instead of a heavier block beside it. */
 .cpm-card > .cpm-toggle {
-	width: 40px;
-	flex: 0 0 40px;
-	min-width: 40px;
-	height: 22px;
-	/* 50px slot minus the 40px track, split evenly. */
+	--sw-w: 48px;
+	--sw-h: 24px;
+	width: var(--sw-w);
+	flex: 0 0 var(--sw-w);
+	min-width: 0;
+	height: var(--sw-h);
 	margin-left: auto;
-	margin-right: 5px;
 }
 .cpm-menu { position: relative; }
 .cpm-menu-pop {
@@ -1555,7 +1640,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 13.5px;
 	outline: none;
 }
-.cpm-input:focus { border-color: var(--cpm-accent); }
+/* Focus is one ring, drawn once: the border turns accent and a single soft
+   halo sits just outside it. The accent ring used to be added on top of a
+   default focus outline, which read as two concentric blue donuts around the
+   field. The halo is translucent rather than a flat second blue line so the
+   panel shows through it. */
+.cpm-input:focus {
+	border-color: var(--cpm-accent);
+	outline: none;
+	box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+.cpm-dark .cpm-input:focus {
+	border-color: var(--cpm-accent);
+	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
+}
 .cpm-check {
 	display: flex;
 	align-items: center;
@@ -1615,7 +1713,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	.cpm-upload-dialog .cpm-field label { margin-bottom: 8px; }
 	.cpm-upload-dialog .cpm-input { box-sizing: border-box; min-width: 0; }
 	.cpm-upload-dialog .cpm-dialog-actions { gap: 10px; padding-top: 4px; }
-	.cpm-upload-dialog :is(.cpm-dropzone, .cpm-input):focus-visible {
+	/* The dropzone is the only control here that needs an outline of its own —
+	   it has no border to light up. The text field's focus is the .cpm-input
+	   ring above; giving it this outline too drew a second, wider blue loop
+	   around the same field. */
+	.cpm-upload-dialog .cpm-dropzone:focus-visible {
 		outline: 2px solid var(--cpm-accent);
 		outline-offset: 3px;
 	}
@@ -1881,6 +1983,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-source-custom-input:focus {
 	border-color: var(--cpm-accent, #3b82f6);
+	outline: none;
 	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 .cpm-radio {
@@ -2254,6 +2357,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 @media (prefers-reduced-motion: reduce) {
 	.cpm-oauth-pending { animation: none; }
+	/* The spring is decoration; the state change is the message. A user who
+	   asked for less motion gets the knob in place immediately. */
+	.cpm-toggle, .cpm-toggle::after {
+		transition-duration: .01s;
+		transition-timing-function: linear;
+	}
 }
 
 /* Custom Dropdown Styles */
@@ -3014,19 +3123,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-skill-header { container-type: inline-size; container-name: cpm-skill-header; padding: .75rem 0 1.5rem; border-bottom: 1px solid var(--cpm-border); }
 .cpm-skill-identity { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1rem; }
 .cpm-skill-identity > .cpm-toggle { grid-column: 2; grid-row: 1; justify-self: end; }
-.cpm-skill-identity > .cpm-card-icon { width: 3.5rem; height: 3.5rem; border-radius: .875rem; }
+/* The header reads as a title block, not a display headline: the icon and
+   title step down one size from the old 56px/32px lockup, and the body below
+   keeps the same optical ratio to it. Tracking tightens as the type grows, so
+   the smaller title takes slightly less negative tracking than a hero would. */
+.cpm-skill-identity > .cpm-card-icon { width: 2.75rem; height: 2.75rem; border-radius: .75rem; }
 .cpm-skill-title {
 	grid-column: 1 / -1; grid-row: 2; min-width: 0; margin: 0; color: var(--cpm-text);
-	font-size: clamp(1.5rem, 1.15rem + 1.2vw, 2rem); font-weight: 650;
-	line-height: 1.2; letter-spacing: -.025em; overflow-wrap: anywhere; text-wrap: balance;
+	font-size: clamp(1.25rem, 1.05rem + .7vw, 1.625rem); font-weight: 650;
+	line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; text-wrap: balance;
 }
 @container cpm-skill-header (min-width: 28rem) {
 	.cpm-skill-identity { grid-template-columns: auto minmax(0, 1fr) auto; }
 	.cpm-skill-title, .cpm-skill-identity > .cpm-toggle { grid-column: auto; grid-row: auto; }
 }
 .cpm-skill-summary {
-	margin: 1.25rem 0 0; color: var(--cpm-text-sub); font-size: .9375rem;
-	line-height: 1.8; overflow-wrap: anywhere; text-wrap: pretty;
+	margin: 1rem 0 0; color: var(--cpm-text-sub); font-size: .875rem;
+	line-height: 1.75; overflow-wrap: anywhere; text-wrap: pretty;
 }
 .cpm-skill-location {
 	display: flex; align-items: center; gap: .625rem; margin-top: 1.125rem;
@@ -3036,28 +3149,28 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-skill-location [data-path-label] { min-width: 0; max-width: 100%; font-family: var(--cpm-mono, ui-monospace, monospace); user-select: text; }
 .cpm-skill-content { padding-top: 2rem; min-width: 0; }
 .cpm-root .cpm-skill-content > div {
-	font-size: .9375rem; line-height: 1.85; color: var(--cpm-text-sub);
+	font-size: .875rem; line-height: 1.8; color: var(--cpm-text-sub);
 	word-break: normal; overflow-wrap: anywhere;
 }
 .cpm-root .cpm-skill-content p { margin: 0 0 1.1em; line-height: inherit; text-wrap: pretty; }
 .cpm-root .cpm-skill-content :is(h1, h2, h3, h4, h5, h6) {
 	margin: 1.75em 0 .75em; color: var(--cpm-text); font-size: 1rem; font-weight: 650; line-height: 1.4; letter-spacing: -.015em;
 }
-.cpm-root .cpm-skill-content h1 { font-size: 1.5rem; }
-.cpm-root .cpm-skill-content h2 { font-size: 1.25rem; }
-.cpm-root .cpm-skill-content h3 { font-size: 1.0625rem; }
+.cpm-root .cpm-skill-content h1 { font-size: 1.375rem; }
+.cpm-root .cpm-skill-content h2 { font-size: 1.125rem; }
+.cpm-root .cpm-skill-content h3 { font-size: 1rem; }
 .cpm-root .cpm-skill-content > div > :first-child { margin-top: 0; }
 .cpm-root .cpm-skill-content :is(ul, ol) { margin: .5em 0 1.25em; padding-inline-start: 1.5em; }
 .cpm-root .cpm-skill-content li { margin-bottom: .5em; padding-inline-start: .2em; line-height: inherit; }
 .cpm-root .cpm-skill-content li::marker { color: var(--cpm-muted); }
 .cpm-root .cpm-skill-content blockquote { margin: 1.25em 0; padding: .75em 1.1em; border-inline-start-color: var(--cpm-border); background: var(--cpm-card-hover); border-radius: 0 .625rem .625rem 0; }
 .cpm-root .cpm-skill-content blockquote > :last-child { margin-bottom: 0; }
-.cpm-root .cpm-skill-content pre { font-size: .8125rem; line-height: 1.65; }
+.cpm-root .cpm-skill-content pre { font-size: .78125rem; line-height: 1.65; }
 .cpm-root .cpm-skill-content hr { margin: 2rem 0; border-color: var(--cpm-border); }
 .cpm-root .cpm-skill-content div:has(> table) { max-width: 100%; margin-block: 1.5rem; border: 1px solid var(--cpm-border); border-radius: .75rem; }
-.cpm-root .cpm-skill-content table { border-collapse: separate; border-spacing: 0; font-size: .875rem; line-height: 1.7; }
-.cpm-root .cpm-skill-content :is(th, td) { padding: .75rem 1rem; border: 0; border-bottom: 1px solid var(--cpm-border); vertical-align: top; font-size: .875rem; line-height: 1.7; overflow-wrap: anywhere; }
-.cpm-root .cpm-skill-content td code { font-size: .8125rem; }
+.cpm-root .cpm-skill-content table { border-collapse: separate; border-spacing: 0; font-size: .8125rem; line-height: 1.7; }
+.cpm-root .cpm-skill-content :is(th, td) { padding: .6875rem .875rem; border: 0; border-bottom: 1px solid var(--cpm-border); vertical-align: top; font-size: .8125rem; line-height: 1.7; overflow-wrap: anywhere; }
+.cpm-root .cpm-skill-content td code { font-size: .75rem; }
 .cpm-root .cpm-skill-content th { color: var(--cpm-text); font-weight: 600; background: var(--cpm-card-hover); }
 .cpm-root .cpm-skill-content tbody tr:last-child td { border-bottom: 0; }
 .cpm-root .cpm-skill-content .md-table-wide:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 3px; }
@@ -5337,7 +5450,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			window.addEventListener("resize", measure);
 			return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
 		}, [reserveSpace]);
-		return h("div", { ref: rootRef, className: "cpm-mcp-overview", style: { position: "relative", maxWidth: 1000, margin: "0 auto", width: "100%" } },
+		return h("div", { ref: rootRef, className: "cpm-mcp-overview", style: { position: "relative", maxWidth: "var(--cpm-grid-width)", margin: "0 auto", width: "100%" } },
 			reserveSpace && h("div", { ref: measureRef, "aria-hidden": true, style: { position: "absolute", top: 0, left: 0, width: "100%", visibility: "hidden", pointerEvents: "none", display: "flow-root" } },
 				h("div", { style: { fontSize: 14, fontWeight: 700, margin: "8px 4px 12px" } }, "服务器"),
 				h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", overflow: "hidden" } }, expandedServerRows),
@@ -5628,31 +5741,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const gridRef = useRef(null);
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
-		// The width the two list columns actually occupy. `clientWidth` is the
-		// grid's content box — padding and the reserved scrollbar gutter are
-		// already excluded — but on a wide panel that box is wider than the
-		// columns themselves, which stop at two 476px tracks plus their 48px
-		// gap. Clamping to that 1000px is what keeps the search box from being
-		// measured against empty space beside the columns.
-		const [columnSpan, setColumnSpan] = useState(0);
-		useSafeLayoutEffect(() => {
-			const measure = () => {
-				const grid = gridRef.current;
-				if (!grid) return;
-				const style = getComputedStyle(grid);
-				const content = grid.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-				const span = Math.round(Math.min(content, GRID_COLUMNS_MAX));
-				if (!(span > 0)) return;
-				setColumnSpan((current) => (current === span ? current : span));
-			};
-			measure();
-			// The grid can mount after this effect (it is absent while the MCP
-			// page or a detail page is open), and a source switch swaps its
-			// content, so re-measure on the next frame as well as on resize.
-			const frame = requestAnimationFrame(measure);
-			window.addEventListener("resize", measure);
-			return () => { cancelAnimationFrame(frame); window.removeEventListener("resize", measure); };
-		}, [activeSourceId, mcpsOpen, filter, rows]);
 		const tabRefs = useRef({});
 		const [tabsMaskClass, setTabsMaskClass] = useState("");
 		const [gridMaskClass, setGridMaskClass] = useState("");
@@ -6832,7 +6920,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		return h("div", { className: "cpm-main" },
 			// Top bar matching Claude official: Row 1 (Full width search) & Row 2 (Tabs on Left + Filter & Sort on Right)
-			h("div", { className: "cpm-topbar", style: columnSpan ? { "--cpm-column-span": columnSpan + "px" } : undefined },
+			h("div", { className: "cpm-topbar" },
 				h("div", { className: "cpm-topbar-row1" },
 					h("div", { className: "cpm-search" },
 						h(IconSearch),
