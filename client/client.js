@@ -5103,11 +5103,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			top: clamp(rect.top, viewport.height - height - margin),
 		};
 	}
-	function placePluginPreview(rect, width, height, viewport, titleRight) {
-		const margin = 12, gap = 6;
-		const left = Math.max(margin, Math.min(titleRight || rect.left + 80, viewport.width - width - margin));
-		const above = rect.bottom + gap + height > viewport.height - margin && rect.top - gap - height >= margin;
-		return { left, top: Math.max(margin, Math.min(above ? rect.top - height - gap : rect.bottom + gap, viewport.height - height - margin)) };
+	// Plugin cards sit in a two-column grid, so their preview hangs off the side
+	// of the card, level with it. Right of the card first, the left edge when
+	// that overflows, and — when the panel is too narrow for either side — a
+	// right-aligned flyout. It must never drop under the card: that hides the
+	// next row and detaches the preview from the row the pointer is on.
+	function placePluginPreview(rect, width, height, viewport) {
+		const margin = 12, gap = 10;
+		width = Math.min(width, viewport.width - margin * 2);
+		height = Math.min(height, viewport.height - margin * 2);
+		const top = Math.max(margin, Math.min(rect.top, viewport.height - height - margin));
+		if (rect.right + gap + width + margin <= viewport.width) return { left: rect.right + gap, top };
+		const sideLeft = rect.left - gap - width;
+		if (sideLeft >= margin) return { left: sideLeft, top };
+		return { left: Math.max(margin, viewport.width - width - margin), top };
 	}
 	// One session owns both pending requests and the currently readable preview.
 	function createHoverSession({ onChange, initialDelay = 200, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -5230,7 +5239,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		useEffect(() => session.bind(document, window), [session]);
 		return [preview, close, session];
 	}
-	function SmartHoverPopover({ anchor, rect, width, className, session, placement = 'tool', titleRight, children }) {
+	function SmartHoverPopover({ anchor, rect, width, className, session, placement = 'tool', children }) {
 		const popRef = useRef(null);
 		const [position, setPosition] = useState(null);
 		useSafeLayoutEffect(() => {
@@ -5239,14 +5248,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const measure = () => {
 				const trigger = anchor?.isConnected ? anchor.getBoundingClientRect() : rect;
 				const measured = popup.getBoundingClientRect(), viewport = { width: window.innerWidth, height: window.innerHeight };
-				setPosition(placement === 'plugin' ? placePluginPreview(trigger, measured.width, measured.height, viewport, titleRight) : placeHoverCard(trigger, measured.width, measured.height, viewport));
+				setPosition(placement === 'plugin' ? placePluginPreview(trigger, measured.width, measured.height, viewport) : placeHoverCard(trigger, measured.width, measured.height, viewport));
 			};
 			measure();
 			const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
 			observer?.observe(popup);
 			const detach = session.attach(popup, anchor);
 			return () => { observer?.disconnect(); detach(); };
-		}, [anchor, rect, placement, titleRight, session]);
+		}, [anchor, rect, placement, session]);
 		return h('div', { ref: popRef, className: className + ' cpm-smart-hover', role: 'region', 'aria-label': '详情预览', tabIndex: 0, style: { width, maxHeight: 'calc(100vh - 24px)', left: position?.left || 12, top: position?.top || 12, visibility: position ? 'visible' : 'hidden', pointerEvents: 'none' }, onWheel: (e) => e.stopPropagation(), onScroll: (e) => e.stopPropagation(), onClick: (e) => e.stopPropagation() }, children);
 	}
 
@@ -5260,7 +5269,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		return h(SmartHoverPopover, {
 			key: p.id || p.name,
-			anchor: preview.anchor, rect: preview.rect, width: 380, session, placement: 'plugin', titleRight: preview.titleRight,
+			anchor: preview.anchor, rect: preview.rect, width: 380, session, placement: 'plugin',
 			className: "cpm-preview-popover",
 		},
 			h("div", { className: "cpm-preview-header" },
@@ -5717,9 +5726,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const rect = el.getBoundingClientRect();
 				const gridRect = gridRef.current.getBoundingClientRect();
 				if (rect.bottom >= gridRect.top + 8 && rect.top <= gridRect.bottom - 8) {
-					const textEl = el.querySelector(".cpm-card-name-text") || el.querySelector(".cpm-card-name");
-					const titleRight = textEl ? textEl.getBoundingClientRect().right : (rect.left + 80);
-					pluginHover.enter({ plugin, rect, gridRect, titleRight }, el, pendingHoverRef.current.point);
+					pluginHover.enter({ plugin, rect, gridRect }, el, pendingHoverRef.current.point);
 					prefetchDetail(plugin.sourceId || activeSourceId, plugin.name);
 				}
 			}

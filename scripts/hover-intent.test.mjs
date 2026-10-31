@@ -40,11 +40,20 @@ test('MCP details stay adjacent on the right and within the viewport', () => {
   assert.ok(small.top >= 12 && small.top + 260 <= 308)
 })
 
-test('plugin previews return below the title and flip above only at the bottom edge', () => {
-  const p = placePluginPreview(box(140, 137, 476, 52), 380, 150, { width: 1280, height: 720 }, 260)
-  assert.equal(p.left, 260); assert.equal(p.top, 195)
-  const bottom = placePluginPreview(box(140, 600, 476, 52), 380, 150, { width: 1280, height: 720 }, 260)
-  assert.equal(bottom.top, 444)
+test('plugin previews open beside the card and only flip when that side overflows', () => {
+  const wide = { width: 1280, height: 720 }
+  const p = placePluginPreview(box(140, 137, 476, 52), 380, 150, wide)
+  assert.equal(p.left, 626); assert.equal(p.top, 137)
+  // Only 300px right of the card: flip to the left edge, same row.
+  const flipped = placePluginPreview(box(500, 137, 476, 52), 380, 150, wide)
+  assert.equal(flipped.left, 110); assert.equal(flipped.top, 137)
+  // Neither side fits: stay level with the card and fly in from the right edge
+  // instead of dropping under it, and never leave the viewport.
+  const narrow = { width: 520, height: 720 }
+  const flyout = placePluginPreview(box(20, 137, 476, 52), 380, 150, narrow)
+  assert.equal(flyout.left, 128); assert.equal(flyout.top, 137)
+  const tiny = placePluginPreview(box(20, 300, 476, 52), 380, 150, { width: 390, height: 320 })
+  assert.ok(tiny.left >= 12 && tiny.left + 366 <= 378 && tiny.top >= 12 && tiny.top + 150 <= 308)
 })
 
 test('travel corridor preserves movement to the card but excludes movement down the list', () => {
