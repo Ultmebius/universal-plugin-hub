@@ -22,7 +22,7 @@ import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } 
 import { buildPluginIcons } from './icons.js'
 import { beginOAuthVerification, completeOAuthVerification, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
 import { encodeOAuthConfig, isOAuthMode, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
-import { oauthStoreDir } from './oauth-store.js'
+import { oauthStoreDir, readOAuthRecord, writeOAuthRecord, deleteOAuthRecord } from './oauth-store.js'
 
 const OAUTH_BRIDGE_PATH = fileURLToPath(new URL('./oauth-bridge.js', import.meta.url))
 
@@ -308,6 +308,112 @@ export function unregisterConnector(pluginName, connectorName) {
   const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
   writeCordisPatch(cleaned)
   return { ok: true, connected: false }
+}
+
+/**
+ * Delete a user-added MCP server completely: registration, saved definition,
+ * per-tool state and any OAuth credentials. `unregisterConnector` alone is the
+ * "turn it off" path and deliberately keeps the saved remote config so the
+ * server can be switched back on; a delete must leave nothing behind, or
+ * re-adding the same name would silently inherit the old sign-in.
+ */
+export function removeUserMcp(connectorName) {
+  const state = readState()
+  const saved = (Array.isArray(state.userMcps) ? state.userMcps : []).find((x) => x && x.name === connectorName)
+  if (!saved) throw new Error(`MCP 不存在：${connectorName}`)
+
+  // Credential keys cover both OAuth modes; the mode the server was saved with
+  // decides which file exists, and deleting a missing one is a no-op.
+  const remote = remoteConfigFromEntry(getConnectorEntry('user-mcp', connectorName)?.config) || saved
+  const url = remote?.url
+  const credentialKeys = url
+    ? ['auto_register', 'custom'].map((mode) => oauthCredentialKey('user-mcp', connectorName, url, mode))
+    : []
+
+  unregisterConnector('user-mcp', connectorName)
+
+  const toolsKey = `user-mcp::${connectorName}`
+  const toolsState = readMcpToolsState()
+  if (Object.prototype.hasOwnProperty.call(toolsState, toolsKey)) {
+    delete toolsState[toolsKey]
+    writeMcpToolsState(toolsState)
+  }
+  MEMORY_TOOLS_CACHE.delete(toolsKey)
+  for (const key of credentialKeys) {
+    try { deleteOAuthRecord(key) } catch {}
+  }
+
+  state.userMcps = (Array.isArray(state.userMcps) ? state.userMcps : []).filter((x) => x && x.name !== connectorName)
+  writeState(state)
+  return { ok: true, name: connectorName }
+}
+
+/**
+ * Rename a user-added MCP. Everything that is keyed by the server name has to
+ * move with it: the cordis registration id, the saved OAuth record (its file
+ * name is a hash of the name, so a rename without this copy would look like a
+ * fresh, unauthenticated server), and per-tool state. OAuth records are copied
+ * before the re-registration so the new registration reuses the existing
+ * sign-in instead of starting a new browser handshake.
+ */
+export function renameUserMcp(oldName, newName, payload) {
+  if (oldName === newName) {
+    return saveConnectorAuth('user-mcp', newName, payload)
+  }
+  const state = readState()
+  if (!Array.isArray(state.userMcps)) state.userMcps = []
+  const idx = state.userMcps.findIndex((x) => x && x.name === oldName)
+  if (idx < 0) throw new Error(`MCP 不存在：${oldName}`)
+  if (state.userMcps.some((x) => x && x.name === newName)) throw new Error(`已存在同名 MCP：${newName}`)
+
+  const saved = state.userMcps[idx]
+  const wasEnabled = !!getConnectorEntry('user-mcp', oldName)
+  const remote = remoteConfigFromEntry(getConnectorEntry('user-mcp', oldName)?.config)
+  const url = remote?.url || saved.url || payload?.url || null
+  const modes = ['auto_register', 'custom']
+
+  if (url) {
+    for (const mode of modes) {
+      const from = oauthCredentialKey('user-mcp', oldName, url, mode)
+      const to = oauthCredentialKey('user-mcp', newName, url, mode)
+      const record = readOAuthRecord(from)
+      if (record && Object.keys(record).length > 0) writeOAuthRecord(to, record)
+    }
+  }
+
+  if (wasEnabled) {
+    const clientId = url ? readOAuthRecord(oauthCredentialKey('user-mcp', newName, url, 'custom')).customClient?.client_id : ''
+    const result = saveConnectorAuth('user-mcp', newName, {
+      ...payload,
+      oauthClientId: payload?.oauthClientId || clientId || '',
+    })
+    if (!result || !result.ok) {
+      // Leave the old server untouched: a failed rename must not strand the
+      // user with neither name registered.
+      if (url) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', newName, url, mode))
+      return result
+    }
+    unregisterConnector('user-mcp', oldName)
+  }
+
+  const toolsState = readMcpToolsState()
+  const oldKey = `user-mcp::${oldName}`
+  const newKey = `user-mcp::${newName}`
+  if (toolsState[oldKey] || toolsState[newKey]) {
+    const merged = { ...(toolsState[oldKey] || {}), ...(toolsState[newKey] || {}) }
+    if (Array.isArray(toolsState[oldKey]?.disabledTools)) merged.disabledTools = toolsState[oldKey].disabledTools
+    delete merged.cachedTools
+    toolsState[newKey] = merged
+    delete toolsState[oldKey]
+    writeMcpToolsState(toolsState)
+  }
+  MEMORY_TOOLS_CACHE.delete(oldKey)
+  MEMORY_TOOLS_CACHE.delete(newKey)
+  if (url) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', oldName, url, mode))
+
+  state.userMcps[idx] = { ...saved, name: newName }
+  writeState(state)
+  return { ok: true, name: newName, previousName: oldName }
 }
 
 // ── LSP server registration (cordis.patch.yml → @deepseek-ai/dsh-lsp-stdio) ──

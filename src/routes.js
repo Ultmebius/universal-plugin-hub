@@ -15,7 +15,7 @@ import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
-  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, getConnectorEntry, readMcpToolsState,
+  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, readMcpToolsState,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
 import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
@@ -389,11 +389,19 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
     if (method === 'POST' && path === '/mcps/update') {
       requireSameOrigin(req)
       const body = await readJsonBody(req)
+      // `previousName` is only sent when the user renamed the server in the
+      // editor; without it the name in the body is also the stored one.
+      const previousName = body.previousName
+        ? safeSegment(normalizeMcpName(body.previousName), 'MCP 名称')
+        : null
       const name = safeSegment(normalizeMcpName(body.name), 'MCP 名称')
       const state = readState()
       if (!Array.isArray(state.userMcps)) state.userMcps = []
-      const idx = state.userMcps.findIndex((x) => x && x.name === name)
-      if (idx < 0) throw new Error(`MCP 不存在：${name}`)
+      const idx = state.userMcps.findIndex((x) => x && x.name === (previousName || name))
+      if (idx < 0) throw new Error(`MCP 不存在：${previousName || name}`)
+      if (previousName && previousName !== name) {
+        return sendJson(res, 200, renameUserMcp(previousName, name, body))
+      }
       const wasEnabled = !!getConnectorEntry('user-mcp', name)
       let result = { ok: true }
       if (wasEnabled) {
@@ -402,6 +410,14 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       }
       state.userMcps[idx] = userMcpConfig(name, body)
       writeState(state)
+      return sendJson(res, 200, result)
+    }
+
+    // One segment only: `/mcps/<name>/tools` belongs to the tool routes below.
+    if (method === 'DELETE' && path.startsWith('/mcps/') && !path.slice('/mcps/'.length).includes('/')) {
+      requireSameOrigin(req)
+      const name = safeSegment(normalizeMcpName(decodeURIComponent(path.slice('/mcps/'.length))), 'MCP 名称')
+      const result = removeUserMcp(name)
       return sendJson(res, 200, result)
     }
 

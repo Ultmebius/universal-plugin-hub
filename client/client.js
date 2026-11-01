@@ -2357,6 +2357,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 @media (prefers-reduced-motion: reduce) {
 	.cpm-oauth-pending { animation: none; }
+	/* The colour change still says "destructive"; only the lift and tilt go. */
+	.cpm-mcp-footer-del,
+	.cpm-mcp-footer-del svg {
+		transition-duration: .01s;
+	}
+	.cpm-mcp-footer-del:hover { scale: 1; }
+	.cpm-mcp-footer-del:hover svg { rotate: 0deg; }
 	/* The spring is decoration; the state change is the message. A user who
 	   asked for less motion gets the knob in place immediately. */
 	.cpm-toggle, .cpm-toggle::after {
@@ -2477,6 +2484,56 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-mcp-footer .cpm-btn {
 	transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
+/* Destructive icon control at the far left of the footer. The identity
+   scale:1 on the base state keeps the hover scale from creating a stacking
+   context only while hovered — that alone can re-order it against the
+   footer's own layers. */
+.cpm-mcp-footer-del {
+	--del-size: 32px;
+	flex: 0 0 auto;
+	width: var(--del-size);
+	height: var(--del-size);
+	padding: 0;
+	border-radius: var(--dsw-radius-md, 12px);
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--cpm-muted);
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	line-height: 1;
+	scale: 1;
+	transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, scale 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.cpm-mcp-footer-del svg {
+	display: block;
+	margin: auto;
+	transition: rotate 0.18s ease;
+}
+.cpm-mcp-footer-del:hover {
+	color: #ef4444;
+	background: rgba(239, 68, 68, 0.1);
+	border-color: rgba(239, 68, 68, 0.28);
+	scale: 1.06;
+}
+/* The lid lifts off the can: 6deg reads as a nudge, not a wobble. */
+.cpm-mcp-footer-del:hover svg { rotate: -6deg; }
+.cpm-mcp-footer-del:active { scale: 0.94; }
+.cpm-mcp-footer-del:focus-visible {
+	outline: 2px solid rgba(239, 68, 68, 0.55);
+	outline-offset: 2px;
+}
+.cpm-mcp-footer-del:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+	scale: 1;
+	background: transparent;
+	border-color: transparent;
+	color: var(--cpm-muted);
+}
+.cpm-mcp-footer-del:disabled:hover svg { rotate: 0deg; }
 .cpm-mcp-footer .cpm-btn-secondary {
 	background: rgba(0, 0, 0, 0.05);
 	border: 1px solid rgba(0, 0, 0, 0.08);
@@ -4138,6 +4195,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		},
 			h("circle", { cx: 12, cy: 12, r: 3 }),
 			h("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }),
+		);
+
+	const IconTrash = ({ size = 14, color = "currentColor" }) =>
+		h("svg", {
+			width: size,
+			height: size,
+			viewBox: "0 0 24 24",
+			fill: "none",
+			stroke: color,
+			strokeWidth: 1.9,
+			strokeLinecap: "round",
+			strokeLinejoin: "round",
+			style: { flexShrink: 0 },
+		},
+			h("path", { d: "M3 6h18" }),
+			h("path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }),
+			h("path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }),
+			h("line", { x1: 10, y1: 11, x2: 10, y2: 17 }),
+			h("line", { x1: 14, y1: 11, x2: 14, y2: 17 }),
 		);
 
 	const IconClose = ({ size = 14, color = "currentColor" }) =>
@@ -8003,6 +8079,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		} : { name: "", transport: "stdio", url: "", oauth: "none", oauthClientId: "", oauthClientSecret: "", oauthHasClientSecret: false, oauthCallbackPort: "", oauthScope: "", command: "", args: "", headersList: [], envList: [] });
 		const [testing, setTesting] = useState(false);
 		const [saving, setSaving] = useState(false);
+		const [confirmDelete, setConfirmDelete] = useState(false);
+		const [deleting, setDeleting] = useState(false);
 		const upd = (patch) => setForm((prev) => ({ ...prev, ...patch }));
 		const argsJsonError = (s) => {
 			const t = String(s || "").trim();
@@ -8052,6 +8130,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				oauthScope: form.oauthScope,
 				args,
 				env,
+				// Only a real rename sends this; `/mcps/update` otherwise works off
+				// `name` alone, and the save still has to find the old record.
+				...(owner || !initial || form.name.trim() === initial.name ? {} : { previousName: initial.name }),
 			};
 		};
 
@@ -8102,6 +8183,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast("请输入启动命令", "stdio 连接需要本地启动命令，如 npx、node 或 uvx", { restart: false });
 				return;
 			}
+			if (data.previousName && data.name === data.previousName) delete data.previousName;
 			setSaving(true);
 			try {
 				const saveUrl = owner
@@ -8113,12 +8195,34 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					setSaving(false);
 					return;
 				}
-				showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${data.name}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
+				if (initial && data.previousName) {
+					showToast("MCP 已重命名", `「${data.previousName}」已改名为「${data.name}」`, { restart: false });
+				} else {
+					showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${data.name}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
+				}
 				await onSaved();
 			} catch (err) {
 				showToast("保存失败", cleanMcpError(err), { restart: false });
 				setSaving(false);
 				throw err;
+			}
+		};
+
+		const removeMcp = async () => {
+			setDeleting(true);
+			try {
+				await api(`/mcps/${encodeURIComponent(initial.name)}`, { method: "DELETE" });
+				const cacheKey = `user-mcp::${initial.name}`;
+				if (GLOBAL_MCP_TOOLS_CACHE[cacheKey]) {
+					delete GLOBAL_MCP_TOOLS_CACHE[cacheKey];
+					try { localStorage.setItem("cpm_mcp_tools_cache_v1", JSON.stringify(GLOBAL_MCP_TOOLS_CACHE)); } catch {}
+				}
+				setConfirmDelete(false);
+				showToast("MCP 已删除", `「${initial.name}」已从服务器列表移除`, { restart: false });
+				await onSaved();
+			} catch (err) {
+				showToast("删除失败", cleanMcpError(err), { restart: false });
+				setDeleting(false);
 			}
 		};
 
@@ -8133,7 +8237,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								className: "cpm-mcp-input",
 								placeholder: "mcp-name，如 github、notion",
 								value: form.name,
-								disabled: !!initial,
+								// Renaming is allowed for user-added servers only. A plugin
+								// connector's name is its connector id: the plugin owns it,
+								// and the route that saves it is keyed by that same name.
+								disabled: !!owner,
 								onChange: (e) => upd({ name: e.target.value }),
 							}),
 						),
@@ -8327,7 +8434,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					),
 				),
 				h("div", { className: "cpm-mcp-footer", style: { gap: 10 } },
-					h("div", { style: { flex: 1 } }),
+					// Delete sits alone on the left, away from the two confirm
+					// actions: a destructive control next to "save" is one slip away
+					// from a misclick. Only user-added servers can be deleted — a
+					// plugin's connector belongs to the plugin, which re-registers it
+					// on every enable, so deleting it here would come straight back.
+					initial && !owner
+						? h("button", {
+							type: "button",
+							className: "cpm-mcp-footer-del",
+							// Accessible name only — the user asked for no tooltip here.
+							"aria-label": "删除这个 MCP",
+							disabled: testing || saving || !!oauthFlow.pending,
+							onClick: () => setConfirmDelete(true),
+						}, h(IconTrash, { size: 15 }))
+						: h("div", { style: { flex: 1 } }),
+					initial && !owner ? h("div", { style: { flex: 1 } }) : null,
 					h("button", {
 						className: "cpm-btn cpm-btn-secondary",
 						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
@@ -8340,6 +8462,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
 						onClick: () => save(),
 					}, saving ? "保存中…" : "保存并启用"),
+				),
+			),
+			confirmDelete && h("div", { className: "cpm-dialog", onClick: () => setConfirmDelete(false) },
+				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
+					h("div", { className: "cpm-dialog-title" }, `删除 MCP「${initial.name}」`),
+					h("div", { className: "cpm-field", style: { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" } },
+						"将移除它的连接配置、已保存的授权和工具开关记录。如需再次使用，可在「添加」里重新配置。",
+					),
+					h("div", { className: "cpm-dialog-actions" },
+						h("button", {
+							className: "cpm-btn cpm-btn-secondary",
+							onClick: () => setConfirmDelete(false),
+						}, "取消"),
+						h("button", {
+							className: "cpm-btn cpm-btn-primary",
+							style: { background: "#dc2626", borderColor: "#dc2626", color: "#fff" },
+							disabled: deleting,
+							onClick: removeMcp,
+						}, deleting ? "删除中…" : "确认删除"),
+					),
 				),
 			),
 		);

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -83,4 +83,15 @@ export function saveOAuthClientCredentials(key, client) {
     ...((client.clientSecret || (sameClient && record.customClient?.client_secret)) ? { client_secret: String(client.clientSecret || record.customClient?.client_secret) } : {}),
   }
   writeOAuthRecord(key, record)
+}
+
+/**
+ * Delete a credential record outright. Used when the connector it belongs to is
+ * removed: leaving the file behind would resurrect a stale sign-in if a server
+ * of the same name were added again with the same URL and OAuth mode.
+ */
+export function deleteOAuthRecord(key) {
+  const file = oauthCredentialPath(key)
+  RECORD_CACHE.delete(file)
+  try { rmSync(file, { force: true }) } catch {}
 }
