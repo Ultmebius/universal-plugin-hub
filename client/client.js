@@ -2359,11 +2359,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	.cpm-oauth-pending { animation: none; }
 	/* The colour change still says "destructive"; only the lift and tilt go. */
 	.cpm-mcp-footer-del,
-	.cpm-mcp-footer-del svg {
+	.cpm-mcp-footer-del .cpm-del-lid,
+	.cpm-mcp-footer-del .cpm-del-body {
 		transition-duration: .01s;
 	}
 	.cpm-mcp-footer-del:hover { scale: 1; }
-	.cpm-mcp-footer-del:hover svg { rotate: 0deg; }
+	.cpm-mcp-footer-del:hover .cpm-del-lid,
+	.cpm-mcp-footer-del:hover .cpm-del-body { rotate: 0deg; translate: 0px 0px; }
 	/* The spring is decoration; the state change is the message. A user who
 	   asked for less motion gets the knob in place immediately. */
 	.cpm-toggle, .cpm-toggle::after {
@@ -2484,19 +2486,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-mcp-footer .cpm-btn {
 	transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
-/* Destructive icon control at the far left of the footer. The identity
-   scale:1 on the base state keeps the hover scale from creating a stacking
-   context only while hovered — that alone can re-order it against the
+/* Destructive icon control at the far left of the footer.
+   Shape: corner-shape: squircle continues the corner past the arc into the
+   straight edge, so the outline has no curvature seam where a circular corner
+   meets a straight side. It is progressive enhancement — browsers without it
+   fall back to the plain border-radius below, which is why the radius stays.
+   The identity scale:1 on the base state keeps the hover scale from creating a
+   stacking context only while hovered, which would re-order it against the
    footer's own layers. */
 .cpm-mcp-footer-del {
 	--del-size: 32px;
+	--del-radius: 10px;
 	flex: 0 0 auto;
 	width: var(--del-size);
 	height: var(--del-size);
 	padding: 0;
-	border-radius: var(--dsw-radius-md, 12px);
-	border: 1px solid transparent;
-	background: transparent;
+	border-radius: var(--del-radius);
+	corner-shape: squircle;
+	/* The resting state already carries the squircle surface, so the control
+	   reads as a button before the pointer arrives; hover only deepens it. */
+	border: 1px solid rgba(0, 0, 0, 0.07);
+	background: rgba(0, 0, 0, 0.045);
 	color: var(--cpm-muted);
 	cursor: pointer;
 	display: inline-flex;
@@ -2505,35 +2515,62 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-sizing: border-box;
 	line-height: 1;
 	scale: 1;
-	transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, scale 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+	transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease,
+		scale 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
 }
+/* The lid is its own group so it can swing while the can tips. */
 .cpm-mcp-footer-del svg {
 	display: block;
 	margin: auto;
-	transition: rotate 0.18s ease;
+	overflow: visible;
+}
+.cpm-mcp-footer-del .cpm-del-lid {
+	transform-box: fill-box;
+	transform-origin: 12px 6px;
+	transition: translate 0.22s cubic-bezier(0.34, 1.4, 0.64, 1), rotate 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+	translate: 0px 0px;
+	rotate: 0deg;
+}
+.cpm-mcp-footer-del .cpm-del-body {
+	transform-box: fill-box;
+	transform-origin: 50% 100%;
+	transition: rotate 0.22s ease;
+	rotate: 0deg;
+}
+.cpm-dark .cpm-mcp-footer-del {
+	background: rgba(255, 255, 255, 0.055);
+	border-color: rgba(255, 255, 255, 0.08);
 }
 .cpm-mcp-footer-del:hover {
 	color: #ef4444;
-	background: rgba(239, 68, 68, 0.1);
-	border-color: rgba(239, 68, 68, 0.28);
+	background: rgba(239, 68, 68, 0.12);
+	border-color: rgba(239, 68, 68, 0.32);
 	scale: 1.06;
 }
-/* The lid lifts off the can: 6deg reads as a nudge, not a wobble. */
-.cpm-mcp-footer-del:hover svg { rotate: -6deg; }
+/* Lid lifts and tips off the can while the can rocks the other way — one
+   gesture, two parts, same spring. */
+.cpm-mcp-footer-del:hover .cpm-del-lid {
+	translate: 0px -1.7px;
+	rotate: -9deg;
+}
+.cpm-mcp-footer-del:hover .cpm-del-body { rotate: 3.5deg; }
 .cpm-mcp-footer-del:active { scale: 0.94; }
+.cpm-mcp-footer-del:active .cpm-del-lid { translate: 0px -0.8px; rotate: -5deg; }
+.cpm-mcp-footer-del:active .cpm-del-body { rotate: 1.5deg; }
 .cpm-mcp-footer-del:focus-visible {
 	outline: 2px solid rgba(239, 68, 68, 0.55);
 	outline-offset: 2px;
 }
 .cpm-mcp-footer-del:disabled {
-	opacity: 0.35;
+	opacity: 0.4;
 	cursor: not-allowed;
 	scale: 1;
-	background: transparent;
-	border-color: transparent;
 	color: var(--cpm-muted);
 }
-.cpm-mcp-footer-del:disabled:hover svg { rotate: 0deg; }
+.cpm-mcp-footer-del:disabled:hover { background: rgba(0, 0, 0, 0.045); border-color: rgba(0, 0, 0, 0.07); }
+.cpm-dark .cpm-mcp-footer-del:disabled:hover { background: rgba(255, 255, 255, 0.055); border-color: rgba(255, 255, 255, 0.08); }
+.cpm-mcp-footer-del:disabled:hover .cpm-del-lid { translate: 0px 0px; rotate: 0deg; }
+.cpm-mcp-footer-del:disabled:hover .cpm-del-body { rotate: 0deg; }
 .cpm-mcp-footer .cpm-btn-secondary {
 	background: rgba(0, 0, 0, 0.05);
 	border: 1px solid rgba(0, 0, 0, 0.08);
@@ -4197,6 +4234,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			h("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }),
 		);
 
+	// Lid and can are separate groups so the hover can lift the lid off the can
+	// while the can rocks the other way. The gap between them at rest (y 4..5.6
+	// for the handle, the bar at y 6) is what makes the lift read.
 	const IconTrash = ({ size = 14, color = "currentColor" }) =>
 		h("svg", {
 			width: size,
@@ -4209,11 +4249,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			strokeLinejoin: "round",
 			style: { flexShrink: 0 },
 		},
-			h("path", { d: "M3 6h18" }),
-			h("path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }),
-			h("path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }),
-			h("line", { x1: 10, y1: 11, x2: 10, y2: 17 }),
-			h("line", { x1: 14, y1: 11, x2: 14, y2: 17 }),
+			h("g", { className: "cpm-del-lid" },
+				h("path", { d: "M3.2 6.2h17.6" }),
+				h("path", { d: "M8.6 6.2V4.1a1.7 1.7 0 0 1 1.7-1.7h3.4a1.7 1.7 0 0 1 1.7 1.7v2.1" }),
+			),
+			h("g", { className: "cpm-del-body" },
+				h("path", { d: "M18.6 6.2l-0.9 13.1a1.8 1.8 0 0 1-1.8 1.7H8.1a1.8 1.8 0 0 1-1.8-1.7L5.4 6.2" }),
+				h("line", { x1: 10.2, y1: 10.6, x2: 10.2, y2: 16.6 }),
+				h("line", { x1: 13.8, y1: 10.6, x2: 13.8, y2: 16.6 }),
+			),
 		);
 
 	const IconClose = ({ size = 14, color = "currentColor" }) =>

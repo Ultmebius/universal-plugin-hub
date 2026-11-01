@@ -155,5 +155,45 @@ test('only user-added servers expose rename and delete in the editor', () => {
   // The delete call targets the user-MCP route, not the plugin connector route.
   assert.match(client, /api\(`\/mcps\/\$\{encodeURIComponent\(initial\.name\)\}`, \{ method: "DELETE" \}\)/)
   assert.match(client, /\.cpm-mcp-footer-del:hover/)
-  assert.match(client, /prefers-reduced-motion[\s\S]{0,400}cpm-mcp-footer-del/)
+  assert.match(client, /prefers-reduced-motion[\s\S]{0,600}cpm-del-lid/)
+})
+
+test('the delete control reads as a button at rest and animates as two parts', () => {
+  const css = client.slice(client.indexOf('const CSS = `'), client.indexOf('\n`;'))
+  // Anchor to the start of a line and require the newline before the brace, so
+  // the reduced-motion overrides earlier in the file (same selectors, nested in
+  // a media block) cannot be mistaken for the rules under test.
+  const rule = (selector) => {
+    const pattern = new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{`, 'm')
+    const at = css.search(pattern)
+    assert.ok(at >= 0, `missing rule: ${selector}`)
+    return css.slice(at, css.indexOf('}', at))
+  }
+
+  // Continuous curvature: corner-shape carries the corner past the arc into the
+  // straight edge. It is progressive enhancement, so the radius must stay as
+  // the fallback for browsers without it.
+  const base = rule('.cpm-mcp-footer-del')
+  assert.match(base, /corner-shape:\s*squircle/)
+  assert.match(base, /border-radius:\s*var\(--del-radius\)/)
+
+  // The surface is present before hover, not only on it — that was the
+  // reported "未选中状态也要有这个背景".
+  assert.match(base, /background:\s*rgba\(0, 0, 0, 0\.045\)/)
+  assert.match(rule('.cpm-dark .cpm-mcp-footer-del'), /background:\s*rgba\(255, 255, 255, 0\.055\)/)
+
+  // Lid and can move independently: a translate/rotate on the lid group and a
+  // counter-rotate on the body group, both origin-anchored so they pivot
+  // rather than drift.
+  assert.match(rule('.cpm-mcp-footer-del .cpm-del-lid'), /transform-origin: 12px 6px/)
+  assert.match(rule('.cpm-mcp-footer-del .cpm-del-lid'), /translate: 0px 0px/)
+  assert.match(rule('.cpm-mcp-footer-del:hover .cpm-del-lid'), /rotate: -9deg/)
+  assert.match(rule('.cpm-mcp-footer-del:hover .cpm-del-lid'), /translate: 0px -1\.7px/)
+  assert.match(rule('.cpm-mcp-footer-del:hover .cpm-del-body'), /rotate: 3\.5deg/)
+  // Press settles rather than repeating the hover pose from zero.
+  assert.match(rule('.cpm-mcp-footer-del:active .cpm-del-lid'), /rotate: -5deg/)
+
+  // Both groups exist in the markup, or the CSS above animates nothing.
+  assert.match(client, /className: "cpm-del-lid"/)
+  assert.match(client, /className: "cpm-del-body"/)
 })
