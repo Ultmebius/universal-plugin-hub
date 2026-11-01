@@ -345,6 +345,28 @@ test('a running scroll-to-top cannot outlive the source that started it', () => 
   assert.match(client, /function stopScrollTopAnim\(\)/)
 })
 
+test('the MCP plugin section follows actual height without reserving collapsed tools', () => {
+  const overview = findFunction(ast, 'McpOverview')
+  assert.ok(overview)
+  const body = client.slice(overview.start, overview.end)
+  // The former expandedServerRows branch forced every server open in a hidden
+  // measurement, so even a collapsed list reserved all of its future tool rows.
+  assert.doesNotMatch(body, /expandedServerRows|measureExpanded/)
+  assert.doesNotMatch(client, /expandedServerRows:|measureExpanded: true/)
+  // Its top edge stays at half the viewport unless the real, current server
+  // content needs more space.
+  assert.match(body, /Math\.round\(available \/ 2\), server\.offsetHeight/)
+  // Measure a wrapper inside minHeight, or the reserved height feeds back into
+  // itself and the section cannot return to the midpoint after collapsing.
+  // Measure a wrapper that carries NO minHeight, whatever its exact spelling:
+  // the invariant is that the measured node is inside the reserved box, not the
+  // box itself, so reserved height cannot feed back into its own measurement.
+  assert.match(body, /ref: serverRef/)
+  assert.doesNotMatch(body, /ref: serverRef[^}]*minHeight/)
+  assert.doesNotMatch(body, /h\("section", \{ ref: serverRef/)
+  assert.match(body, /observer\?\.observe\(server\)/)
+})
+
 test('the CSS template stays a single string literal', () => {
   // The stylesheet is a JS template literal, so one stray backtick inside a
   // comment ends it early and the rest of the CSS is parsed as JavaScript.

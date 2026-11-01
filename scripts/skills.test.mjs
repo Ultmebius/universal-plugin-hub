@@ -222,7 +222,8 @@ test('disabled skills override preset scopes for existing and future agents', as
     assert.equal(scoped.size, 0)
   } finally {
     await disposeAgents?.(); dispose()
-    process.env.DSH_HOME = previousHome
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
     rmSync(fixture, { recursive: true, force: true })
   }
 })

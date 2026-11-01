@@ -31,6 +31,62 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return msg.length > 50 ? msg.slice(0, 48) + "…" : msg;
 	}
 
+	// A persisted change and a live one are different outcomes. The write answers
+	// `scheduled` with a token because applying it can restart this plugin, so
+	// the real result is read back from /apply-status instead of being assumed.
+	// Returns a promise that resolves once the outcome is reported; callers must
+	// not await it before refreshing, or every action pays the poll window.
+	function showApplicationToast(showToast, result, title, body) {
+		const toast = (t, b) => { showToast(t, b, { restart: false }); };
+		const saved = () => toast(title, body);
+		const failed = (message) => toast("已保存，但未即时生效", message || "DSH 未能完成运行时配置应用，请查看启动日志。");
+		const application = result && result.application;
+		// No runtime report at all: the host has no applicator, so neither the
+		// write nor this helper can claim the change is live.
+		if (!application) {
+			toast("已保存", "当前 DSH 未提供运行时应用接口，请重启后确认是否生效。");
+			return Promise.resolve();
+		}
+		if (application === "applied") {
+			saved();
+			return Promise.resolve();
+		}
+		if (application !== "scheduled" && application !== "pending") {
+			failed(result.applicationError);
+			return Promise.resolve();
+		}
+		const token = result.applicationToken;
+		return (async () => {
+			// Poll for this change's own outcome. A restart of the hub resets the
+			// server's status to `applied` for the token it was given, and a
+			// transient failure while that restart happens is retried rather than
+			// swallowed — that restart is the success path for a linked plugin.
+			for (let attempt = 0; attempt < 40; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, attempt < 3 ? 120 : 300));
+				let status = null;
+				try { status = await api("/apply-status" + (token === undefined ? "" : `?token=${encodeURIComponent(token)}`)); } catch { continue; }
+				if (!status) continue;
+				// Identity first: a newer change's `applied` must not be reported as
+				// this change's success. `APPLIED_TOKEN` (-1) is the server telling
+				// us our own change was applied by a previous, now-restarted fiber.
+				const APPLIED_TOKEN = -1;
+				if (token !== undefined && status.token !== undefined
+					&& status.token !== token && status.token !== APPLIED_TOKEN) {
+					toast("已保存", "配置已保存，更新状态已被后续操作接管。");
+					return;
+				}
+				if (status.application === "applied") { saved(); return; }
+				if (status.application === "failed") { failed(status.applicationError); return; }
+				if (status.application === "restart-required") {
+					toast("已保存，但未即时生效", "该变更需要重启 DSH 后才会加载。");
+					return;
+				}
+				// `idle`/`unknown`/`pending`: the change has not been applied yet.
+			}
+			toast("已保存", "DSH 仍在应用配置，稍后可在列表中确认。");
+		})();
+	}
+
 	// Inline progress card shown while a browser sign-in is in flight. Rendered
 	// as part of the dialog body (not a labelled grid row) so it reads as one
 	// object with its own title, message and actions, using the same tokens as
@@ -2357,15 +2413,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 @media (prefers-reduced-motion: reduce) {
 	.cpm-oauth-pending { animation: none; }
-	/* The colour change still says "destructive"; only the lift and tilt go. */
-	.cpm-mcp-footer-del,
-	.cpm-mcp-footer-del .cpm-del-lid,
-	.cpm-mcp-footer-del .cpm-del-body {
-		transition-duration: .01s;
-	}
-	.cpm-mcp-footer-del:hover { scale: 1; }
-	.cpm-mcp-footer-del:hover .cpm-del-lid,
-	.cpm-mcp-footer-del:hover .cpm-del-body { rotate: 0deg; translate: 0px 0px; }
 	/* The spring is decoration; the state change is the message. A user who
 	   asked for less motion gets the knob in place immediately. */
 	.cpm-toggle, .cpm-toggle::after {
@@ -2571,6 +2618,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-dark .cpm-mcp-footer-del:disabled:hover { background: rgba(255, 255, 255, 0.055); border-color: rgba(255, 255, 255, 0.08); }
 .cpm-mcp-footer-del:disabled:hover .cpm-del-lid { translate: 0px 0px; rotate: 0deg; }
 .cpm-mcp-footer-del:disabled:hover .cpm-del-body { rotate: 0deg; }
+/* Must follow the base and :hover rules above: equal specificity means the
+   later declaration wins, and the base transition shorthand re-expands
+   transition-duration. Placed earlier, this block was dead CSS. */
+@media (prefers-reduced-motion: reduce) {
+	/* The colour change still says "destructive"; only the lift and tilt go. */
+	.cpm-mcp-footer-del,
+	.cpm-mcp-footer-del .cpm-del-lid,
+	.cpm-mcp-footer-del .cpm-del-body {
+		transition-duration: .01s;
+	}
+	.cpm-mcp-footer-del:hover { scale: 1; }
+	.cpm-mcp-footer-del:hover .cpm-del-lid,
+	.cpm-mcp-footer-del:hover .cpm-del-body { rotate: 0deg; translate: 0px 0px; }
+}
 .cpm-mcp-footer .cpm-btn-secondary {
 	background: rgba(0, 0, 0, 0.05);
 	border: 1px solid rgba(0, 0, 0, 0.08);
@@ -5549,35 +5610,51 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Browse & Detail Container ──────────────────────────────
-	function McpOverview({ serverRows, expandedServerRows, pluginRows }) {
+	function McpOverview({ serverRows, pluginRows }) {
 		const rootRef = useRef(null);
-		const measureRef = useRef(null);
+		const serverRef = useRef(null);
 		const [reservedHeight, setReservedHeight] = useState(0);
 		const reserveSpace = serverRows.length > 0 && pluginRows.length > 0;
 		useSafeLayoutEffect(() => {
 			const viewport = rootRef.current?.parentElement;
-			if (!viewport || !reserveSpace) { setReservedHeight(0); return; }
+			const server = serverRef.current;
+			if (!viewport || !reserveSpace || !server) { setReservedHeight(0); return; }
+			// A window resize and the observer's own viewport callback describe the
+			// same change, and each measure forces a synchronous layout. Coalesce
+			// them into one measure per frame.
+			let frame = 0;
+			const schedule = () => {
+				if (frame) return;
+				frame = requestAnimationFrame(() => { frame = 0; measure(); });
+			};
 			const measure = () => {
 				const style = getComputedStyle(viewport);
 				const available = viewport.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
-				const next = Math.max(0, Math.round(available / 2), measureRef.current?.offsetHeight || 0);
+				// Anchor the plugin section's top edge to the midpoint. Only the
+				// server section's actual, current height may push it down; never
+				// reserve space for tools that are not expanded yet.
+				const next = Math.max(0, Math.round(available / 2), server.offsetHeight);
 				setReservedHeight((prev) => prev === next ? prev : next);
 			};
 			measure();
-			const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+			const observer = typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : null;
 			observer?.observe(viewport);
-			if (measureRef.current) observer?.observe(measureRef.current);
-			window.addEventListener("resize", measure);
-			return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+			observer?.observe(server);
+			window.addEventListener("resize", schedule);
+			return () => {
+				if (frame) cancelAnimationFrame(frame);
+				observer?.disconnect();
+				window.removeEventListener("resize", schedule);
+			};
 		}, [reserveSpace]);
 		return h("div", { ref: rootRef, className: "cpm-mcp-overview", style: { position: "relative", maxWidth: "var(--cpm-grid-width)", margin: "0 auto", width: "100%" } },
-			reserveSpace && h("div", { ref: measureRef, "aria-hidden": true, style: { position: "absolute", top: 0, left: 0, width: "100%", visibility: "hidden", pointerEvents: "none", display: "flow-root" } },
-				h("div", { style: { fontSize: 14, fontWeight: 700, margin: "8px 4px 12px" } }, "服务器"),
-				h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", overflow: "hidden" } }, expandedServerRows),
-			),
 			serverRows.length > 0 && h("section", { className: "cpm-mcp-user-section", style: { display: "flow-root", minHeight: reserveSpace ? reservedHeight : undefined } },
-				h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
-				h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } }, serverRows),
+				// Measure the intrinsic content, not the section with minHeight applied:
+				// expansion can push the next section down, and collapse can release it.
+				h("div", { ref: serverRef, style: { display: "flow-root" } },
+					h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "8px 4px 12px" } }, "服务器"),
+					h("div", { style: { borderRadius: 16, border: "1px solid var(--cpm-border)", background: "var(--cpm-card-bg)", overflow: "hidden" } }, serverRows),
+				),
 			),
 			pluginRows.length > 0 && h("section", { className: "cpm-mcp-plugin-section", style: { display: "flow-root" } },
 				h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)", margin: "22px 4px 12px" } }, "来自插件"),
@@ -5758,7 +5835,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const renderMcpServerRow = (opts) => {
 			const { owner, name, transport, connected, canEdit, record, first, conn } = opts;
 			const key = `${owner}::${name}`;
-			const isExpanded = opts.measureExpanded || !!globalExpanded[key];
+			const isExpanded = !!globalExpanded[key];
 			const info = globalToolData[key];
 			const toolsList = info?.tools || [];
 			const disabledTools = info?.disabledTools || [];
@@ -6938,8 +7015,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const removePlugin = async (pluginName) => {
 			try {
-				await api("/plugins/" + encodeURIComponent(pluginName), { method: "DELETE" });
-				showToast("已卸载插件", "插件副本与技能注册已实时移除并生效。", { restart: false });
+				const result = await api("/plugins/" + encodeURIComponent(pluginName), { method: "DELETE" });
+				void showApplicationToast(showToast, result, "已卸载插件", "插件副本与技能注册已实时移除并生效。");
 				setView({ type: "browse", sourceId: activeSourceId });
 				await refreshState();
 				onInstalled();
@@ -7027,7 +7104,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				else if (result.converted && result.converted.length) parts.push(`${result.converted.length} 个子代理`);
 				if (result.connectors && result.connectors.length) parts.push(`${result.connectors.length} 个 MCP 服务`);
 				const summary = parts.length ? `${parts.join("、")}已就绪。` : "插件已安装就绪。";
-				showToast("安装完成", summary, { restart: false });
+				void showApplicationToast(showToast, result, "安装完成", summary);
 				setInstallFor(null);
 				await refreshState();
 				onInstalled();
@@ -7373,7 +7450,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			},
 					!hasMcps && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
 					h(McpOverview, {
-						expandedServerRows: mcps.map((m, i) => renderMcpServerRow({ owner: "user-mcp", row: m, name: m.name, transport: m.transport, connected: m.enabled === true, canEdit: true, first: i === 0, measureExpanded: true })),
 						serverRows: mcps.map((m, i) => renderMcpServerRow({
 							owner: "user-mcp",
 							row: m,
@@ -8125,6 +8201,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [saving, setSaving] = useState(false);
 		const [confirmDelete, setConfirmDelete] = useState(false);
 		const [deleting, setDeleting] = useState(false);
+		// The confirmation renders inside this dialog, so it must handle Escape
+		// first: the outer handler would otherwise close the whole editor and
+		// discard the form behind it.
+		useEffect(() => {
+			if (!confirmDelete) return;
+			const onKey = (e) => {
+				if (e.key !== "Escape") return;
+				e.stopPropagation();
+				e.preventDefault();
+				setConfirmDelete(false);
+			};
+			window.addEventListener("keydown", onKey, true);
+			return () => window.removeEventListener("keydown", onKey, true);
+		}, [confirmDelete]);
 		const upd = (patch) => setForm((prev) => ({ ...prev, ...patch }));
 		const argsJsonError = (s) => {
 			const t = String(s || "").trim();
@@ -8240,9 +8330,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					return;
 				}
 				if (initial && data.previousName) {
-					showToast("MCP 已重命名", `「${data.previousName}」已改名为「${data.name}」`, { restart: false });
+					void showApplicationToast(showToast, res, "MCP 已重命名", `「${data.previousName}」已改名为「${data.name}」`);
 				} else {
-					showToast(initial ? "MCP 已更新" : "MCP 已添加", `「${data.name}」已${initial ? "更新" : "注册为可用 MCP 服务"}`, { restart: false });
+					void showApplicationToast(showToast, res, initial ? "MCP 已更新" : "MCP 已添加", `「${data.name}」已${initial ? "更新" : "注册为可用 MCP 服务"}`);
 				}
 				await onSaved();
 			} catch (err) {
@@ -8255,14 +8345,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const removeMcp = async () => {
 			setDeleting(true);
 			try {
-				await api(`/mcps/${encodeURIComponent(initial.name)}`, { method: "DELETE" });
+				const result = await api(`/mcps/${encodeURIComponent(initial.name)}`, { method: "DELETE" });
 				const cacheKey = `user-mcp::${initial.name}`;
 				if (GLOBAL_MCP_TOOLS_CACHE[cacheKey]) {
 					delete GLOBAL_MCP_TOOLS_CACHE[cacheKey];
 					try { localStorage.setItem("cpm_mcp_tools_cache_v1", JSON.stringify(GLOBAL_MCP_TOOLS_CACHE)); } catch {}
 				}
 				setConfirmDelete(false);
-				showToast("MCP 已删除", `「${initial.name}」已从服务器列表移除`, { restart: false });
+				void showApplicationToast(showToast, result, "MCP 已删除", `「${initial.name}」已从服务器列表移除`);
 				await onSaved();
 			} catch (err) {
 				showToast("删除失败", cleanMcpError(err), { restart: false });
@@ -9450,12 +9540,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const toggle = async () => {
 			setToggling(true);
 			try {
-				await api(`/plugins/${record.name}/toggle`, {
+				const result = await api(`/plugins/${record.name}/toggle`, {
 					method: "POST",
 					body: JSON.stringify({ enabled: !record.enabled }),
 				});
 				await refreshState();
-				showToast(record.enabled ? "已禁用插件" : "已启用插件", "插件状态已实时更新并生效。", { restart: false });
+				void showApplicationToast(showToast, result, record.enabled ? "已禁用插件" : "已启用插件", "插件状态已实时更新并生效。");
 			} catch (e) {
 				showToast("操作失败", e.message, { restart: false });
 			} finally {
@@ -9466,12 +9556,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const toggleConn = async (connectorName, currentConnected) => {
 			setTogglingConn(connectorName);
 			try {
-				await api(`/plugins/${record.name}/connectors/${connectorName}/toggle`, {
+				const result = await api(`/plugins/${record.name}/connectors/${connectorName}/toggle`, {
 					method: "POST",
 					body: JSON.stringify({ enabled: !currentConnected }),
 				});
 				await refreshState();
-				showToast(!currentConnected ? "已连接 Connector" : "已断开 Connector", `MCP 服务 ${connectorName} 配置已实时更新。`, { restart: false });
+				void showApplicationToast(showToast, result, !currentConnected ? "已连接 Connector" : "已断开 Connector", `MCP 服务 ${connectorName} 配置已实时更新。`);
 			} catch (e) {
 				showToast("操作失败", e.message, { restart: false });
 			} finally {
@@ -9484,7 +9574,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			try {
 				const result = await api(`/plugins/${record.name}/update`, { method: "POST" });
 				await refreshState();
-				showToast("更新完成", `${result.skills.length} 个技能已实时重新就绪并生效。`, { restart: false });
+				void showApplicationToast(showToast, result, "更新完成", `${result.skills.length} 个技能已实时重新就绪并生效。`);
 			} catch (e) {
 				showToast("更新失败", e.message, { restart: false });
 			} finally {
@@ -9495,7 +9585,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const remove = async () => {
 			setBusy(true);
 			try {
-				await api(`/plugins/${record.name}`, { method: "DELETE" });
+				const result = await api(`/plugins/${record.name}`, { method: "DELETE" });
 				for (const k of Object.keys(GLOBAL_MCP_TOOLS_CACHE)) {
 					if (k.startsWith(`${record.name}::`)) {
 						delete GLOBAL_MCP_TOOLS_CACHE[k];
@@ -9505,7 +9595,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					localStorage.setItem("cpm_mcp_tools_cache_v1", JSON.stringify(GLOBAL_MCP_TOOLS_CACHE));
 				} catch {}
 				await refreshState();
-				showToast("已卸载插件", "插件副本与技能注册已实时移除并生效。", { restart: false });
+				void showApplicationToast(showToast, result, "已卸载插件", "插件副本与技能注册已实时移除并生效。");
 				onClose();
 			} catch (e) {
 				showToast("卸载失败", e.message, { restart: false });
@@ -10405,7 +10495,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 											return;
 										}
 										await refreshState();
-										showToast("配置成功", `已成功保存 ${authDialog.connectorName} 认证信息并注册为可用 MCP 服务`, { restart: false });
+										void showApplicationToast(showToast, res, "配置成功", `已成功保存 ${authDialog.connectorName} 认证信息并注册为可用 MCP 服务`);
 										closeAuthDialog();
 									} catch (err) {
 										showToast("保存失败", err.message);

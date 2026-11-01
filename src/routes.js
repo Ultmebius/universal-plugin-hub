@@ -15,19 +15,20 @@ import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
-  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, readMcpToolsState,
+  fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
 import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
 import { remoteConfigFromEntry } from './oauth-config.js'
+import { scheduledResult } from './runtime.js'
 
 const API_PREFIX = '/universal-plugin-hub/api'
 
-export function mountRoutes(webServer, skills = null) {
+export function mountRoutes(webServer, skills = null, applyProfile = null) {
   const r = webServer.register({
     kind: 'prefix',
     path: API_PREFIX,
-    handler: (req, res) => handle(req, res, API_PREFIX, skills),
+    handler: (req, res) => handle(req, res, API_PREFIX, skills, applyProfile),
   })
   return () => {
     try { if (typeof r === 'function') r() } catch {}
@@ -38,23 +39,8 @@ function normalizeMcpName(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+|-+$/g, '') || 'mcp'
 }
 
-function userMcpConfig(name, body) {
-  return {
-    name,
-    transport: body.transport === 'http' ? 'http' : 'stdio',
-    url: body.url || null,
-    command: body.command || null,
-    args: Array.isArray(body.args) ? body.args : [],
-    env: body.env && typeof body.env === 'object' ? body.env : {},
-    headers: body.headers && typeof body.headers === 'object' ? body.headers : {},
-    oauth: body.oauth || 'none',
-    oauthClientId: body.oauthClientId || '',
-    oauthCallbackPort: body.oauthCallbackPort || null,
-    oauthScope: body.oauthScope || '',
-  }
-}
 
-async function handle(req, res, prefix = API_PREFIX, skills = null) {
+async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile = null) {
   const url = new URL(req.url, 'http://localhost')
   const path = url.pathname.slice(prefix.length).replace(/\/+$/, '') || '/'
   const method = req.method ?? 'GET'
@@ -116,6 +102,19 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
           ...p,
           skillsEnabled: isScanDirRegistered(join(installedDir(p.name), 'skills')),
         })),
+      })
+    }
+
+    // The runtime outcome of the last saved change. It is intentionally a
+    // separate read: applying a change can restart this plugin, so the write
+    // answers immediately and the result arrives here.
+    if (method === 'GET' && path === '/apply-status') {
+      const token = Number(url.searchParams.get('token'))
+      return sendJson(res, 200, {
+        ok: true,
+        ...(typeof applyProfile?.status === 'function'
+          ? applyProfile.status(Number.isFinite(token) ? token : undefined)
+          : { application: 'unknown' }),
       })
     }
 
@@ -323,7 +322,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       for (const block of patch) {
         if (!block || !Array.isArray(block.insert)) continue
         for (const item of block.insert) {
-          if (!item || typeof item.id !== 'string' || !item.id.startsWith('mcp-user-mcp-')) continue
+          if (!item || typeof item.id !== 'string' || !item.id.startsWith(getConnectorId('user-mcp', ''))) continue
           const cfg = item.config || {}
           if (cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
             state.userMcps.push(userMcpConfig(cfg.serverName, {
@@ -342,15 +341,22 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
           const entry = getConnectorEntry('user-mcp', x.name)
           const remote = remoteConfigFromEntry(entry?.config) || readMcpToolsState()[`user-mcp::${x.name}`]?.savedOAuthRemoteConfig
           const client = remote?.oauth === 'custom' ? readSavedOAuthClient('user-mcp', x.name, remote.url, remote.oauth) : null
+          // The live registration says what is *running*; the saved definition
+          // says what the editor should show. The client id comes from the
+          // credential record, since the definition never stores the secret.
           return {
             ...x,
             ...(remote ? {
               transport: 'http', url: remote.url, headers: remote.headers,
-              oauth: remote.oauth, oauthClientId: client?.clientId || remote.oauthClientId,
+              oauth: remote.oauth,
+              oauthClientId: client?.clientId || x.oauthClientId || remote.oauthClientId,
               oauthHasClientSecret: client?.hasClientSecret || false,
-              oauthCallbackPort: remote.oauthCallbackPort || null, oauthScope: remote.oauthScope || '',
+              // Fall back to the live config only when the definition has no
+              // opinion, so a cleared field stays cleared.
+              oauthCallbackPort: x.oauthCallbackPort ?? remote.oauthCallbackPort ?? null,
+              oauthScope: x.oauthScope ?? remote.oauthScope ?? '',
             } : {}),
-            enabled: enabledIds.has('mcp-user-mcp-' + x.name),
+            enabled: enabledIds.has(getConnectorId('user-mcp', x.name)),
           }
         })
       return sendJson(res, 200, { ok: true, mcps })
@@ -383,7 +389,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
         state.userMcps.push(userMcpConfig(name, body))
         writeState(state)
       }
-      return sendJson(res, 200, result)
+      // A rejected create registered nothing, so there is nothing to apply.
+      if (!result || !result.ok) return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId('user-mcp', name)]))
     }
 
     if (method === 'POST' && path === '/mcps/update') {
@@ -400,7 +408,15 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       const idx = state.userMcps.findIndex((x) => x && x.name === (previousName || name))
       if (idx < 0) throw new Error(`MCP 不存在：${previousName || name}`)
       if (previousName && previousName !== name) {
-        return sendJson(res, 200, renameUserMcp(previousName, name, body))
+        // Capture enablement before the rename: a disabled server registers
+        // nothing, so asking HMR to start its id would target an entry that
+        // does not exist.
+        const renamingEnabled = !!getConnectorEntry('user-mcp', previousName)
+        const renamed = renameUserMcp(previousName, name, body)
+        // A rename that failed registered nothing, so there is nothing to apply.
+        if (!renamed || !renamed.ok) return sendJson(res, 200, renamed)
+        return sendJson(res, 200, scheduledResult(
+          renamed, applyProfile, renamingEnabled ? [getConnectorId('user-mcp', name)] : []))
       }
       const wasEnabled = !!getConnectorEntry('user-mcp', name)
       let result = { ok: true }
@@ -408,17 +424,28 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
         result = saveConnectorAuth('user-mcp', name, body)
         if (!result || !result.ok) return sendJson(res, 200, result)
       }
-      state.userMcps[idx] = userMcpConfig(name, body)
+      // Pass the stored record so an edit keeps the URL history a later delete
+      // needs to find every credential this server ever issued.
+      state.userMcps[idx] = userMcpConfig(name, body, state.userMcps[idx])
       writeState(state)
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile, wasEnabled ? [getConnectorId('user-mcp', name)] : []))
     }
 
     // One segment only: `/mcps/<name>/tools` belongs to the tool routes below.
-    if (method === 'DELETE' && path.startsWith('/mcps/') && !path.slice('/mcps/'.length).includes('/')) {
+    // Decode and validate before the single-segment test, or an encoded slash
+    // slips past it; and reject a name that normalizes to nothing rather than
+    // falling back to the literal "mcp", which could match a real server.
+    if (method === 'DELETE' && path.startsWith('/mcps/')) {
+      // Check segments *after* decoding: `prod%2Fdb` decodes to a two-segment
+      // path and must not fall through to the server named `prod-db`.
+      const decoded = decodeURIComponent(path.slice('/mcps/'.length))
+      if (decoded.includes('/')) return sendJson(res, 404, { error: 'not found' })
       requireSameOrigin(req)
-      const name = safeSegment(normalizeMcpName(decodeURIComponent(path.slice('/mcps/'.length))), 'MCP 名称')
+      const normalized = String(decoded || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+|-+$/g, '')
+      if (!normalized) throw new Error('无效的 MCP 名称')
+      const name = safeSegment(normalized, 'MCP 名称')
       const result = removeUserMcp(name)
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 
     if (method === 'POST' && path === '/mcps/toggle') {
@@ -430,10 +457,12 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       if (!cfg) throw new Error(`MCP 不存在：${name}`)
       if (body.enabled !== false) {
         const result = saveConnectorAuth('user-mcp', name, cfg)
-        return sendJson(res, 200, result)
+        // A rejected enable registered nothing: do not schedule a reconcile.
+        if (!result || !result.ok) return sendJson(res, 200, result)
+        return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId('user-mcp', name)]))
       }
       unregisterConnector('user-mcp', name)
-      return sendJson(res, 200, { ok: true })
+      return sendJson(res, 200, scheduledResult({ ok: true }, applyProfile))
     }
 
     // ── user MCP tool list / per-tool toggle (same shape as plugin connectors) ──
@@ -492,7 +521,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
       const result = toggleConnector(pluginName, connectorName, body.enabled !== false)
-      return sendJson(res, 200, result)
+      // A rejected toggle registered nothing: do not schedule a reconcile.
+      if (!result || !result.ok) return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile, body.enabled !== false ? [getConnectorId(pluginName, connectorName)] : []))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/verify')) {
@@ -512,7 +543,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
       const result = saveConnectorAuth(pluginName, connectorName, body)
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId(pluginName, connectorName)]))
     }
 
     // ── plugin detail ────────────────────────────────────────────────────
@@ -588,14 +619,14 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
         pluginName,
       })
       invalidateMarketplaceCache(sourceId)
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/toggle')) {
       requireSameOrigin(req)
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/toggle'.length), 'plugin name')
       const body = await readJsonBody(req)
-      return sendJson(res, 200, await togglePlugin(pluginName, body.enabled === true))
+      return sendJson(res, 200, scheduledResult(await togglePlugin(pluginName, body.enabled === true), applyProfile))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/update')) {
@@ -603,7 +634,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/update'.length), 'plugin name')
       const result = await updatePlugin(pluginName)
       invalidateMarketplaceCache()
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 
     if (method === 'POST' && path === '/restart') {
@@ -646,7 +677,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null) {
       const pluginName = safeSegment(path.slice('/plugins/'.length), 'plugin name')
       const result = uninstallPlugin(pluginName)
       invalidateMarketplaceCache()
-      return sendJson(res, 200, result)
+      return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 
     return sendJson(res, 404, { error: 'not found' })

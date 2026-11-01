@@ -325,10 +325,14 @@ export function removeUserMcp(connectorName) {
   // Credential keys cover both OAuth modes; the mode the server was saved with
   // decides which file exists, and deleting a missing one is a no-op.
   const remote = remoteConfigFromEntry(getConnectorEntry('user-mcp', connectorName)?.config) || saved
-  const url = remote?.url
-  const credentialKeys = url
-    ? ['auto_register', 'custom'].map((mode) => oauthCredentialKey('user-mcp', connectorName, url, mode))
-    : []
+  // A server can have been edited to a new URL since it signed in, so clear the
+  // record for every URL it is known to have used — the live one and the stored
+  // one — or the old sign-in survives the delete and is inherited on re-add.
+  const urls = new Set([remote?.url, saved.url, ...(Array.isArray(saved.usedUrls) ? saved.usedUrls : [])]
+    .filter((u) => typeof u === 'string' && u.trim()))
+  const credentialKeys = [...urls].flatMap((u) =>
+    ['auto_register', 'custom'].map((mode) => oauthCredentialKey('user-mcp', connectorName, u, mode)))
+  const url = remote?.url || saved.url || null
 
   unregisterConnector('user-mcp', connectorName)
 
@@ -346,6 +350,39 @@ export function removeUserMcp(connectorName) {
   state.userMcps = (Array.isArray(state.userMcps) ? state.userMcps : []).filter((x) => x && x.name !== connectorName)
   writeState(state)
   return { ok: true, name: connectorName }
+}
+
+/**
+ * Normalize one saved user MCP definition. `fallback` supplies the previous
+ * record, so a body that omits a field inherits the stored value instead of
+ * resetting it.
+ */
+export function userMcpConfig(name, body = {}, fallback = {}) {
+  // Only a *missing* field inherits the stored value. An explicit empty string
+  // is the user clearing the field; treating it as "keep previous" would make
+  // the editor unable to remove a callback port, scope or client id.
+  const pick = (value, previous) => (value === undefined ? previous : value)
+  // Remember every URL this server has used. A credential file is named by a
+  // hash of its URL, so once a server is edited to a new URL the old sign-in is
+  // unreachable unless its URL was recorded here.
+  const usedUrls = new Set(Array.isArray(fallback.usedUrls) ? fallback.usedUrls : [])
+  for (const candidate of [fallback.url, body.url]) {
+    if (typeof candidate === 'string' && candidate.trim()) usedUrls.add(candidate)
+  }
+  return {
+    name,
+    usedUrls: [...usedUrls],
+    transport: (body.transport || fallback.transport) === 'http' ? 'http' : 'stdio',
+    url: pick(body.url, fallback.url ?? null),
+    command: pick(body.command, fallback.command ?? null),
+    args: Array.isArray(body.args) ? body.args : (fallback.args || []),
+    env: body.env && typeof body.env === 'object' ? body.env : (fallback.env || {}),
+    headers: body.headers && typeof body.headers === 'object' ? body.headers : (fallback.headers || {}),
+    oauth: body.oauth || fallback.oauth || 'none',
+    oauthClientId: pick(body.oauthClientId, fallback.oauthClientId || ''),
+    oauthCallbackPort: pick(body.oauthCallbackPort, fallback.oauthCallbackPort ?? null),
+    oauthScope: pick(body.oauthScope, fallback.oauthScope || ''),
+  }
 }
 
 /**
@@ -367,33 +404,62 @@ export function renameUserMcp(oldName, newName, payload) {
   if (state.userMcps.some((x) => x && x.name === newName)) throw new Error(`已存在同名 MCP：${newName}`)
 
   const saved = state.userMcps[idx]
-  const wasEnabled = !!getConnectorEntry('user-mcp', oldName)
-  const remote = remoteConfigFromEntry(getConnectorEntry('user-mcp', oldName)?.config)
+  // One lookup for both facts: `readCordisPatch` re-reads and re-parses the
+  // patch file on every call, and this runs inside a user-visible action.
+  const entry = getConnectorEntry('user-mcp', oldName)
+  const wasEnabled = !!entry
+  const remote = remoteConfigFromEntry(entry?.config)
   const url = remote?.url || saved.url || payload?.url || null
   const modes = ['auto_register', 'custom']
+  // Carry every URL this server has used, exactly as `removeUserMcp` clears
+  // them: the sign-in may belong to a URL the server has since been edited
+  // away from, and copying only the current one would strand it.
+  const urls = [...new Set([url, saved.url, ...(Array.isArray(saved.usedUrls) ? saved.usedUrls : [])]
+    .filter((u) => typeof u === 'string' && u.trim()))]
 
-  if (url) {
+  for (const source of urls) {
     for (const mode of modes) {
-      const from = oauthCredentialKey('user-mcp', oldName, url, mode)
-      const to = oauthCredentialKey('user-mcp', newName, url, mode)
+      const from = oauthCredentialKey('user-mcp', oldName, source, mode)
+      const to = oauthCredentialKey('user-mcp', newName, source, mode)
       const record = readOAuthRecord(from)
       if (record && Object.keys(record).length > 0) writeOAuthRecord(to, record)
     }
   }
 
   if (wasEnabled) {
-    const clientId = url ? readOAuthRecord(oauthCredentialKey('user-mcp', newName, url, 'custom')).customClient?.client_id : ''
-    const result = saveConnectorAuth('user-mcp', newName, {
-      ...payload,
-      oauthClientId: payload?.oauthClientId || clientId || '',
-    })
-    if (!result || !result.ok) {
+    const clientId = url ? readSavedOAuthClient('user-mcp', newName, url, 'custom').clientId : ''
+    // `saveConnectorAuth` reports failure both by returning `{ok:false}` and by
+    // throwing (e.g. a missing OAuth client id), so the rollback lives in one
+    // place that both paths reach.
+    const rollback = () => {
+      for (const source of urls) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', newName, source, mode))
+    }
+    let result
+    try {
+      result = saveConnectorAuth('user-mcp', newName, {
+        ...payload,
+        // A cleared field stays cleared: falling back to the stored id would put
+        // the old client back into the live registration while the definition
+        // says empty, and the next toggle would fail on the mismatch.
+        oauthClientId: payload?.oauthClientId !== undefined ? payload.oauthClientId : (clientId || ''),
+      })
+    } catch (error) {
       // Leave the old server untouched: a failed rename must not strand the
       // user with neither name registered.
-      if (url) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', newName, url, mode))
+      rollback()
+      throw error
+    }
+    if (!result || !result.ok) {
+      rollback()
       return result
     }
-    unregisterConnector('user-mcp', oldName)
+    // Only drop the old registration when it is a different entry. Names are
+    // normalized but ids are slugified, so `a.dot` and `a-dot` share one id —
+    // unregistering by the old name would delete the entry just written and
+    // leave the server silently disabled.
+    if (getConnectorId('user-mcp', oldName) !== getConnectorId('user-mcp', newName)) {
+      unregisterConnector('user-mcp', oldName)
+    }
   }
 
   const toolsState = readMcpToolsState()
@@ -409,9 +475,14 @@ export function renameUserMcp(oldName, newName, payload) {
   }
   MEMORY_TOOLS_CACHE.delete(oldKey)
   MEMORY_TOOLS_CACHE.delete(newKey)
-  if (url) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', oldName, url, mode))
+  for (const source of urls) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', oldName, source, mode))
 
-  state.userMcps[idx] = { ...saved, name: newName }
+  // Keep the whole edited form, not just the name: `/mcps/update` routes a
+  // rename here with the same body a plain save sends, so a rename that also
+  // edits command/url/args/env/headers must persist those edits — and on an
+  // enabled server the patch was already written from them, so storing the old
+  // record would silently revert the edit on the next toggle.
+  state.userMcps[idx] = userMcpConfig(newName, payload, saved)
   writeState(state)
   return { ok: true, name: newName, previousName: oldName }
 }
