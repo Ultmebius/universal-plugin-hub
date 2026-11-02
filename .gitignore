@@ -77,6 +77,9 @@ oauth-credentials/
 /cordis.yml
 /cordis.local.yml
 
+# 首页大图（3.9 MB，仅本地保留；商店截图见 screenshots.json）
+/assets/hero.png
+
 # 本地备份及发布产物
 /backups/
 *.bak
