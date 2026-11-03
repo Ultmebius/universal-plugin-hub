@@ -4,7 +4,7 @@ English | [简体中文](README.zh.md)
 
 Use plugins from ecosystems such as Claude Code and Codex in DeepSeek Harness (DSH), and manage plugins, skills, and MCP in one place.
 
-Universal Plugin Hub expands the plugin sources available to DSH. Browse the built-in official Claude catalog, install Claude Code and Codex plugins, add your own Git repositories as plugin sources, or upload plugins and skills for centralized browsing, installation, updates, and management. It also automatically scans your local skills directory, lets you enable or disable individual skills, and manages MCP servers, connection settings, and tool switches in the same interface.
+Universal Plugin Hub expands the plugin sources available to DSH. Browse the built-in official Claude catalog, install Claude Code and Codex plugins, add your own GitHub repositories as plugin sources, or install plugins from marketplaces, then browse, update, and manage them in one place. It also automatically scans your local skills directory, lets you enable or disable individual skills, and manages MCP servers, connection settings, and tool switches in the same interface.
 
 After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP, Hooks, and LSP configuration and converts or registers those capabilities with DSH. Skills and commands become available from the composer's `/` menu, subagents use DSH's delegation tool, and bundled MCP, Hooks, and LSP are managed with the plugin.
 
@@ -92,6 +92,7 @@ dsh plugin add universal-plugin-hub
 4. **Manage installed plugins**: Click **Manage** on an installed plugin to configure connectors, manage capabilities, update, or uninstall it.
 5. **Use MCP tools**: Open the **MCP** tab to view servers and plugin connectors. Expand a server's tools to view their descriptions and control which tools are enabled.
 6. **Manage local skills**: Once local skills are detected, open the **Skills** tab, click a skill to read its instructions, and use the switch in the list or detail page to enable or disable it. Refresh the list after adding, editing, or deleting skill files.
+7. **Reorder tabs**: Long-press a source tab and drag it to change the tab order.
 
 After installing a plugin with Skills or Commands, find its skills in the DSH composer's `/` menu. For a plugin with MCP connectors, open the **From plugins** group in the MCP tab to configure connections and inspect tools.
 

@@ -4,7 +4,7 @@
 
 在 DeepSeek Harness（DSH）中使用 Claude Code、Codex 等软件生态的插件，一站式管理插件、Skills 与 MCP。
 
-Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claude 官方插件目录，安装 Claude Code 和 Codex 生态的插件，也可以添加自己的 Git 仓库作为插件源，或上传插件和 Skills，统一浏览、安装、更新和管理。已有的本地 Skills 目录会自动扫描，支持逐个启用或停用；MCP 服务器、连接配置和工具开关也在同一界面中管理。
+Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claude 官方插件目录，安装 Claude Code 和 Codex 生态的插件，也可以自己添加 GitHub 仓库作为插件源，或者从插件市场安装插件，统一浏览、更新和管理。已有的本地 Skills 目录会自动扫描，支持逐个启用或停用；MCP 服务器、连接配置和工具开关也在同一界面中管理。
 
 安装插件后，Hub 会识别其中的 Skills、Commands、Agents、MCP、Hooks 和 LSP 配置，将相应能力转换或注册到 DSH。技能与命令从输入框的 `/` 菜单调用，子代理通过 DSH 的委派工具使用，插件附带的 MCP、Hooks 与 LSP 随插件统一管理。
 
@@ -92,6 +92,7 @@ dsh plugin add universal-plugin-hub
 4. **管理已安装插件**：点击插件卡片上的 **管理**，配置连接器、管理能力、更新或卸载插件。
 5. **使用 MCP 工具**：进入 **MCP** 页查看服务器和插件连接器，展开服务器工具列表，查看工具说明并控制启用状态。
 6. **管理本地 Skills**：检测到本地技能后，打开 **Skills** 标签，点击技能查看说明，通过列表或详情页的开关控制启用状态。新增、修改或删除技能后，点击刷新更新列表。
+7. **调整标签顺序**：长按插件源标签并拖动，可以调整标签的排列顺序。
 
 安装提供 Skills 或 Commands 的插件后，可以在 DSH 输入框的 `/` 菜单中找到相应技能。安装带有 MCP 的插件后，可以在 MCP 页的 **来自插件** 分组中配置连接器并查看工具。
 
