@@ -4,7 +4,7 @@ English | [简体中文](README.zh.md)
 
 Use plugins from ecosystems such as Claude Code and Codex in DeepSeek Harness (DSH), and manage plugins, skills, and MCP in one place.
 
-Universal Plugin Hub expands the plugin sources available to DSH. Browse the built-in official Claude catalog and install Claude Code and Codex plugins, add your own GitHub repositories as plugin sources, or add a GitHub plugin marketplace and install plugins from it. It also automatically scans your local skills directory, lets you enable or disable individual skills, and manages MCP servers, connection settings, and tool switches in the same interface.
+Universal Plugin Hub expands the plugin sources available to DSH. Browse the built-in official Claude catalog and install Claude Code and Codex plugins. You can also add GitHub repositories yourself as plugin sources, or add a GitHub plugin marketplace and install plugins from it. It also automatically scans your local skills directory, lets you enable or disable individual skills, and manages MCP servers, connection settings, and tool switches in the same interface.
 
 After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP, Hooks, and LSP configuration and converts or registers those capabilities with DSH. Skills and commands become available from the composer's `/` menu, subagents use DSH's delegation tool, and bundled MCP, Hooks, and LSP are managed with the plugin.
 
