@@ -4,7 +4,7 @@
 
 在 DeepSeek Harness（DSH）中使用 Claude Code、Codex 等软件生态的插件，一站式管理插件、Skills 与 MCP。
 
-Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claude 官方插件目录，安装 Claude Code 和 Codex 生态的插件，也可以自己添加 GitHub 仓库作为插件源，或者从插件市场安装插件，统一浏览、更新和管理。已有的本地 Skills 目录会自动扫描，支持逐个启用或停用；MCP 服务器、连接配置和工具开关也在同一界面中管理。
+Universal Plugin Hub 为 DSH 扩展插件来源。你可以浏览内置的 Claude 官方插件目录，安装 Claude Code 和 Codex 生态的插件；也可以添加自己的 GitHub 仓库作为插件源，或者添加 GitHub 插件市场，在市场里浏览并安装插件。已有的本地 Skills 目录会自动扫描，支持逐个启用或停用；MCP 服务器、连接配置和工具开关也在同一界面中管理。
 
 安装插件后，Hub 会识别其中的 Skills、Commands、Agents、MCP、Hooks 和 LSP 配置，将相应能力转换或注册到 DSH。技能与命令从输入框的 `/` 菜单调用，子代理通过 DSH 的委派工具使用，插件附带的 MCP、Hooks 与 LSP 随插件统一管理。
 
