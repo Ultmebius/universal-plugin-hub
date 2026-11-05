@@ -160,6 +160,44 @@ test('discovery, resources, provider control and persistence', async () => {
   } finally { rmSync(temp, { recursive: true, force: true }) }
 })
 
+test('a plugin mirror stays out of the Skills tab, a user copy of the same name does not', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'hub-plugin-owned-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAgents = process.env.DSH_AGENTS_HOME
+  process.env.DSH_HOME = join(fixture, 'dsh')
+  process.env.DSH_AGENTS_HOME = join(fixture, 'agents')
+  try {
+    const dshRoot = join(process.env.DSH_HOME, 'skills')
+    const pluginSkills = join(installedDir('demo'), 'skills')
+    write(join(pluginSkills, 'mirrored', 'SKILL.md'), '---\nname: mirrored\ndescription: from plugin\n---\nbody\n')
+    write(join(pluginSkills, 'left-behind', 'SKILL.md'), '---\nname: left-behind\ndescription: from plugin\n---\nbody\n')
+    // The hub mirrored these at install time; the user also keeps their own.
+    write(join(dshRoot, 'mirrored', 'SKILL.md'), '---\nname: mirrored\ndescription: from plugin\n---\nbody\n')
+    write(join(dshRoot, 'left-behind', 'SKILL.md'), '---\nname: left-behind\ndescription: from plugin\n---\nbody\n')
+    // A same-named directory the user edited is theirs, not the plugin's.
+    write(join(pluginSkills, 'edited', 'SKILL.md'), '---\nname: edited\ndescription: from plugin\n---\nplugin\n')
+    write(join(dshRoot, 'edited', 'SKILL.md'), '---\nname: edited\ndescription: mine\n---\nmy own edits\n')
+    write(join(process.env.DSH_AGENTS_HOME, 'skills', 'own', 'SKILL.md'), '---\nname: own\ndescription: mine\n---\nbody\n')
+    writeState({ ...readState(), plugins: [{ name: 'demo', sourceId: 'local', enabled: false }] })
+    assert.deepEqual(createSkillsManager().entries().map(s => s.name), ['edited', 'own'])
+    writeState({ ...readState(), plugins: [{ name: 'demo', sourceId: 'local', enabled: true }] })
+    assert.deepEqual(createSkillsManager().entries().map(s => s.name), ['edited', 'own'])
+
+    // An upload at the same name as a shipped skill is the user's, never hidden.
+    write(join(dshRoot, 'taken', 'SKILL.md'), '---\nname: taken\ndescription: uploaded\n---\nmine\n')
+    write(join(pluginSkills, 'taken', 'SKILL.md'), '---\nname: taken\ndescription: from plugin\n---\nplugin\n')
+    writeState({ ...readState(), uploadedSkills: [{ name: 'taken', kind: 'directory', sourceDir: join(fixture, 'private'), target: join(dshRoot, 'taken') }] })
+    assert.deepEqual(createSkillsManager().entries().map(s => s.name), ['edited', 'own', 'taken'])
+  } finally {
+    writeState({ ...readState(), plugins: [], uploadedSkills: [] })
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAgents === undefined) delete process.env.DSH_AGENTS_HOME
+    else process.env.DSH_AGENTS_HOME = previousAgents
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('cross-root duplicates keep one card and switch both copies', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'hub-two-roots-'))
   const previousHome = process.env.DSH_HOME

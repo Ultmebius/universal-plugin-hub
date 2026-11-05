@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { readState, writeState, dshSkillsDir, installedDir } from './store.js'
-import { uploadedSkillRecord } from './skill-uploads.js'
+import { isUploadedSkillTarget, uploadedSkillRecord } from './skill-uploads.js'
 import { formatDisplayName } from './parser.js'
 
 const PROVIDER = 'universal-plugin-hub-skills'
@@ -147,21 +147,44 @@ function defaultSkillRoots() {
   ]
 }
 
+/**
+ * Keys must be produced and consumed by this one function: realpathSync returns
+ * the mixed-case display path on Windows, so a raw canonical lookups never
+ * matches a lowercased key.
+ */
+function pathKey(path) {
+  const value = canonical(path)
+  return process.platform === 'win32' ? value.toLowerCase() : value
+}
+
+function readText(path) {
+  try { return readFileSync(path, 'utf8') } catch { return null }
+}
+
+/**
+ * Skills the hub mirrored into $DSH_HOME/skills on behalf of an installed
+ * plugin. They belong to the plugin's own row and stay out of the Skills tab.
+ *
+ * Ownership is decided by content, not by name: the mirror is a byte copy of
+ * the plugin's SKILL.md, so a same-named directory holding anything else is the
+ * user's own skill (or a direct upload) and must stay visible. A disabled
+ * plugin leaves no mirror behind, and a leftover one still matches its source,
+ * so the check covers both states without reading `enabled`.
+ */
 function pluginOwnedSkillPaths() {
   const paths = new Set()
-  const canonicalKey = path => {
-    const value = canonical(path)
-    return process.platform === 'win32' ? value.toLowerCase() : value
-  }
   for (const plugin of readState().plugins || []) {
-    if (plugin.enabled === false) continue
     const root = join(installedDir(plugin.name), 'skills')
     let children
     try { children = readdirSync(root, { withFileTypes: true }) } catch { continue }
     for (const child of children) {
       if (!child.isDirectory() && !child.isSymbolicLink()) continue
-      const dir = join(root, child.name)
-      if (existsSync(join(dir, 'SKILL.md')) || existsSync(join(dir, 'skill.md'))) paths.add(canonicalKey(join(dshSkillsDir(), child.name)))
+      const source = readText(join(root, child.name, 'SKILL.md'))
+      if (source === null) continue
+      const target = join(dshSkillsDir(), child.name)
+      if (isUploadedSkillTarget(target)) continue
+      if (readText(join(target, 'SKILL.md')) !== source) continue
+      paths.add(pathKey(target))
     }
   }
   return paths
@@ -180,13 +203,19 @@ function pluginOwnedSkillPaths() {
  */
 export function discoverSkillsFromRoots(roots = defaultSkillRoots()) {
   const sorted = [...roots].filter(root => root?.path).sort((a, b) => (a.rank || 300) - (b.rank || 300))
+  const pluginPaths = pluginOwnedSkillPaths()
   const claimed = new Map()
   for (const root of sorted) {
-    const items = discoverRootSkills(root.path).map(item => {
-      item.skillSource = root.source
-      item.rank = root.rank
-      return item
-    })
+    const items = discoverRootSkills(root.path)
+      // A plugin mirror is dropped before merging, not after: it must not claim
+      // its name at the higher user-dsh rank and take the user's own copy in
+      // another root down with it.
+      .filter(item => !pluginPaths.has(pathKey(item.directory)))
+      .map(item => {
+        item.skillSource = root.source
+        item.rank = root.rank
+        return item
+      })
     for (const item of mergeSkillLocations(items)) {
       const current = claimed.get(item.name)
       if (!current) {
@@ -202,7 +231,6 @@ export function discoverSkillsFromRoots(roots = defaultSkillRoots()) {
       }
     }
   }
-  const pluginPaths = pluginOwnedSkillPaths()
   const result = []
   for (const { cards, shadowed } of claimed.values()) {
     for (const card of cards) {
@@ -212,8 +240,7 @@ export function discoverSkillsFromRoots(roots = defaultSkillRoots()) {
       }
       card.duplicate = cards.length > 1
       card.uploaded = card.skillSource === 'user-dsh' && !!uploadedSkillRecord(card.name)
-      card.managedByPlugin = pluginPaths.has(canonical(card.directory))
-      if (!card.managedByPlugin) result.push(card)
+      result.push(card)
     }
   }
   return result.sort((a, b) => a.name.localeCompare(b.name))
