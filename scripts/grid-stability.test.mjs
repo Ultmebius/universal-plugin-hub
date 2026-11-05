@@ -414,3 +414,17 @@ test('the CSS template stays a single string literal', () => {
   // And the whole file must still parse as one script.
   assert.doesNotThrow(() => parse(client, { ecmaVersion: 'latest' }))
 })
+
+test('scrolling surfaces keep their fade without animating the mask itself', () => {
+  // mask-image is not a compositor property. Keep the existing multi-stop fade,
+  // but never transition the mask: repainting that transition across the whole
+  // scroller is what made the edge shimmer.
+  for (const sel of ['.cpm-grid.mask-bottom', '.cpm-manage.mask-bottom', '.cpm-detail.mask-bottom']) {
+    const start = client.indexOf(sel)
+    assert.ok(start >= 0, `${sel} is missing`)
+    const block = client.slice(start, client.indexOf('}', start))
+    assert.match(block, /mask-image:/, `${sel} lost its fade`)
+  }
+  assert.doesNotMatch(client, /transition:\s*mask-image/)
+  assert.doesNotMatch(client, /className: "cpm-(?:scroll-fade|detail-fade(?:-top)?)"/)
+})

@@ -804,7 +804,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	/* The top bar's last row already ends ~10px above the rule under it, so the
 	   full 16px grid inset left the first card floating well clear of it. */
 	padding: 10px 24px 28px 24px;
-	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
 	box-sizing: border-box;
 	width: 100%;
 	/* Reserve the scrollbar track on every list surface. Centered columns are
@@ -1054,7 +1053,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overflow-y: auto;
 	padding: 16px 24px 28px 24px;
 	width: 100%;
-	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -1308,7 +1306,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	padding: 16px 24px 28px 24px;
 	width: 100%;
 	background: var(--cpm-bg);
-	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -1448,6 +1445,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
  * collapsed to a negative number and threw the knob out of the track. */
 .cpm-toggle.on::after {
 	translate: calc(var(--sw-w) - var(--sw-knob) - var(--sw-inset) * 2) 0;
+}
+/* Restoring a saved Skill state is not a toggle interaction. Keep both the
+   track and its generated knob still until this control is used. */
+.cpm-skill-toggle:not(.is-interactive),
+.cpm-skill-toggle:not(.is-interactive)::after {
+	transition: none;
 }
 /* A list row's switch restates the mockup's ratios at the pill's size: the
    pill is 24px tall, so the track is 24 and the knob 70% of it. The same
@@ -3097,7 +3100,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overscroll-behavior: contain;
 	scrollbar-width: none;
 	-ms-overflow-style: none;
-	transition: mask-image 0.2s ease, -webkit-mask-image 0.2s ease;
 	padding-bottom: 2px;
 }
 .cpm-mcp-tool-popover-body::-webkit-scrollbar {
@@ -4203,10 +4205,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	function SkillSwitch({ skill, busy, onToggle }) {
-			return h("input", { type: "checkbox", switch: "", className: "cpm-toggle" + (skill.enabled ? " on" : ""), role: "switch", checked: !!skill.enabled,
+			const [interactive, setInteractive] = useState(false);
+			return h("input", { type: "checkbox", switch: "", className: "cpm-toggle cpm-skill-toggle" + (skill.enabled ? " on" : "") + (interactive ? " is-interactive" : ""), role: "switch", checked: !!skill.enabled,
 				"aria-label": `启用 ${skill.name}`, style: { appearance: "none", margin: 0 },
 				disabled: busy || !skill.available || !!skill.error,
-				onClick: e => e.stopPropagation(), onChange: e => onToggle(skill, e.currentTarget.checked) });
+				onClick: e => e.stopPropagation(), onChange: e => { setInteractive(true); onToggle(skill, e.currentTarget.checked); } });
 	}
 
 		function useDetailScrollMask(identity, containerRef, content) {
@@ -6001,7 +6004,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// Detail View Data Fetching & LRU Cache
 		const [detail, setDetail] = useState(null);
 		const detailCacheRef = useRef({});
-		const gridMaskRafRef = useRef(null);
 
 		const prefetchDetail = useCallback((sourceId, pluginName) => {
 				if (!sourceId || !pluginName || sourceId === "skills-local") return;
@@ -6018,20 +6020,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, []);
 
 		const updateGridMask = useCallback(() => {
-			if (gridMaskRafRef.current) return;
-			gridMaskRafRef.current = requestAnimationFrame(() => {
-				gridMaskRafRef.current = null;
-				const el = gridRef.current;
-				if (!el) return;
-				const { scrollTop, scrollHeight, clientHeight } = el;
-				const maxScroll = scrollHeight - clientHeight;
-				if (maxScroll <= 4) {
-					setGridMaskClass("");
-					return;
-				}
-				const canScrollDown = scrollTop < maxScroll - 4;
-				setGridMaskClass(canScrollDown ? " mask-bottom" : "");
-			});
+			const el = gridRef.current;
+			if (!el) return;
+			const maxScroll = el.scrollHeight - el.clientHeight;
+			setGridMaskClass(maxScroll > 4 && el.scrollTop < maxScroll - 4 ? " mask-bottom" : "");
 		}, []);
 
 		const scrollContentToTop = useCallback(() => {
@@ -6043,19 +6035,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [updateGridMask]);
 
+		// Measure the committed rows before paint, including navigation back to
+		// a remounted grid. A timer/rAF here exposes the previous view's mask.
+		useSafeLayoutEffect(() => { updateGridMask(); });
 		useEffect(() => {
 			updateGridMask();
+			const el = gridRef.current;
+			const observer = el && typeof ResizeObserver === "function" ? new ResizeObserver(updateGridMask) : null;
+			if (observer) { observer.observe(el); Array.from(el.children).forEach(child => observer.observe(child)); }
 			window.addEventListener("resize", updateGridMask);
 			return () => {
+				observer?.disconnect();
 				window.removeEventListener("resize", updateGridMask);
-				if (gridMaskRafRef.current) cancelAnimationFrame(gridMaskRafRef.current);
 			};
-		}, [updateGridMask]);
-
-		useEffect(() => {
-			const timer = setTimeout(updateGridMask, 60);
-			return () => clearTimeout(timer);
-		}, [activeSourceId, rows, updateGridMask]);
+		}, [activeSourceId, rows, filter, query, view?.type, mcpsOpen, updateGridMask]);
 
 		const isScrollingRef = useRef(false);
 		const scrollTimerRef = useRef(null);
@@ -7513,9 +7506,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			isBrowse && mcpsOpen && h("div", {
+				ref: gridRef,
 				className: "cpm-grid-container" + gridMaskClass,
 				onWheelCapture: globalHover.suspend,
-				onScroll: globalHover.suspend,
+				onScroll: () => { globalHover.suspend(); updateGridMask(); },
 			},
 					!hasMcps && h("div", { className: "cpm-empty", style: { textAlign: "center", padding: "40px 16px" } }, "还没有添加 MCP，点右上角「添加」→「添加 MCP」"),
 					h(McpOverview, {
@@ -9544,7 +9538,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return () => window.removeEventListener("resize", updateManageMask);
 		}, [updateManageMask]);
 
-		useEffect(() => {
+		useLayoutEffect(() => {
 			if (record) {
 				setTab("skills");
 				setTabQuery("");
@@ -9557,9 +9551,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [record?.name, updateManageMask]);
 
+		useLayoutEffect(() => { updateManageMask(); });
 		useEffect(() => {
-			const timer = setTimeout(updateManageMask, 60);
-			return () => clearTimeout(timer);
+			const el = manageRef.current;
+			const observer = el && typeof ResizeObserver === "function" ? new ResizeObserver(updateManageMask) : null;
+			if (observer) { observer.observe(el); Array.from(el.children).forEach(child => observer.observe(child)); }
+			return () => observer?.disconnect();
 		}, [record, tab, tabQuery, updateManageMask]);
 
 		useEffect(() => {
