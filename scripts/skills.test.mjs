@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync, existsSync, lstatSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
@@ -158,6 +158,68 @@ test('discovery, resources, provider control and persistence', async () => {
     assert.deepEqual((await get('/state')).sources.map(s => s.id), ['anthropic', 'local', 'skills-local'])
     dispose()
   } finally { rmSync(temp, { recursive: true, force: true }) }
+})
+
+test('cross-root duplicates keep one card and switch both copies', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'hub-two-roots-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAgents = process.env.DSH_AGENTS_HOME
+  process.env.DSH_HOME = join(fixture, 'dsh')
+  process.env.DSH_AGENTS_HOME = join(fixture, 'agents')
+  try {
+    const dshRoot = join(process.env.DSH_HOME, 'skills')
+    const agentsRoot = join(process.env.DSH_AGENTS_HOME, 'skills')
+    write(join(dshRoot, 'dup', 'SKILL.md'), '---\nname: dup\ndescription: dsh copy\n---\nbody\n')
+    // Same name, different content: the .dsh copy must still win silently.
+    write(join(agentsRoot, 'dup', 'SKILL.md'), '---\nname: dup\ndescription: agents copy\n---\nother body\n')
+    write(join(agentsRoot, 'agents-only', 'SKILL.md'), '---\nname: agents-only\ndescription: only here\n---\nbody\n')
+    const manager = createSkillsManager()
+    const items = manager.entries()
+    assert.deepEqual(items.map(s => s.name), ['agents-only', 'dup'])
+    const dup = items.find(s => s.name === 'dup')
+    assert.equal(dup.path, join(dshRoot, 'dup', 'SKILL.md'))
+    // Both locations stay switchable, so a later removal cannot resurrect the
+    // hidden copy with a stale on/off state.
+    assert.equal(dup.locations.length, 2)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAgents === undefined) delete process.env.DSH_AGENTS_HOME
+    else process.env.DSH_AGENTS_HOME = previousAgents
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('a root SKILL.md makes a skill collection one skill, not its children', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'hub-aggregate-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(fixture, 'dsh')
+  const pack = join(fixture, 'offer-toolkit-skill')
+  try {
+    const { inspectLocalPlugin, importLocalSkills } = await import('../src/local.js')
+    const { uninstallUploadedSkill } = await import('../src/skill-uploads.js')
+    write(join(pack, 'SKILL.md'), '---\nname: offer-toolkit-skill\ndescription: Full toolkit\n---\nroot\n')
+    for (const child of ['bq-skill', 'resume-skill', 'salary-negotiation-skill']) {
+      write(join(pack, child, 'SKILL.md'), `---\nname: ${child}\ndescription: sub\n---\nsub\n`)
+    }
+    const inspected = await inspectLocalPlugin(pack)
+    assert.equal(inspected.kind, 'skills')
+    assert.deepEqual(inspected.entries.map(entry => entry.row.name), ['offer-toolkit-skill'])
+    const imported = await importLocalSkills(pack)
+    assert.deepEqual(imported.skills.map(skill => skill.name), ['offer-toolkit-skill'])
+    const target = join(process.env.DSH_HOME, 'skills', 'offer-toolkit-skill')
+    const original = join(process.env.DSH_HOME, 'agent-skills', 'universal-plugin-hub', 'uploaded', 'offer-toolkit-skill')
+    assert.equal(lstatSync(target).isSymbolicLink(), true)
+    assert.equal(readFileSync(join(original, 'SKILL.md'), 'utf8').includes('root'), true)
+    uninstallUploadedSkill('offer-toolkit-skill')
+    assert.equal(existsSync(target), false)
+    assert.equal(existsSync(original), false)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    rmSync(pack, { recursive: true, force: true })
+    rmSync(fixture, { recursive: true, force: true })
+  }
 })
 
 test('disabled skills override preset scopes for existing and future agents', async () => {

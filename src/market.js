@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve, relative, isAbsolute } from 'node:path'
-import { sourceCacheDir, safeRmDir } from './store.js'
+import { sourceCacheDir, safeRmDir, readState } from './store.js'
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i
 
@@ -100,7 +100,7 @@ function runGit(args, cwd) {
 export async function ensureSourceCloned(sourceId, url) {
   safeSegment(sourceId, 'source id')
   const dir = sourceCacheDir(sourceId)
-  if (sourceId === 'local') {
+  if (sourceId === 'local' || /^local-(?:upload|market):\/\//i.test(String(url || ''))) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     return dir
   }
@@ -138,7 +138,7 @@ export async function ensureSourceCloned(sourceId, url) {
 /** git pull in a source cache dir (waits for any in-flight clone of the same source). */
 export async function pullSource(sourceId) {
   safeSegment(sourceId, 'source id')
-  if (sourceId === 'local') return
+  if (sourceId === 'local' || /^local-(?:upload|market):\/\//i.test(String(readState().sources.find(source => source.id === sourceId)?.url || ''))) return
   const dir = sourceCacheDir(sourceId)
   const inFlight = GIT_LOCKS.get(`src:${sourceId}`)
   if (inFlight) {

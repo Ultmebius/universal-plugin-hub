@@ -4204,9 +4204,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return { detailRef, maskClass, updateMask };
 		}
 
-		function SkillDetail({ skill, onBack, onToggle, busy, isDark, containerRef }) {
+		function SkillDetail({ skill, onBack, onToggle, onRemove, busy, isDark, containerRef }) {
 		const [detail, setDetail] = useState(null);
 		const [error, setError] = useState("");
+		const [removing, setRemoving] = useState(false);
 			const { detailRef, maskClass, updateMask } = useDetailScrollMask(skill.id, containerRef, detail || error);
 		useEffect(() => {
 			let live = true;
@@ -4214,6 +4215,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			api("/skills/detail?id=" + encodeURIComponent(skill.id)).then(body => { if (live) setDetail(body.skill); }).catch(e => { if (live) setError(e.message); });
 			return () => { live = false; };
 		}, [skill.id]);
+		const uploaded = !!(detail && detail.uploaded);
+		const remove = async () => {
+			if (!onRemove || removing) return;
+			setRemoving(true);
+			try { await onRemove(skill); } finally { setRemoving(false); }
+		};
 			return h("div", { ref: detailRef, onScroll: updateMask, className: "cpm-detail cpm-skill-detail" + maskClass },
 				h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "Back"),
 				h("header", { className: "cpm-skill-header" },
@@ -4221,6 +4228,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("h1", { className: "cpm-skill-title" }, skill.displayName || skill.name),
 						h(SkillSwitch, { skill, busy, onToggle })),
 					skill.description && h("p", { className: "cpm-skill-summary" }, skill.description),
+					uploaded && onRemove && h("button", {
+						className: "cpm-btn cpm-btn-danger cpm-skill-remove", disabled: removing || busy,
+						onClick: remove,
+					}, removing ? "卸载中…" : "卸载"),
 					(skill.activePath || skill.path) && h("div", { className: "cpm-skill-location" },
 						h("span", { className: "cpm-skill-location-label" }, "本地文件"),
 						h(NativePathLabel, { path: skill.activePath || skill.path }))),
@@ -7078,6 +7089,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
+			const removeUploadedSkill = async (skill) => {
+				if (skillBusy) return;
+				setSkillBusy(skill.id);
+				try {
+					const body = await api("/skills/uninstall", { method: "POST", body: JSON.stringify({ name: skill.name }) });
+					setRows(prev => ({ ...(prev || {}), "skills-local": body.skills || [] }));
+					setView({ type: "browse", sourceId: "skills-local" });
+					showToast("Skill 已卸载", skill.name, { restart: false });
+				} catch (e) { showToast("卸载失败", e.message, { restart: false }); }
+				finally { setSkillBusy(null); }
+			};
+
 			const toggleSkill = async (skill, enabled) => {
 			if (skillBusy) return;
 			setSkillBusy(skill.id);
@@ -7292,7 +7315,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			view.type === "skill-detail" && (() => {
 				const selected = ((rows && rows["skills-local"]) || []).find(s => s.id === view.skill.id) || view.skill;
-				return h(SkillDetail, { skill: selected, isDark, containerRef: detailContainerRef, busy: skillBusy === selected.id, onToggle: toggleSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
+				return h(SkillDetail, { skill: selected, isDark, containerRef: detailContainerRef, busy: skillBusy === selected.id, onToggle: toggleSkill, onRemove: removeUploadedSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
 			})(),
 
 			// Detail view — 0ms instant transition without intermediate loading screen
@@ -7657,10 +7680,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					return;
 				}
 				if (res.exists) {
-					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
+					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind: res.kind });
 					setPhase("local-duplicate");
 				} else {
-					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload });
+					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind: res.kind });
 					setPhase("local-preview");
 				}
 			} catch (e) {
@@ -7706,10 +7729,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					return;
 				}
 				if (res.exists) {
-					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload });
+					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind: res.kind });
 					setPhase("local-duplicate");
 				} else {
-					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload });
+					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind: res.kind });
 					setPhase("local-preview");
 				}
 			} catch (e) {
@@ -7719,13 +7742,40 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		const handleImportLocal = async (payload, overwrite, sourceName) => {
+		const handleImportLocal = async (payload, overwrite, sourceName, kindOverride) => {
 			setBusy(true);
 			try {
-				const res = await api("/plugins/local/import", {
+				// A pure skill package must not go through the plugin pipeline:
+				// it belongs in the Skills tab as a directly managed skill.
+				// The duplicate branch never sets localPreview, so it passes its
+				// own kind: overwriting must reach the same endpoint as the first
+				// import, not the plugin pipeline.
+				const kind = kindOverride || (localPreview && localPreview.kind);
+				const isSkillPackage = kind === "skills";
+				const isMarketplace = kind === "marketplace";
+				const res = await api(isSkillPackage ? "/skills/import" : isMarketplace ? "/marketplaces/import" : "/plugins/local/import", {
 					method: "POST",
-					body: JSON.stringify({ ...payload, overwrite, sourceName })
+					body: JSON.stringify(isSkillPackage ? { ...payload, overwrite } : isMarketplace ? { ...payload, overwrite, sourceName } : { ...payload, overwrite, sourceName })
 				});
+				if (res.kind === "marketplace") {
+					showToast("插件市场已添加", `「${res.source?.name || localName}」已作为独立标签页加入`, { restart: false });
+					await onAdded(res.sourceId);
+					setUrl("");
+					setPhase(initialPhase || "url");
+					setLocalPreview(null);
+					setLocalDuplicate(null);
+					return;
+				}
+				if (res.kind === "skills") {
+					const count = res.skills?.length || 1;
+					showToast("Skill 已导入", count > 1 ? `${count} 个 Skill 已加入 Skills 标签页` : `「${res.skills?.[0]?.name || ""}」已加入 Skills 标签页`, { restart: false });
+					await onAdded("skills-local");
+					setUrl("");
+					setPhase(initialPhase || "url");
+					setLocalPreview(null);
+					setLocalDuplicate(null);
+					return;
+				}
 				showToast("导入成功", res.plugins?.length > 1 ? `成功导入 ${res.plugins.length} 项插件 / Skills` : `成功导入「${res.plugin.displayName || res.plugin.name}」`, { restart: false });
 				await onAdded("local", true);
 				setUrl("");
@@ -8099,7 +8149,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("button", {
 							className: "cpm-btn cpm-btn-warning",
 							disabled: busy,
-							onClick: () => handleImportLocal(localDuplicate.payload, true),
+							onClick: () => handleImportLocal(localDuplicate.payload, true, undefined, localDuplicate.kind),
 						}, busy ? "正在覆盖…" : "覆盖更新"),
 					),
 				],

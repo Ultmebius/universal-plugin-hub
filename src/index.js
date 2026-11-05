@@ -10,6 +10,7 @@ import { mountRoutes } from './routes.js'
 import { cancelAllOAuthVerifications } from './oauth.js'
 import { syncAllInstalledSkillsToDsh, installProfilePackages, findDshMainNodeModules, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
 import { createSkillsManager } from './skills.js'
+import { restoreUploadedSkills } from './skill-uploads.js'
 import { createProfileApplicator } from './runtime.js'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -31,6 +32,8 @@ export function apply(ctx) {
 
     // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
     try {
+      restoreUploadedSkills()
+
       syncAllInstalledSkillsToDsh()
     } catch (err) {
       ctx.logger?.warn?.(`[universal-plugin-hub] skill sync error: ${err.message}`)

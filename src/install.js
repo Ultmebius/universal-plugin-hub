@@ -19,6 +19,7 @@ import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, sa
 import { materializePlugin, pullSource, pluginPath } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
+import { isUploadedSkillTarget } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
 import { beginOAuthVerification, completeOAuthVerification, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
 import { encodeOAuthConfig, isOAuthMode, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
@@ -1739,6 +1740,9 @@ export function syncPluginSkillsToDsh(pluginName) {
       const srcSkillFile = join(srcSkillDir, 'SKILL.md')
       if (existsSync(srcSkillFile)) {
         const destSkillDir = join(dshSkills, entry.name)
+        // A direct upload owns its junction/copy. A later plugin installation
+        // must not replace it or delete the user's original through the link.
+        if (isUploadedSkillTarget(destSkillDir)) continue
         safeRmDir(destSkillDir)
         copyDir(srcSkillDir, destSkillDir)
         synced.push(entry.name)
@@ -1762,6 +1766,7 @@ export function removePluginSkillsFromDsh(pluginName) {
     for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
         const destSkillDir = join(dshSkills, entry.name)
+        if (isUploadedSkillTarget(destSkillDir)) continue
         safeRmDir(destSkillDir)
       }
     }
@@ -1769,7 +1774,7 @@ export function removePluginSkillsFromDsh(pluginName) {
 
   // 2. Also remove any skills prefixed with plugin name or compiled subagent hub
   const subagentHubName = `${pluginName}-agents`
-  safeRmDir(join(dshSkills, subagentHubName))
+  if (!isUploadedSkillTarget(join(dshSkills, subagentHubName))) safeRmDir(join(dshSkills, subagentHubName))
 }
 
 /**
@@ -1889,9 +1894,10 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
     }
   }
 
-  // 2.5. If the plugin repository has skill directories directly under root, mirror into skills/
+  // 2.5. Skill directories beside a root SKILL.md belong to that one skill.
+  // Only expand them when the package has no root skill of its own.
   try {
-    for (const entry of readdirSync(target, { withFileTypes: true })) {
+    if (!rootSkillMd) for (const entry of readdirSync(target, { withFileTypes: true })) {
       if (
         entry.isDirectory() &&
         entry.name !== 'skills' &&

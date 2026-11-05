@@ -17,7 +17,8 @@ import {
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
 } from './install.js'
-import { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } from './local.js'
+import { inspectLocalPlugin, importLocalPlugin, importLocalSkills, importLocalMarketplace, saveUploadedZip } from './local.js'
+import { uninstallUploadedSkill, uploadedSkillRecord } from './skill-uploads.js'
 import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
 import { remoteConfigFromEntry } from './oauth-config.js'
 import { scheduledResult } from './runtime.js'
@@ -129,7 +130,19 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (typeof body.enabled !== 'boolean') throw new Error('无效的开关状态')
       return sendJson(res, 200, await skills.toggle(body.id, body.enabled))
     }
-    if (path === '/skills/detail' && method === 'GET' && skills) return sendJson(res, 200, { skill: skills.detail(url.searchParams.get('id'), false) })
+    if (path === '/skills/detail' && method === 'GET' && skills) {
+      const skill = skills.detail(url.searchParams.get('id'), false)
+      return sendJson(res, 200, { skill: { ...skill, uploaded: !!uploadedSkillRecord(skill.name) } })
+    }
+    if (path === '/skills/uninstall' && method === 'POST' && skills) {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      const name = String(body.name || '')
+      if (!uploadedSkillRecord(name)) throw new Error('只能卸载通过本插件上传的 Skill')
+      uninstallUploadedSkill(name)
+      skills.refresh()
+      return sendJson(res, 200, { ok: true, skills: await skills.list() })
+    }
     if (path === '/skills/resource' && method === 'GET' && skills) return sendJson(res, 200, { content: skills.resource(url.searchParams.get('id'), url.searchParams.get('path')) })
     if (path === '/skills/icon' && method === 'GET' && skills) {
       try {
@@ -221,6 +234,26 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const body = await readJsonBody(req, 30_000_000)
       const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
       const result = await importLocalPlugin({ path: target, overwrite: body.overwrite, sourceName: body.sourceName })
+      return sendJson(res, 200, result)
+    }
+
+    // Pure skill packages bypass the plugin pipeline: upload, private copy,
+    // junction into $DSH_HOME/skills, then a hot refresh of the Skills tab.
+    if (method === 'POST' && path === '/skills/import') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req, 30_000_000)
+      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
+      const result = await importLocalSkills(target, { overwrite: body.overwrite === true })
+      skills?.refresh()
+      return sendJson(res, 200, result)
+    }
+
+    // An uploaded marketplace becomes its own plugin source tab.
+    if (method === 'POST' && path === '/marketplaces/import') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req, 30_000_000)
+      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
+      const result = await importLocalMarketplace(target, { sourceName: body.sourceName, overwrite: body.overwrite === true })
       return sendJson(res, 200, result)
     }
 

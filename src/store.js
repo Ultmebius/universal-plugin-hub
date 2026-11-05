@@ -69,6 +69,11 @@ export function installedDir(name) {
   return join(marketRoot(), 'installed', name)
 }
 
+/** Original copies of skills imported directly into the Skills tab. */
+export function uploadedSkillsDir() {
+  return join(marketRoot(), 'uploaded')
+}
+
 /** Default state: the built-in Anthropic source. */
 export function defaultState() {
   return {

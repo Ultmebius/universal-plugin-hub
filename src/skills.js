@@ -3,7 +3,8 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync, watch } 
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
-import { readState, writeState } from './store.js'
+import { readState, writeState, dshSkillsDir, installedDir } from './store.js'
+import { uploadedSkillRecord } from './skill-uploads.js'
 import { formatDisplayName } from './parser.js'
 
 const PROVIDER = 'universal-plugin-hub-skills'
@@ -94,7 +95,19 @@ function readSkill(file, root, isNested) {
   }
 }
 
-export function discoverSkills(root = join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')) {
+function mergeSkillLocations(entries) {
+  const identical = new Map(), merged = []
+  for (const item of entries) {
+    const key = JSON.stringify([item.name, item.metadata, item.content.replace(/\r\n/g, '\n')])
+    const existing = !item.error && identical.get(key)
+    const location = { id: item.id, path: item.path, relativePath: item.relativePath }
+    if (existing) existing.locations.push(location)
+    else { item.locations = [location]; merged.push(item); if (!item.error) identical.set(key, item) }
+  }
+  return merged
+}
+
+function discoverRootSkills(root) {
   const entries = [], seen = new Set()
   let children
   try { children = readdirSync(root, { withFileTypes: true }) } catch { return entries }
@@ -114,25 +127,131 @@ export function discoverSkills(root = join(process.env.DSH_AGENTS_HOME || join(h
       if (!seen.has(id)) { seen.add(id); entries.push(readSkill(file, root, false)) }
     } catch {}
   }
-  // Identical direct entries share one card and one provider candidate.
+  return entries
+}
+
+export function discoverSkills(root = join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')) {
+  const entries = discoverRootSkills(root)
   entries.sort((a, b) => a.path.localeCompare(b.path))
-  const identical = new Map(), merged = []
-  for (const item of entries) {
-    const key = JSON.stringify([item.name, item.metadata, item.content.replace(/\r\n/g, '\n')])
-    const existing = !item.error && identical.get(key)
-    const location = { id: item.id, path: item.path, relativePath: item.relativePath }
-    if (existing) existing.locations.push(location)
-    else { item.locations = [location]; merged.push(item); if (!item.error) identical.set(key, item) }
-  }
+  const merged = mergeSkillLocations(entries)
   const counts = new Map()
   for (const item of merged) counts.set(item.name, (counts.get(item.name) || 0) + 1)
   for (const item of merged) item.duplicate = counts.get(item.name) > 1
   return merged.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+function defaultSkillRoots() {
+  return [
+    { path: dshSkillsDir(), source: 'user-dsh', rank: 400 },
+    { path: join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills'), source: 'user-agents', rank: 500 },
+  ]
+}
+
+function pluginOwnedSkillPaths() {
+  const paths = new Set()
+  const canonicalKey = path => {
+    const value = canonical(path)
+    return process.platform === 'win32' ? value.toLowerCase() : value
+  }
+  for (const plugin of readState().plugins || []) {
+    if (plugin.enabled === false) continue
+    const root = join(installedDir(plugin.name), 'skills')
+    let children
+    try { children = readdirSync(root, { withFileTypes: true }) } catch { continue }
+    for (const child of children) {
+      if (!child.isDirectory() && !child.isSymbolicLink()) continue
+      const dir = join(root, child.name)
+      if (existsSync(join(dir, 'SKILL.md')) || existsSync(join(dir, 'skill.md'))) paths.add(canonicalKey(join(dshSkillsDir(), child.name)))
+    }
+  }
+  return paths
+}
+
+/**
+ * Merge the native user roots.
+ *
+ * Within one root the long-standing rule stands: identical copies share a card
+ * and same-name/different-content skills stay visible as separate cards (the
+ * detail view then reports which one DSH actually resolved). Across roots a
+ * lower-ranked root never adds a second card for a name the higher root already
+ * provides — its file locations are folded into the surviving cards instead, so
+ * one switch writes every copy and a hidden copy cannot come back later with a
+ * stale state.
+ */
+export function discoverSkillsFromRoots(roots = defaultSkillRoots()) {
+  const sorted = [...roots].filter(root => root?.path).sort((a, b) => (a.rank || 300) - (b.rank || 300))
+  const claimed = new Map()
+  for (const root of sorted) {
+    const items = discoverRootSkills(root.path).map(item => {
+      item.skillSource = root.source
+      item.rank = root.rank
+      return item
+    })
+    for (const item of mergeSkillLocations(items)) {
+      const current = claimed.get(item.name)
+      if (!current) {
+        claimed.set(item.name, { rank: root.rank, cards: [item], shadowed: [] })
+      } else if (root.rank === current.rank) {
+        current.cards.push(item)
+      } else if (root.rank < current.rank) {
+        for (const card of current.cards) current.shadowed.push(...card.locations)
+        current.rank = root.rank
+        current.cards = [item]
+      } else {
+        current.shadowed.push(...item.locations)
+      }
+    }
+  }
+  const pluginPaths = pluginOwnedSkillPaths()
+  const result = []
+  for (const { cards, shadowed } of claimed.values()) {
+    for (const card of cards) {
+      const ids = new Set(card.locations.map(location => location.id))
+      for (const location of shadowed) {
+        if (!ids.has(location.id)) { ids.add(location.id); card.locations.push(location) }
+      }
+      card.duplicate = cards.length > 1
+      card.uploaded = card.skillSource === 'user-dsh' && !!uploadedSkillRecord(card.name)
+      card.managedByPlugin = pluginPaths.has(canonical(card.directory))
+      if (!card.managedByPlugin) result.push(card)
+    }
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 export function createSkillsManager(root) {
-  root ||= join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')
-  let cache = null, registry = null, invalidate = null, catalogChanged = null, watcher = null, watchTimer = null, toggling = false
+  const customRoot = typeof root === 'string' ? root : null
+  const explicitRoots = Array.isArray(root) ? root : null
+  // `customSkillDirs` / `bundledSkillDir` are evaluated JS expressions in the
+  // profile patch, so the paths are not readable as text. DSH has already
+  // resolved them into its catalog by the time we attach; collect those
+  // directories here instead of parsing configuration ourselves.
+  let registryRoots = null
+  const baseRoots = () => explicitRoots
+    || (customRoot
+      // An explicit test root replaces the defaults (legacy single-root tests).
+      // It stands in for the native user-agents root, so it keeps that rank and
+      // the fallback candidate lands one step below it, as it always has.
+      // In production this string is the native user-agents root, and the
+      // user-dsh root must still be scanned alongside it.
+      ? (customRoot === join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')
+        ? defaultSkillRoots()
+        : [{ path: customRoot, source: 'user-agents', rank: 500 }])
+      : defaultSkillRoots())
+  const roots = () => {
+    if (explicitRoots) return explicitRoots
+    const known = baseRoots()
+    const seen = new Set(known.map(root => canonical(root.path).toLowerCase()))
+    const extra = []
+    for (const root of registryRoots || []) {
+      const key = canonical(root.path).toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      extra.push(root)
+    }
+    return [...known, ...extra]
+  }
+  let cache = null, registry = null, invalidate = null, catalogChanged = null, watchers = [], watchedRoots = new Set(), watchTimer = null, toggling = false
   const agentViews = new Map()
   const scopePolicies = new Map(), presetProviders = new Map()
   let createPolicyScope = null
@@ -178,7 +297,7 @@ export function createSkillsManager(root) {
     return pending
   }
   const scan = (force = false) => {
-    if (force || !cache) cache = discoverSkills(root)
+    if (force || !cache) cache = discoverSkillsFromRoots(roots())
     return cache
   }
   const disabled = () => readState().disabledLocalSkills || {}
@@ -195,9 +314,12 @@ export function createSkillsManager(root) {
   function candidate(item, isDisabled) {
     return {
       name: item.name, description: item.description, invocation: isDisabled ? { modelInvocable: false, userInvocable: false } : item.invocation,
-      // The same ~/.agents file can be discovered as a project root (rank 200).
+      // One step below the native provider of the same root, so the native
+      // filesystem provider still wins whenever it discovers the skill and this
+      // stays a fallback. Ordering between roots is preserved: a user-dsh copy
+      // (401) beats the user-agents fallback (501), matching the .dsh priority.
       // An explicit off choice must precede every native filesystem rank.
-      provider: PROVIDER, source: 'user-agents', rank: isDisabled ? 99 : 501,
+      provider: PROVIDER, source: item.skillSource || 'user-agents', rank: isDisabled ? 99 : (item.rank || 500) + 1,
       path: item.path, resourceBase: { kind: 'directory', path: item.directory }, locator: item.id,
     }
   }
@@ -213,7 +335,7 @@ export function createSkillsManager(root) {
     async get(entry) {
       const item = scan().find(s => s.id === entry.locator)
       if (!item || item.error) return undefined
-      const fresh = readSkill(item.path, root, item.nested)
+      const fresh = readSkill(item.path, dirname(item.path), item.nested)
       if (fresh.error || fresh.name !== item.name) return undefined
       const { rank, locator, ...summary } = candidate(fresh, isDisabled(item))
       return { ...summary, content: fresh.content, metadata: fresh.metadata.metadata }
@@ -318,24 +440,58 @@ export function createSkillsManager(root) {
     if (data.includes(0)) throw new Error('该资源不是文本文件')
     return data.toString('utf8')
   }
+  // Only the configured custom roots (rank 300) are scanned on top of the two
+  // native user roots. Bundled skills (rank 600) belong to DSH itself and stay
+  // out of the Skills tab.
+  const CUSTOM_SOURCES = new Set(['custom'])
+  const CUSTOM_RANKS = { custom: 300 }
+  async function observeRegistryRoots() {
+    if (!registry || explicitRoots || customRoot) return
+    let catalog
+    try { catalog = await registry.list() } catch { return }
+    const roots = new Map()
+    for (const entry of catalog) {
+      if (!CUSTOM_SOURCES.has(entry.source) || typeof entry.path !== 'string') continue
+      // A directory bundle is <root>/<name>/SKILL.md, a flat skill <root>/<name>.md.
+      // Walk back to the scanned root, never to the skill directory itself.
+      const directory = /^skill\.md$/i.test(basename(entry.path)) ? dirname(dirname(entry.path)) : dirname(entry.path)
+      if (roots.has(directory)) continue
+      roots.set(directory, { path: directory, source: entry.source, rank: CUSTOM_RANKS[entry.source] || 300 })
+    }
+    registryRoots = [...roots.values()]
+    // The custom directories only become known here, after the catalog is read,
+    // so their watchers have to be installed now rather than in attach().
+    watchRoots()
+  }
+  /** Watch every scanned root that does not have a watcher yet, once each. */
+  function watchRoots() {
+    for (const root of roots()) {
+      const key = canonical(root.path).toLowerCase()
+      if (watchedRoots.has(key)) continue
+      watchedRoots.add(key)
+      try {
+        const watcher = watch(root.path, { recursive: true }, (event, filename) => {
+          if (filename) {
+            const parts = String(filename).split(/[\\/]/)
+            if (parts.length > 2 || (parts.length === 2 && !/^skill\.md$/i.test(parts[1]))) return
+            if (event === 'change' && parts.length === 1 && !/\.md$/i.test(parts[0])) return
+          }
+          clearTimeout(watchTimer)
+          watchTimer = setTimeout(() => { cache = null; invalidateAll(); catalogChanged?.() }, 150)
+          watchTimer.unref?.()
+        })
+        watcher.on('error', () => {})
+        watchers.push(watcher)
+      } catch {}
+    }
+  }
   function attach(service, onCatalogChanged = null) {
     registry = service
     catalogChanged = onCatalogChanged
     const dispose = service.registerProvider(control => { invalidate = control.invalidate; return provider })
-    try {
-      watcher = watch(root, { recursive: true }, (event, filename) => {
-        if (filename) {
-          const parts = String(filename).split(/[\\/]/)
-          if (parts.length > 2 || (parts.length === 2 && !/^skill\.md$/i.test(parts[1]))) return
-          if (event === 'change' && parts.length === 1 && !/\.md$/i.test(parts[0])) return
-        }
-        clearTimeout(watchTimer)
-        watchTimer = setTimeout(() => { cache = null; invalidateAll(); catalogChanged?.() }, 150)
-        watchTimer.unref?.()
-      })
-      watcher.on('error', () => {})
-    } catch {}
-    return () => { clearTimeout(watchTimer); watcher?.close(); watcher = null; registry = null; invalidate = null; catalogChanged = null; dispose() }
+    watchRoots()
+    void observeRegistryRoots()
+    return () => { clearTimeout(watchTimer); for (const watcher of watchers) watcher.close(); watchers = []; watchedRoots.clear(); registry = null; invalidate = null; catalogChanged = null; dispose() }
   }
   function attachAgents(ctx, createScope = null) {
     createPolicyScope = createScope
