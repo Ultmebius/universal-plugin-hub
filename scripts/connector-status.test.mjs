@@ -78,3 +78,39 @@ test('remote connector status follows a successful probe of the current config',
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('an installed record carries the identity the icon chain reads', () => {
+  // The browse grid and the "来自插件" connector rows render the plugin from
+  // /state's installed records, while its own page merges the marketplace row
+  // first. When the record lacked `source`/`homepage`, an icon-less plugin fell
+  // back to "author name as a GitHub handle" and showed a stranger's avatar
+  // inline while its page showed the real logo.
+  //
+  // Every test here owns its own DSH_HOME: the previous test's finally already
+  // restored (and possibly deleted) the variable, so relying on it would point
+  // writeState at the user's real state.json.
+  const identityRoot = mkdtempSync(join(tmpdir(), 'hub-identity-'))
+  const savedHome = process.env.DSH_HOME
+  process.env.DSH_HOME = join(identityRoot, 'dsh')
+  try {
+    writePlugin('identity-plugin', exa)
+    writeState({
+      sources: [{ id: 'src', name: 'Src', url: 'https://example.test/repo' }],
+      plugins: [{ name: 'identity-plugin', sourceId: 'src', author: 'Exa' }],
+    })
+    const record = installedDetails().find((p) => p.name === 'identity-plugin')
+    assert.ok(record)
+    // Nothing to merge from here, but the fields must exist and be undefined
+    // rather than absent, and the record must not invent a GitHub identity.
+    assert.equal('source' in record, true)
+    assert.equal('homepage' in record, true)
+    assert.equal(record.source ?? null, null)
+    // An install-time record whose manifest declares no icon still reports the
+    // icons object, so the client's fallback chain is reached identically.
+    assert.deepEqual(record.icons, { light: [], dark: [] })
+  } finally {
+    if (savedHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = savedHome
+    rmSync(identityRoot, { recursive: true, force: true })
+  }
+})

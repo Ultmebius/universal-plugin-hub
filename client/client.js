@@ -2800,6 +2800,35 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 
 /* MCP Tools Collapse & Capability Pills */
+/* The owning plugin's icon on a plugin connector row. A 24px well around a
+   14px label reads as "a little bigger than the name" without touching the
+   row height: the 30px action buttons on the right already set it. */
+.cpm-connector-owner-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	flex: 0 0 24px;
+	border-radius: 8px;
+	overflow: hidden;
+}
+.cpm-connector-owner-icon > .cpm-card-icon {
+	width: 24px;
+	height: 24px;
+	flex: 0 0 24px;
+	border-radius: 8px;
+	box-shadow: none;
+}
+/* The fallback badge carries a hard-coded 34px <img>, which overflows a 24px
+   well; the declared logo image is already sized by .cpm-card-icon img. */
+.cpm-connector-owner-icon .cpm-card-icon img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	border-radius: 7px;
+}
+
 .cpm-connector-collapse-btn {
 	display: inline-flex;
 	align-items: center;
@@ -5844,7 +5873,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [globalToolData, loadGlobalTools, showToast]);
 
 		const renderMcpServerRow = (opts) => {
-			const { owner, name, transport, connected, canEdit, record, first, conn } = opts;
+			const { owner, name, transport, connected, canEdit, record, first, conn, plugin: ownerPlugin } = opts;
 			const key = `${owner}::${name}`;
 			const isExpanded = !!globalExpanded[key];
 			const info = globalToolData[key];
@@ -5900,9 +5929,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				},
 			},
 				h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-					h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
+					// Outside the wrapping label group on purpose: inside it the extra
+					// 32px (24px box + 8px gap) tips "N tools enabled" onto a second
+					// line in a narrow pane, which grows the row and makes the whole
+					// left side look top-aligned. As a sibling it is centered by the
+					// row exactly like the gear and the switch.
+					ownerPlugin && h("span", {
+						className: "cpm-connector-owner-icon",
+						title: ownerPlugin.displayName || ownerPlugin.name || owner,
+					}, h(PluginIcon, { plugin: ownerPlugin, isDark, eager: true })),
+					// Baseline alignment, not center: the name is 14px/600 while the
+					// pill and the tool count are 11–11.5px, and centering each box
+					// leaves the smaller text sitting a couple of pixels high — the
+					// name reads as sagging below its own labels. One shared text
+					// baseline fixes all three at once. `align-items: center` still
+					// centers the icon and the right-hand buttons on the row.
+					h("div", { style: { flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" } },
 						h("span", { style: { fontSize: 14, fontWeight: 600, color: "var(--cpm-text)" } }, name),
-						h("span", { style: { fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, transport === "stdio" ? "stdio" : "http"),
+						// inline-flex so the pill's text baseline is the one that aligns,
+						// instead of the padded box being pushed around as a block.
+						h("span", { style: { display: "inline-flex", alignItems: "center", fontSize: 11, lineHeight: "16px", padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, transport === "stdio" ? "stdio" : "http"),
 						// Must render before the tool list is fetched: this button is
 						// what triggers the fetch.
 						connected && h("button", {
@@ -7485,6 +7531,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						pluginRows: pluginMcpRows.map((r, i) => renderMcpServerRow({
 							owner: r.owner,
 							record: r.record,
+							plugin: r.record,
 							name: r.name,
 							transport: r.type,
 							connected: r.connected,

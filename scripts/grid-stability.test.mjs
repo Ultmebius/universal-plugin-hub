@@ -367,6 +367,35 @@ test('the MCP plugin section follows actual height without reserving collapsed t
   assert.match(body, /observer\?\.observe\(server\)/)
 })
 
+test('a plugin connector row shows its owning plugin icon without growing the row', () => {
+  const body = client.slice(
+    client.indexOf('const renderMcpServerRow = (opts) => {'),
+    client.indexOf('const [confirmRemoveSource, setConfirmRemoveSource] = useState(null);'),
+  )
+  // Only plugin-owned rows get the plugin record; user-added servers have none.
+  assert.match(body, /plugin: ownerPlugin/)
+  assert.match(body, /ownerPlugin && h\("span", \{[\s\S]{0,200}cpm-connector-owner-icon/)
+  assert.match(body, /h\(PluginIcon, \{ plugin: ownerPlugin, isDark, eager: true \}\)/)
+  // The caller passes the plugin record for plugin rows and omits it otherwise.
+  assert.match(client, /plugin: r\.record,/)
+
+  // The icon is a sibling of the wrapping label group, not a member of it:
+  // inside, its 32px pushes "N tools enabled" onto a second line in a narrow
+  // pane, the row grows, and the whole left side reads top-aligned.
+  const leftGroupAt = body.indexOf('flex: 1, minWidth: 0, display: "flex"')
+  assert.ok(leftGroupAt > 0, 'label group not found')
+  assert.ok(body.indexOf('cpm-connector-owner-icon') < leftGroupAt, 'icon must precede the wrapping label group')
+  assert.doesNotMatch(body.slice(leftGroupAt, leftGroupAt + 240), /cpm-connector-owner-icon/)
+  // Vertical alignment: row, icon, name and both buttons share one center line.
+  assert.match(body, /display: "flex", alignItems: "center", gap: 10/)
+
+  // Height budget: the icon well must fit inside the row's existing tallest
+  // element (the 30px action buttons), or every connector row grows.
+  const css = client.slice(client.indexOf('.cpm-connector-owner-icon {'), client.indexOf('.cpm-connector-collapse-btn {'))
+  assert.match(css, /width: 24px;\s*\n\s*height: 24px;/)
+  assert.doesNotMatch(css, /height: (?:3[1-9]|[4-9]\d)px/) // never taller than the 30px buttons
+})
+
 test('the CSS template stays a single string literal', () => {
   // The stylesheet is a JS template literal, so one stray backtick inside a
   // comment ends it early and the rest of the CSS is parsed as JavaScript.

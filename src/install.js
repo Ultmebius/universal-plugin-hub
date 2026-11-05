@@ -2202,13 +2202,14 @@ export async function findMarketRow(sourceId, pluginName) {
 }
 
 /**
- * Author from the source's live marketplace row. Used as the last fallback for
- * installed records written before the reader merged each plugin's own
- * manifest (`author: null`). Returns null when the row or its author is absent.
+ * The source's live marketplace row, read synchronously. Used as the last
+ * fallback for installed records written before the reader merged each
+ * plugin's own manifest, and as the identity source (`homepage`, `source`,
+ * `icons`) the browse grid and connector rows render from. Null when absent.
  */
-function findMarketRowAuthor(sourceId, pluginName) {
+function findMarketRowSync(sourceId, pluginName) {
   try {
-    return readMarketplace(sourceId).find((r) => r.name === pluginName)?.author ?? null
+    return readMarketplace(sourceId).find((r) => r.name === pluginName) ?? null
   } catch {
     return null
   }
@@ -2327,9 +2328,17 @@ export function installedDetails() {
     const manifestAuthor = targetManifest?.author
       ? (typeof targetManifest.author === 'string' ? targetManifest.author : targetManifest.author.name)
       : null
-    const author = rec.author || manifestAuthor || findMarketRowAuthor(rec.sourceId, rec.name)
+    const marketRow = findMarketRowSync(rec.sourceId, rec.name)
+    const author = rec.author || manifestAuthor || marketRow?.author
+    // The browse list and the connector rows render the same plugin through the
+    // same icon component, so they must be handed the same identity fields the
+    // detail page merges in. Without these a plugin whose manifest declares no
+    // icon falls back to "author name as a GitHub handle" and shows a stranger's
+    // avatar while its own page shows the real logo.
+    const declaredIcons = buildPluginIcons(targetManifest, { sourceId: rec.sourceId, name: rec.name, dir: existsSync(target) ? target : undefined, source: marketRow?.source })
+    const hasDeclaredIcon = !!((declaredIcons.light.length) || (declaredIcons.dark.length))
     const detail = existsSync(target) ? {
-      icons: buildPluginIcons(targetManifest, { sourceId: rec.sourceId, name: rec.name, dir: target }),
+      icons: hasDeclaredIcon ? declaredIcons : (marketRow?.icons || declaredIcons),
       skills: listSkills(target),
       agents: listAgents(target),
       prompts: listPrompts(target),
@@ -2342,6 +2351,11 @@ export function installedDetails() {
       ...rec,
       ...detail,
       author: author || rec.author,
+      // Identity fields the icon chain reads. The detail page already merges
+      // these from the marketplace row before rendering, which is why the same
+      // plugin showed one icon inline and another on its own page.
+      homepage: rec.homepage || marketRow?.homepage,
+      source: rec.source || marketRow?.source,
       skillCount: detail.skills.length,
       agentCount: detail.agents.length,
       promptCount: detail.prompts.length,
