@@ -29,10 +29,13 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       write(join(dir, 'assets/dark.svg'), svg)
       write(join(sourceCacheDir('icon-source'), '.agents/plugins/marketplace.json'), JSON.stringify({ plugins: [{ name: 'example', source: { source: 'local', path: './plugins/example' } }] }))
       const [row] = readMarketplace('icon-source')
-      localUrl = row.icons.light[0]
+      // The first candidate is the file itself, so the row paints with no request.
+      assert.match(row.icons.light[0], /^data:image\/svg\+xml;base64,/)
+      // The served URL is still carried for the full-size and installed routes.
+      localUrl = row.icons.light.find((url) => url.includes('/plugin-icon'))
       assert.match(localUrl, /plugin-icon\?sourceId=icon-source/)
       assert.equal(new URL(localUrl, 'http://localhost').searchParams.get('path'), './assets/light.svg')
-      assert.match(row.icons.dark[0], /dark.svg/)
+      assert.ok(row.icons.dark.some((url) => /^data:.+/.test(url)), 'dark row is inlined too')
       assert.match(localUrl, /&v=/)
       assert.ok(!localUrl.includes(root))
     })
@@ -68,7 +71,9 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       assert.equal(row.description, 'Actual plugin description')
       assert.equal(row.version, '5.3.2')
       assert.equal(row.displayName, 'Self Plugin')
-      assert.match(decodeURIComponent(row.icons.light[0]), /assets\/codex-icon.svg/)
+      assert.match(row.icons.light[0], /^data:image\/svg\+xml;base64,/, 'the row paints from the inlined copy')
+      const servedIcon = row.icons.light.find((url) => url.includes('/plugin-icon'))
+      assert.match(decodeURIComponent(servedIcon), /assets\/codex-icon.svg/)
       const detail = pluginDetail('self-market', row.name, row.source, row)
       assert.equal(detail.author, row.author)
       assert.equal(detail.skills[0].name, 'review')
@@ -76,7 +81,7 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       let handler
       mountRoutes({ register(route) { handler = route.handler } })
       const response = { writeHead(status) { this.status = status }, end(body) { this.body = body } }
-      await handler({ url: row.icons.light[0], method: 'GET', headers: {} }, response)
+      await handler({ url: servedIcon, method: 'GET', headers: {} }, response)
       assert.equal(response.status, 200)
       assert.deepEqual(response.body, svg)
       assert.equal(sourceRepositoryDir(dir, { ...source, url: 'https://github.com/OtherOrg/SelfPlugin' }), null)
@@ -93,14 +98,137 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       const single = buildPluginIcons({ logo: { light: 'https://example.com/light.svg' } })
       assert.deepEqual(single.light, single.dark)
     })
+    await t.test('a portrait-only plugin reports its artwork without leading with it', () => {
+      // Rejecting Exa's 151x182 monogram was right, but on its own it emptied the
+      // row and the plugin fell all the way back to a GitHub avatar — trading one
+      // wrong picture for another. The shape rule must relegate, never erase.
+      const svgOf = (w, h) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}"/></svg>`
+      const dir = join(root, 'portrait-fallback')
+      write(join(dir, 'assets/Exa.svg'), svgOf(151, 182))
+      const icons = buildPluginIcons({}, { sourceId: 's', name: 'exa', dir })
+      assert.deepEqual(icons.light, [], 'a logotype is not a tile candidate')
+      assert.equal(icons.portrait.light.length, 1, 'but the artwork is still reported')
+      assert.match(decodeURIComponent(icons.portrait.light[0]), /Exa\.svg/)
+    })
+    await t.test('an icon too large to inline is still fetched eagerly, not on scroll', () => {
+      // Only the first twelve cards asked for their icon eagerly; everything
+      // else was loading="lazy", so scrolling revealed a placeholder first and
+      // the picture a frame or two later — the flash. A same-origin local icon
+      // costs one disk read, so it is never worth deferring.
+      const state = []
+      let cursor = 0
+      const context = vm.createContext({
+        useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (v) => { state[i] = v }] },
+        h: (type, props, ...children) => ({ type, props: props || {}, children: children.filter(Boolean) }),
+      })
+      const start = client.indexOf('const LOADED_AVATARS')
+      const end = client.indexOf('function PluginIconFallback', start)
+      vm.runInContext(client.slice(start, end) + '\nglobalThis.Icon = PluginIconImage;', context)
+      const render = (candidates, eager) => { cursor = 0; return context.Icon({ candidates, plugin: { name: 't' }, fallback: 'f', eager }) }
+      const local = render(['/universal-plugin-hub/api/plugin-icon?sourceId=s&name=n&path=a.svg'], false)
+      assert.equal(local.children[1].props.loading, 'eager', 'a local icon must not wait for the viewport')
+      const remote = render(['/universal-plugin-hub/api/icon?v=2&u=https%3A%2F%2Fgithub.com%2Fx.png'], false)
+      assert.equal(remote.children[1].props.loading, 'lazy', 'a remote avatar may still wait')
+      const shown = render(['/universal-plugin-hub/api/icon?v=2&u=https%3A%2F%2Fgithub.com%2Fx.png'], true)
+      assert.equal(shown.children[1].props.loading, 'eager', 'above-the-fold cards stay eager')
+    })
+    await t.test('shipped artwork is found by name and shape, not a fixed file list', () => {
+      // The four shapes that used to fall through to a network avatar: a custom
+      // icon name, a brand-prefixed logo, a nested variant directory, and a
+      // wide banner that must lose to real square artwork.
+      const png = (width, height) => {
+        const header = Buffer.alloc(24)
+        header.writeUInt32BE(0x89504e47, 0)
+        header.write('IHDR', 1, 'ascii')
+        header.writeUInt32BE(width, 16)
+        header.writeUInt32BE(height, 20)
+        return header
+      }
+      const dir = join(root, 'artwork')
+      write(join(dir, 'assets/app-icon.png'), png(512, 512))
+      write(join(dir, 'assets/brand-banner.png'), png(1200, 300))
+      write(join(dir, 'codex-plugin/assets/atlan-logo.png'), png(256, 256))
+      write(join(dir, 'cursor-plugin/assets/atlan-logo.png'), png(256, 256))
+      write(join(dir, 'assets/screenshot.png'), png(800, 800))
+      const picked = (icons) => new URL(icons.light[0], 'http://localhost').searchParams.get('path')
+      // A name-based hit wins outright, even over a squarer neighbour.
+      assert.equal(picked(buildPluginIcons({}, { sourceId: 's', name: 'app', dir })), 'assets/app-icon.png')
+      // The banner is named like artwork but is 4:1, so it must not win.
+      const branded = buildPluginIcons({}, { sourceId: 's', name: 'brand', dir })
+      assert.ok(!branded.light.some((url) => decodeURIComponent(url).includes('brand-banner')), 'a wide banner is not an icon')
+      // A plugin name alone is enough to pick its logo out of a nested folder.
+      assert.equal(picked(buildPluginIcons({}, { sourceId: 's', name: 'atlan', dir })), 'codex-plugin/assets/atlan-logo.png')
+      // A documentation screenshot is never considered.
+      assert.ok(!buildPluginIcons({}, { sourceId: 's', name: 'x', dir }).light.some((url) => decodeURIComponent(url).includes('screenshot')))
+    })
+    await t.test('a portrait logotype is reported separately so the client can rank it last', () => {
+      // Exa's assets/Exa.svg is blue line art on transparent: inside our rounded
+      // container it reads as a blank blue tile, while the exa-labs avatar is
+      // the solid mark that belongs there. Ordering among local files is not
+      // enough, because the client puts every declared icon ahead of the avatar.
+      // Marking the shape lets the client place it after the avatar instead.
+      const svgOf = (w, h) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}"/></svg>`
+      const dir = join(root, 'portrait-marked')
+      write(join(dir, 'assets/Exa.svg'), svgOf(151, 182))
+      write(join(dir, 'assets/logo.svg'), svgOf(200, 200))
+      const icons = buildPluginIcons({}, { sourceId: 's', name: 'exa', dir })
+      const asPath = (url) => decodeURIComponent(url).match(/path=([^&]+)/)?.[1]
+      assert.equal(asPath(icons.light.find((u) => u.includes('/plugin-icon'))), 'assets/logo.svg')
+      assert.deepEqual(icons.portrait.light.map(asPath), ['assets/Exa.svg'], 'the portrait file is listed apart from the tile candidates')
+    })
+    await t.test('a portrait logotype never wins the tile, but is kept as a last resort', () => {
+      // Exa ships assets/Exa.svg (151x182). It matches the plugin name exactly,
+      // so the name bonus always beat the shape penalty and the row rendered a
+      // bare blue glyph on a blue well instead of the brand tile. It must rank
+      // below square artwork — but dropping it outright emptied the row, which
+      // was worse: the plugin fell through to a GitHub avatar.
+      const svgOf = (w, h) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}"/></svg>`)
+      const dir = join(root, 'portrait')
+      write(join(dir, 'assets/Exa.svg'), svgOf(151, 182))
+      const squarePng = Buffer.alloc(24)
+      squarePng.writeUInt32BE(0x89504e47, 0)
+      squarePng.write('IHDR', 1, 'ascii')
+      squarePng.writeUInt32BE(512, 16)
+      squarePng.writeUInt32BE(512, 20)
+      write(join(dir, 'assets/app-icon.png'), squarePng)
+      const icons = buildPluginIcons({}, { sourceId: 's', name: 'exa', dir })
+      // Square artwork is the tile; the name-matching portrait file is not in
+      // the tile ranking at all, however well its name scores.
+      const order = icons.light.filter((url) => url.includes('/plugin-icon'))
+        .map((url) => new URL(url, 'http://x').searchParams.get('path'))
+      assert.deepEqual(order, ['assets/app-icon.png'])
+      assert.deepEqual(icons.portrait.light.map((url) => new URL(url, 'http://x').searchParams.get('path')), ['assets/Exa.svg'])
+      // A picture at 0.15 or squarer is still an icon.
+      const square = join(root, 'portrait-ok')
+      write(join(square, 'assets/logo.svg'), svgOf(120, 132))
+      assert.ok(buildPluginIcons({}, { sourceId: 's', name: 'p', dir: square }).light.length > 0,
+        'a slightly tall logo is still usable')
+    })
+    await t.test('an expired icon is served from disk while the refresh happens behind it', async () => {
+      let count = 0
+      globalThis.fetch = async () => { count++; return new Response(svg) }
+      const url = 'https://icons.example.test/stale-but-good.svg'
+      const file = join(marketRoot(), 'icons', `icon_${createHash('md5').update(url).digest('hex')}.bin`)
+      write(file, svg)
+      utimesSync(file, new Date(0), new Date(0))
+      const icon = await getOrFetchIcon(url)
+      assert.deepEqual(icon.buffer, svg, 'the expired copy still renders')
+      // The refresh runs detached, so a broken upstream cannot turn a usable
+      // icon into an error; the caller never waits on it.
+      globalThis.fetch = async () => { throw new Error('upstream down') }
+      const again = await getOrFetchIcon(url)
+      assert.deepEqual(again.buffer, svg)
+      assert.ok(count >= 1)
+    })
     await t.test('small conventional icon precedes a large logo fallback', () => {
       const dir = join(root, 'small-icon')
       write(join(dir, 'assets/codex-icon.png'), svg)
       write(join(dir, 'assets/logo.png'), svg)
+      const servedPath = (icons) => new URL(icons.light.find((url) => url.includes('/plugin-icon')), 'http://localhost').searchParams.get('path')
       const icons = buildPluginIcons({}, { sourceId: 's', name: 'n', dir })
-      assert.equal(new URL(icons.light[0], 'http://localhost').searchParams.get('path'), 'assets/codex-icon.png')
+      assert.equal(servedPath(icons), 'assets/codex-icon.png')
       const declared = buildPluginIcons({ icon: 'assets/logo.png' }, { sourceId: 's', name: 'n', dir })
-      assert.equal(new URL(declared.light[0], 'http://localhost').searchParams.get('path'), 'assets/logo.png')
+      assert.equal(servedPath(declared), 'assets/logo.png')
     })
     await t.test('50 concurrent icon requests share one upstream fetch and warm memory', async () => {
       let count = 0
@@ -206,21 +334,93 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       assert.equal(tree.children.length, 1)
       assert.equal(tree.children[0].props.style.opacity, 1)
     })
-    await t.test('loaded icons remain ready after many icons and decode synchronously when remounted', () => {
+    await t.test('an icon remembered from a previous session never shows an empty box while it refetches', () => {
+      // Regression: persisting "loaded" across restarts let a cold page hide the
+      // placeholder and set opacity:1 before the bytes had arrived, which showed
+      // the bare dark container. A remembered icon may start optimistic, but it
+      // still has to hold the placeholder until this session's onLoad fires —
+      // and it must fall back if the fetch now fails.
       const state = []
       let cursor = 0
+      const saved = JSON.stringify(['/remembered'])
       const context = vm.createContext({
         useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (v) => { state[i] = v }] },
         h: (type, props, ...children) => ({ type, props: props || {}, children: children.filter(Boolean) }),
+        localStorage: { getItem: () => saved, setItem() {} },
       })
       const start = client.indexOf('const LOADED_AVATARS')
       const end = client.indexOf('function PluginIconFallback', start)
-      vm.runInContext(client.slice(start, end) + '\nglobalThis.Icon = PluginIconImage; globalThis.track = trackLoadedAvatar;', context)
-      context.track('/first')
-      for (let i = 0; i < 400; i++) context.track(`/icon-${i}`)
-      const tree = context.Icon({ candidates: ['/first'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      vm.runInContext(client.slice(start, end) + '\nglobalThis.Icon = PluginIconImage;', context)
+      const props = { candidates: ['/remembered'], plugin: { name: 'test' }, fallback: 'fallback', eager: true }
+      const render = () => { cursor = 0; return context.Icon(props) }
+      let tree = render()
+      // Restored history only earns an eager fetch; it does not prove this
+      // session has painted anything. Once onLoad fires, later mounts paint
+      // immediately, including navigation from the list into a detail page.
+      assert.equal(tree.children[0].props.style.opacity, 1, 'restored history must not expose an empty container')
+      assert.equal(tree.children[1].props.style.opacity, 0)
+      tree.children[1].props.onLoad()
+      tree = render()
       assert.equal(tree.children[0].props.style.opacity, 0)
+      assert.equal(tree.children[1].props.style.opacity, 1)
+      cursor = 0
+      state.length = 0
+      const remounted = context.Icon({ candidates: ['/remembered'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      assert.equal(remounted.children[0].props.style.opacity, 0, 'a painted icon must not flash on remount')
+      assert.equal(remounted.children[1].props.style.opacity, 1)
+      // And a remembered icon whose fetch fails must not stay blank either.
+      cursor = 0
+      state.length = 0
+      const failed = context.Icon({ candidates: ['/remembered-broken'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      assert.equal(failed.children[0].props.style.opacity, 1)
+    })
+    await t.test('a cold start paints a plugin-local icon without waiting on anything', () => {
+      // The icons that visibly lagged were the plugin-local ones: their only
+      // source was /api/plugin-icon, so the first paint waited on a request and
+      // showed the bare container until it landed. The bytes are already on this
+      // disk, so the row carries them and needs no request to paint.
+      const dir = join(root, 'cold-start')
+      write(join(dir, 'assets/icon.svg'), svg)
+      const icons = buildPluginIcons({}, { sourceId: 's', name: 'cold', dir })
+      assert.match(icons.light[0], /^data:image\/svg\+xml;base64,/, 'first candidate must be drawable as-is')
+      assert.ok(icons.light.some((url) => url.includes('/api/plugin-icon')), 'the served URL is still available')
+      // The case that actually matters: one row holding both a local file and a
+      // remote source. Only the file may be inlined — a regression that inlined
+      // the raw.githubusercontent URL would expose it here.
+      const both = buildPluginIcons(
+        { icon: 'assets/icon.svg', logo: 'https://cdn.example.test/remote.svg' },
+        { sourceId: 's', name: 'cold', dir, source: { url: 'https://github.com/o/r.git', sha: 'abc' } },
+      )
+      const inlined = both.light.filter((url) => url.startsWith('data:'))
+      assert.equal(inlined.length, 1, 'exactly one inline copy')
+      assert.match(inlined[0], /^data:image\/svg\+xml;base64,/, 'the inlined copy is the local file')
+      assert.ok(!both.light.some((url) => url.includes('raw.githubusercontent') && url.startsWith('data:')), 'a remote URL is never inlined')
+      // A row with only a remote source keeps the proxy path.
+      const remote = buildPluginIcons({ icon: 'assets/icon.svg' }, { sourceId: 's', name: 'cold', source: { url: 'https://github.com/o/r.git', sha: 'abc' } })
+      assert.ok(!remote.light[0].startsWith('data:'), 'remote rows keep the proxy path')
+      // Oversized local artwork stays on the URL path rather than bloating rows.
+      const big = join(root, 'cold-start-big')
+      write(join(big, 'assets/icon.svg'), Buffer.alloc(600 * 1024, 32))
+      assert.ok(!buildPluginIcons({}, { sourceId: 's', name: 'big', dir: big }).light.some((url) => url.startsWith('data:')))
+    })
+    await t.test('loaded icons remain ready after many icons and decode synchronously when remounted', () => {
+      const state = []
+      let cursor = 0
+      const saved = JSON.stringify(['/first', ...Array.from({ length: 400 }, (_, i) => `/icon-${i}`)])
+      const context = vm.createContext({
+        useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (v) => { state[i] = v }] },
+        h: (type, props, ...children) => ({ type, props: props || {}, children: children.filter(Boolean) }),
+        localStorage: { getItem: () => saved, setItem() {} },
+      })
+      const start = client.indexOf('const LOADED_AVATARS')
+      const end = client.indexOf('function PluginIconFallback', start)
+      vm.runInContext(client.slice(start, end) + '\nglobalThis.Icon = PluginIconImage;', context)
+      const tree = context.Icon({ candidates: ['/first'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      // Restored history earns a synchronous decode and eager fetch, but it is
+      // not proof that this session has painted the icon yet.
+      assert.equal(tree.children[0].props.style.opacity, 1)
       assert.equal(tree.children[1].props.decoding, 'sync')
+      assert.equal(tree.children[1].props.loading, 'eager')
       tree.children[1].props.onError()
       cursor = 0
       state.length = 0

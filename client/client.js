@@ -3932,7 +3932,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const home = new URL(plugin?.homepage);
 				if (/^https?:$/.test(home.protocol) && !/(^|\.)github\.com$/i.test(home.hostname)) favicon = `/universal-plugin-hub/api/icon?u=${encodeURIComponent(home.origin + "/favicon.ico")}`;
 			} catch {}
-			return [...new Set([...declared, brand ? BRAND_ICONS[brand.key] : null, getGithubAvatarUrl(plugin), favicon].filter((url) => typeof url === "string" && (url.startsWith("/universal-plugin-hub/api/") || url.startsWith("data:image/"))))];
+			// Portrait artwork (a logotype authored for the publisher's own
+			// background) is reported apart from the tile candidates. It goes after
+			// the brand mark the plugin can supply, so Exa gets its solid blue tile
+			// instead of blue line art that reads as a blank well — but it is still
+			// ahead of a guessed favicon.
+			const portrait = plugin?.icons?.portrait?.[isDark ? "dark" : "light"] || [];
+			return [...new Set([...declared, brand ? BRAND_ICONS[brand.key] : null, getGithubAvatarUrl(plugin), ...portrait, favicon].filter((url) => typeof url === "string" && (url.startsWith("/universal-plugin-hub/api/") || url.startsWith("data:image/"))))];
 		}
 
 	function AnthropicIcon({ isDark }) {
@@ -4081,12 +4087,61 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return badge;
 	}
 
+	// Icons that have rendered at least once. Remembering this across restarts is
+	// what stops the cold-start flash: a fresh page used to start with an empty
+	// set, so every icon showed its fallback badge until its image arrived —
+	// visible only on the rows that actually hit the network, which read as
+	// "these few icons reload every time".
 	const LOADED_AVATARS = new Set();
+	// Only a successful load in this session may skip the placeholder. Restored
+	// history helps fetch and decode quickly, but must not expose an empty box.
+	const PAINTED_AVATARS = new Set();
 		const FAILED_ICON_URLS = new Map();
+	const LOADED_AVATARS_KEY = "cpm_loaded_icons_v1";
+	// Deferred: touching localStorage while this module is still being evaluated
+	// throws outright in a storage-disabled or sandboxed context, and an escaping
+	// exception there aborts the whole client module before anything mounts.
+	let loadedAvatarsRestored = false;
+	function restoreLoadedAvatars() {
+		if (loadedAvatarsRestored) return;
+		loadedAvatarsRestored = true;
+		try {
+			const saved = JSON.parse(localStorage.getItem(LOADED_AVATARS_KEY) || "[]");
+			if (Array.isArray(saved)) for (const url of saved) if (typeof url === "string" && url) LOADED_AVATARS.add(url);
+		} catch {}
+	}
+	function isKnownAvatar(url) {
+		restoreLoadedAvatars();
+		return LOADED_AVATARS.has(url);
+	}
+	let loadedAvatarsDirty = false;
+	const defer = (fn) => { try { if (typeof queueMicrotask === "function") return queueMicrotask(fn); } catch {} fn(); };
+	function persistLoadedAvatars() {
+		if (!loadedAvatarsDirty) return;
+		loadedAvatarsDirty = false;
+		try { localStorage.setItem(LOADED_AVATARS_KEY, JSON.stringify([...LOADED_AVATARS].slice(-2048))); } catch {}
+	}
 	function trackLoadedAvatar(url) {
 		if (!url || url.startsWith("data:")) return;
-		if (LOADED_AVATARS.size >= 2048 && !LOADED_AVATARS.has(url)) LOADED_AVATARS.delete(LOADED_AVATARS.values().next().value);
+		PAINTED_AVATARS.add(url);
+		restoreLoadedAvatars();
+		// Only a real change is worth a write: a restart re-reports every icon it
+		// already knows, and rewriting an identical 2048-entry set on each boot is
+		// pure work.
+		if (LOADED_AVATARS.has(url)) return;
+		if (LOADED_AVATARS.size >= 2048) LOADED_AVATARS.delete(LOADED_AVATARS.values().next().value);
 		LOADED_AVATARS.add(url);
+		loadedAvatarsDirty = true;
+		// Batched: a list of icons loads at once and one write per icon would
+		// stringify the whole set dozens of times in the same frame.
+		defer(persistLoadedAvatars);
+	}
+	function forgetLoadedAvatar(url) {
+		restoreLoadedAvatars();
+		PAINTED_AVATARS.delete(url);
+		if (!LOADED_AVATARS.delete(url)) return;
+		loadedAvatarsDirty = true;
+		defer(persistLoadedAvatars);
 	}
 
 		function PluginIcon({ plugin, isDark, eager = false }) {
@@ -4100,14 +4155,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const [index, setIndex] = useState(0);
 			const [loaded, setLoaded] = useState("");
 			const avatarUrl = candidates.slice(index).find((url) => !(FAILED_ICON_URLS.get(url) > Date.now()));
-			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || LOADED_AVATARS.has(avatarUrl) || loaded === avatarUrl);
+			// Once this session's onLoad has confirmed an icon, every later mount
+			// shows it immediately: re-mounting into a detail page used to reset
+			// `loaded` to "" and paint the placeholder until the same bytes were
+			// decoded again, which flashed on every click. A restored entry that
+			// has not yet loaded in this session still holds the placeholder, so
+			// a cold start never paints an empty container either.
+			const known = !!avatarUrl && isKnownAvatar(avatarUrl);
+			const painted = !!avatarUrl && PAINTED_AVATARS.has(avatarUrl);
+			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || painted || loaded === avatarUrl);
 			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
 				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, fallback),
-				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: LOADED_AVATARS.has(avatarUrl) ? "sync" : "async", loading: eager ? "eager" : "lazy",
+				// A plugin-local icon is a same-origin disk read, so deferring it to
+				// the viewport buys nothing and costs a visible placeholder on scroll.
+				// Only remote avatars are worth deferring — and never above the fold.
+				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: known ? "sync" : "async", loading: (eager || known || avatarUrl.indexOf("/api/plugin-icon") >= 0) ? "eager" : "lazy",
 					style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", borderRadius: "inherit", opacity: imgLoaded ? 1 : 0 },
 					onLoad: () => { trackLoadedAvatar(avatarUrl); setLoaded(avatarUrl); },
 					onError: () => {
-						LOADED_AVATARS.delete(avatarUrl);
+						forgetLoadedAvatar(avatarUrl);
 						if (FAILED_ICON_URLS.size >= 512) FAILED_ICON_URLS.delete(FAILED_ICON_URLS.keys().next().value);
 						FAILED_ICON_URLS.set(avatarUrl, Date.now() + 60_000);
 						setLoaded("");

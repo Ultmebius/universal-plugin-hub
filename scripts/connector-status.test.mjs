@@ -107,7 +107,7 @@ test('an installed record carries the identity the icon chain reads', () => {
     assert.equal(record.source ?? null, null)
     // An install-time record whose manifest declares no icon still reports the
     // icons object, so the client's fallback chain is reached identically.
-    assert.deepEqual(record.icons, { light: [], dark: [] })
+    assert.deepEqual(record.icons, { light: [], dark: [], portrait: { light: [], dark: [] } })
   } finally {
     if (savedHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = savedHome
