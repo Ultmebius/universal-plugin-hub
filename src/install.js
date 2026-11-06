@@ -1248,7 +1248,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   let result
   try {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), MCP_TOOLS_TIMEOUT_MS)
+    const timer = setTimeout(() => controller.abort(), MCP_AUTH_TIMEOUT_MS)
     const res = await fetch(url, {
       method: 'POST',
       headers: reqHeaders,
@@ -1293,22 +1293,23 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
     if (e.name === 'AbortError') {
       result = {
         ok: false,
-        message: '连接超时（8 秒未响应），请检查服务 URL 与网络',
+        message: `连接超时（${MCP_AUTH_TIMEOUT_MS / 1000} 秒未响应），请检查服务 URL 与网络`,
         server: connectorName,
         transport,
         endpoint: url,
-        errorDetails: 'Connection timed out (8s limit)',
+        errorDetails: `Connection timed out (${MCP_AUTH_TIMEOUT_MS / 1000}s limit)`,
         duration,
       }
-    }
-    result = {
-      ok: false,
-      message: `连接异常：${e.message}`,
-      server: connectorName,
-      transport,
-      endpoint: url,
-      errorDetails: e.message,
-      duration,
+    } else {
+      result = {
+        ok: false,
+        message: `连接异常：${e.message}`,
+        server: connectorName,
+        transport,
+        endpoint: url,
+        errorDetails: e.message,
+        duration,
+      }
     }
   }
   setRemoteVerification(pluginName, connectorName, { transport, url, headers: reqHeaders, oauth: payload?.oauth }, result.ok === true)
@@ -1389,7 +1390,11 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
       writeMcpToolsState(savedState)
     }
   }
-  if (result.ok) MEMORY_TOOLS_CACHE.delete(toolsKey)
+  if (result.ok) {
+    MEMORY_TOOLS_CACHE.delete(toolsKey)
+    // A probe still running against the old configuration must not be reused.
+    MCP_TOOLS_INFLIGHT.delete(toolsKey)
+  }
   return result
 }
 
@@ -1465,6 +1470,11 @@ function quoteArgForShell(value) {
  */
 const MCP_STARTUP_TIMEOUT_MS = 180000
 const MCP_TOOLS_TIMEOUT_MS = 60000
+// A user-initiated connection test is not the same wait as a background probe.
+const MCP_AUTH_TIMEOUT_MS = 8000
+// Keep only the tail: a chatty server during a 180s startup window would
+// otherwise grow this string without bound (and `+=` copies it each time).
+const STDERR_TAIL_BYTES = 8192
 
 export function queryStdioToolsList(cmd, args, extraEnv = {}) {
   return new Promise((resolve) => {
@@ -1502,6 +1512,7 @@ export function queryStdioToolsList(cmd, args, extraEnv = {}) {
     }
 
     const armTimeout = (ms, phase) => {
+      if (settled) return
       clearTimeout(timer)
       timer = setTimeout(() => {
         const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
@@ -1509,7 +1520,10 @@ export function queryStdioToolsList(cmd, args, extraEnv = {}) {
       }, ms)
     }
 
-    cp.stderr.on('data', (d) => { stderr += d.toString() })
+    cp.stderr.on('data', (d) => {
+      stderr += d.toString()
+      if (stderr.length > STDERR_TAIL_BYTES) stderr = stderr.slice(-STDERR_TAIL_BYTES)
+    })
 
     cp.stdout.on('data', (d) => {
       output += d.toString()
@@ -1574,15 +1588,22 @@ const MCP_TOOLS_INFLIGHT = new Map()
 
 export async function fetchConnectorTools(pluginName, connectorName, forceFresh = false) {
   const key = `${pluginName}::${connectorName}`
-  if (MCP_TOOLS_INFLIGHT.has(key)) return MCP_TOOLS_INFLIGHT.get(key)
-  const request = discoverConnectorTools(pluginName, connectorName, forceFresh)
-  MCP_TOOLS_INFLIGHT.set(key, request)
+  const inflight = MCP_TOOLS_INFLIGHT.get(key)
+  // A caller asking for a fresh probe must never be served a background
+  // probe's stale answer (e.g. right after the user fixed a bad URL).
+  if (inflight && !(forceFresh && !inflight.forceFresh)) return inflight.promise
+  const entry = { forceFresh, promise: null }
+  entry.promise = discoverConnectorTools(pluginName, connectorName, forceFresh)
+  MCP_TOOLS_INFLIGHT.set(key, entry)
   try {
-    const result = await request
-    MEMORY_TOOLS_CACHE.set(key, { tools: result.tools || [], ok: result.ok, message: result.message })
+    const result = await entry.promise
+    // A failure is transient; remembering it with no expiry pinned the UI to
+    // "解析失败" until the process restarted.
+    if (result.ok === false) MEMORY_TOOLS_CACHE.delete(key)
+    else MEMORY_TOOLS_CACHE.set(key, { tools: result.tools || [], ok: result.ok, message: result.message })
     return result
   } finally {
-    if (MCP_TOOLS_INFLIGHT.get(key) === request) MCP_TOOLS_INFLIGHT.delete(key)
+    if (MCP_TOOLS_INFLIGHT.get(key) === entry) MCP_TOOLS_INFLIGHT.delete(key)
   }
 }
 
@@ -1693,15 +1714,23 @@ async function discoverConnectorTools(pluginName, connectorName, forceFresh = fa
   }
 
   // A probe that never reached the server is an error, not an empty tool list;
-  // reporting ok:true here made the UI claim the server exposes no tools.
+  // reporting ok:true with an empty list made the UI claim the server exposes
+  // no tools. A cached list is different: it is still usable, and surfacing it
+  // as an error replaced the whole row (and its toggles) with a failure notice.
   if (probeError) {
-    return { ok: false, tools: cached, disabledTools, message: probeError }
+    if (cached.length > 0) return { ok: true, tools: cached, disabledTools, message: probeError }
+    return { ok: false, tools: [], disabledTools, message: probeError }
   }
 
   return { ok: true, tools: [], disabledTools }
 }
 
 function cacheConnectorTools(key, tools) {
+  // A probe started before an uninstall can finish afterwards; writing then
+  // resurrects the removed plugin's tool table for the next install of the
+  // same name.
+  const owner = key.slice(0, key.indexOf('::'))
+  if (owner !== 'user-mcp' && !readState().plugins.some((p) => p.name === owner)) return
   const state = readMcpToolsState()
   state[key] = { ...state[key], cachedTools: tools }
   writeMcpToolsState(state)
@@ -2136,6 +2165,7 @@ export function uninstallPlugin(pluginName) {
       delete mcpToolsState[k]
       mcpToolsStateChanged = true
       MEMORY_TOOLS_CACHE.delete(k)
+      MCP_TOOLS_INFLIGHT.delete(k)
     }
   }
   if (mcpToolsStateChanged) {

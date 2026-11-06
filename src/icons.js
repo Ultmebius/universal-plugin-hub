@@ -1,4 +1,4 @@
-import { statSync, realpathSync, readFileSync, readdirSync, openSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
+import { statSync, realpathSync, readFileSync, readdirSync, openSync, readSync, closeSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import { join, relative, isAbsolute, posix } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -170,7 +170,13 @@ const INLINE_LIMIT = 12 * 1024
 // A preview is carried once per URL rather than duplicated in both theme arrays.
 // This covers ordinary raster logos while keeping large artwork out of list JSON.
 const PREVIEW_LIMIT = 64 * 1024
+// Decoding runs synchronously inside catalog parsing, once per row, so the
+// bound has to cover the decode itself and not just the file size.
+const PREVIEW_MAX_PIXELS = 262144
+const PREVIEWS_DIR = 'previews'
+const PREVIEW_CACHE_KEEP = 200
 const previewMemory = new Map()
+let lastPreviewPrune = 0
 
 /** A local file's bytes as a data URL, or null when it is too big or unreadable. */
 function inlineFile(file) {
@@ -187,19 +193,21 @@ function inlinePreview(buffer) {
   const contentType = imageContentType(buffer)
   if (!contentType) return null
   if (contentType === 'image/png' && buffer.length > INLINE_LIMIT) {
+    if (buffer.length < 24) return null
+    const w = buffer.readUInt32BE(16), h = buffer.readUInt32BE(20)
+    // Reject before decoding: the decode is the expensive part.
+    if (!w || !h || w * h > PREVIEW_MAX_PIXELS) return null
     // Version the derived cache by content and algorithm, so replacing artwork
     // cannot leave an old thumbnail behind. Originals are never overwritten.
     const key = createHash('sha256').update(buffer).digest('hex')
-    const directory = join(marketRoot(), 'icons', 'previews')
+    const directory = join(marketRoot(), 'icons', PREVIEWS_DIR)
     const file = join(directory, `96-v1-${key}.png`)
     try {
       const saved = readFileSync(file)
       if (saved.length <= INLINE_LIMIT && imageContentType(saved) === 'image/png') return `data:image/png;base64,${saved.toString('base64')}`
     } catch {}
-    if (buffer.length < 24) return null
-    const w = buffer.readUInt32BE(16), h = buffer.readUInt32BE(20)
-    if (!w || !h || w * h > 4_194_304) return null
-    const image = PNG.sync.read(buffer)
+    let image
+    try { image = PNG.sync.read(buffer) } catch { return null }
     const ratio = Math.min(1, 96 / Math.max(w, h))
     const width = Math.max(1, Math.round(w * ratio)), height = Math.max(1, Math.round(h * ratio))
     const data = Buffer.alloc(width * height * 4)
@@ -220,10 +228,32 @@ function inlinePreview(buffer) {
     }
     const thumbnail = PNG.sync.write({ width, height, data }, { deflateLevel: 9, deflateStrategy: 0 })
     if (thumbnail.length > INLINE_LIMIT) return null
-    try { mkdirSync(directory, { recursive: true }); writeFileSync(file, thumbnail) } catch {}
+    try {
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(file, thumbnail)
+      prunePreviewCache(directory)
+    } catch {}
     return `data:image/png;base64,${thumbnail.toString('base64')}`
   }
   return buffer.length <= PREVIEW_LIMIT ? `data:${contentType};base64,${buffer.toString('base64')}` : null
+}
+
+/** Content-addressed thumbnails are never overwritten, so they need pruning. */
+function prunePreviewCache(directory) {
+  const now = Date.now()
+  if (now - lastPreviewPrune < 60 * 60 * 1000) return
+  lastPreviewPrune = now
+  try {
+    const files = readdirSync(directory)
+      .map((entry) => {
+        try { const info = statSync(join(directory, entry)); return info.isFile() ? { entry, at: info.mtimeMs } : null } catch { return null }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.at - a.at)
+    for (const stale of files.slice(PREVIEW_CACHE_KEEP)) {
+      try { rmSync(join(directory, stale.entry), { force: true }) } catch {}
+    }
+  } catch {}
 }
 
 function previewFile(file) {

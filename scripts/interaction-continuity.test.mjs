@@ -64,9 +64,12 @@ test('detail reading position survives remount and waits for asynchronous conten
 
 test('source sorting survives installation, tab navigation and remounts until filtering, sorting or a new Hub session', async () => {
   const browse = func('BrowseView')
-  const names = new Set(['currentSourceInstalledNames', 'sortInstalledSnapshots', 'sortInstalledSnapshot', 'sortInstalledNames', 'currentSourcePlugins', 'visible'])
+  const names = new Set(['currentSourceInstalledNames', 'sortInstalledSnapshots', 'sortInstalledNames', 'currentSourcePlugins', 'visible'])
+  const commits = browse.body.body.filter(n => n.type === 'ExpressionStatement'
+    && n.expression?.type === 'CallExpression' && code(n).includes('SESSION_STORE.browseSortSnapshots'))
+  assert.equal(commits.length, 1, 'the snapshot commit effect moved; update this test to follow it')
   const sorting = browse.body.body.filter(n => (n.type === 'VariableDeclaration' && n.declarations.some(d => names.has(d.id.name)))
-    || (n.type === 'IfStatement' && code(n).includes('sortInstalledSnapshot')))
+    || commits.includes(n))
     .map(code).join('\n')
   let result, view
   const context = { ...React, calcSearchScore: () => 1, SESSION_STORE: {} }

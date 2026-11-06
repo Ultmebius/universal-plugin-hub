@@ -27,7 +27,7 @@ function probe() {
   cp.stdin = { write: value => writes.push(JSON.parse(value)) }; cp.kill = () => {}
   let timerId = 0
   const context = { process: { env: {} }, spawn: () => cp, SHELL_COMMANDS: /^(npx|npm)$/,
-    MCP_STARTUP_TIMEOUT_MS: 180000, MCP_TOOLS_TIMEOUT_MS: 60000,
+    MCP_STARTUP_TIMEOUT_MS: 180000, MCP_TOOLS_TIMEOUT_MS: 60000, STDERR_TAIL_BYTES: 8192,
     setTimeout(fn, ms) { const id = ++timerId; timers.set(id, { fn, ms }); return id }, clearTimeout(id) { timers.delete(id) } }
   vm.runInNewContext(serverFns.get('quoteArgForShell') + '\n' + serverFns.get('queryStdioToolsList') + '\nglobalThis.query = queryStdioToolsList', context)
   return { cp, timers, writes, result: context.query('node', ['server.js']) }
@@ -70,20 +70,27 @@ test('installation immediately discovers every registered connector without bloc
 })
 
 test('concurrent discovery joins one server process and a later retry starts fresh', async () => {
-  const pending = new Map()
-  let calls = 0, release
-  const context = { MCP_TOOLS_INFLIGHT: pending, MEMORY_TOOLS_CACHE: new Map(), discoverConnectorTools: () => { calls++; return new Promise(resolve => { release = resolve }) } }
+  const pending = new Map(), releases = []
+  let calls = 0
+  const context = { MCP_TOOLS_INFLIGHT: pending, MEMORY_TOOLS_CACHE: new Map(), discoverConnectorTools: () => { calls++; return new Promise(resolve => { releases.push(resolve) }) } }
   vm.runInNewContext(serverFns.get('fetchConnectorTools') + '\nglobalThis.fetch = fetchConnectorTools', context)
-  const first = context.fetch('p', 'c'), second = context.fetch('p', 'c', true)
+  const first = context.fetch('p', 'c')
+  // Same freshness joins the process already running.
+  const joined = context.fetch('p', 'c')
   assert.equal(calls, 1)
-  release({ ok: false, message: 'network offline', tools: [] })
-  assert.equal((await first).message, 'network offline')
-  assert.equal((await second).message, 'network offline')
-  assert.equal(pending.size, 0)
-  assert.equal(context.MEMORY_TOOLS_CACHE.get('p::c').ok, false, 'a failed warmup must remain visible to the next page request')
-  const retry = context.fetch('p', 'c', true)
+  // A forced refresh must not be answered by an older background probe.
+  const second = context.fetch('p', 'c', true)
   assert.equal(calls, 2)
-  release({ ok: true, tools: [] }); await retry
+  assert.notEqual(joined, second)
+  releases[0]({ ok: false, message: 'network offline', tools: [] })
+  assert.equal((await first).message, 'network offline')
+  releases[1]({ ok: false, message: 'network offline', tools: [] })
+  assert.equal((await second).message, 'network offline')
+  assert.equal(context.MEMORY_TOOLS_CACHE.has('p::c'), false, 'a transient failure must not be remembered')
+  const retry = context.fetch('p', 'c', true)
+  assert.equal(calls, 3)
+  releases[2]({ ok: true, tools: [] }); await retry
+  assert.equal(pending.size, 0)
 })
 
 test('remote discovery allows 60 seconds through body parsing and reports fresh failures with cached tools', async () => {
@@ -106,9 +113,9 @@ test('remote discovery allows 60 seconds through body parsing and reports fresh 
   assert.equal(timers.size, 0)
   response = { status: 503 }
   const failed = await context.discover('p', 'c', true)
-  assert.equal(failed.ok, false)
-  assert.match(failed.message, /503/)
-  assert.equal(failed.tools, cached, 'a stale cache cannot turn a failed refresh into success')
+  assert.equal(failed.ok, true, 'cached tools stay usable when a refresh fails')
+  assert.match(failed.message, /503/, 'the failure reason still travels with the cached list')
+  assert.equal(failed.tools, cached)
   assert.equal(timers.size, 0)
   context.MEMORY_TOOLS_CACHE.set('p::c', { ok: false, tools: cached, message: failed.message })
   const remembered = await context.discover('p', 'c')

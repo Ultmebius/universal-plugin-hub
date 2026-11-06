@@ -7106,15 +7106,31 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const currentSourceInstalledNames = useMemo(() => new Set((state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)), [state.plugins, activeSourceId]);
 		// Each source retains its browsing order for this Hub session, including
-		// tab navigation and panel remounts. Filtering or sorting takes a new snapshot.
-		const sortInstalledSnapshots = SESSION_STORE.browseSortSnapshots ||= Object.create(null);
-		let sortInstalledSnapshot = sortInstalledSnapshots[activeSourceId];
-		if (!sortInstalledSnapshot || sortInstalledSnapshot.filter !== filter
-			|| sortInstalledSnapshot.query !== query || sortInstalledSnapshot.sortBy !== sortBy) {
-			sortInstalledSnapshot = { filter, query, sortBy, names: currentSourceInstalledNames };
-			sortInstalledSnapshots[activeSourceId] = sortInstalledSnapshot;
-		}
-		const sortInstalledNames = sortInstalledSnapshot.names;
+		// tab navigation and panel remounts. Filtering or sorting takes a new
+		// snapshot — derived here, committed below, so a render that React
+		// discards leaves the session store untouched.
+		const sortInstalledSnapshots = SESSION_STORE.browseSortSnapshots;
+		const sortInstalledNames = useMemo(() => {
+			const saved = sortInstalledSnapshots && sortInstalledSnapshots[activeSourceId];
+			if (!saved || saved.filter !== filter || saved.query !== query || saved.sortBy !== sortBy) {
+				return currentSourceInstalledNames;
+			}
+			// The captured order only ever loses names, never gains them: an
+			// uninstall has to release the plugin's pinned slot at once (it drops
+			// back into the current order like any other row), while an install
+			// must still leave the list alone until the order is re-snapshotted.
+			if (![...saved.names].some((n) => !currentSourceInstalledNames.has(n))) return saved.names;
+			return new Set([...saved.names].filter((n) => currentSourceInstalledNames.has(n)));
+		}, [sortInstalledSnapshots, activeSourceId, filter, query, sortBy, currentSourceInstalledNames]);
+		// Only a new browsing order (or a tab switch) re-captures what is
+		// installed. A plain install must leave the remembered order alone, so
+		// the pruned set is never written back.
+		useEffect(() => {
+			if (!SESSION_STORE.browseSortSnapshots) SESSION_STORE.browseSortSnapshots = Object.create(null);
+			const saved = SESSION_STORE.browseSortSnapshots[activeSourceId];
+			if (saved && saved.filter === filter && saved.query === query && saved.sortBy === sortBy) return;
+			SESSION_STORE.browseSortSnapshots[activeSourceId] = { filter, query, sortBy, names: currentSourceInstalledNames };
+		}, [activeSourceId, filter, query, sortBy, currentSourceInstalledNames]);
 		const installedNames = useMemo(() => new Set(state.plugins.map((p) => p.name)), [state.plugins]);
 		const totalInstalledCount = state.plugins.length;
 		const currentSourcePlugins = useMemo(() => (rows && rows[activeSourceId]) || [], [rows, activeSourceId]);
@@ -7560,7 +7576,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			})(),
 
 			// Detail view — 0ms instant transition without intermediate loading screen
-			!mcpsOpen && view.type === "detail" && !manageRecord && currentDetailPlugin && h(DetailView, {
+			!mcpsOpen && view.type === "detail" && currentDetailPlugin && h(DetailView, {
 				plugin: {
 					...currentDetailPlugin,
 					installed: installedNames.has(currentDetailPlugin.name),
