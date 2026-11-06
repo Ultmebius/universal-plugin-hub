@@ -90,13 +90,15 @@ test('management tabs apply their scroll edges during layout and observe later g
   const layouts = [], effects = []
   let mask = '', resized, disconnected = false
   const scroller = { scrollTop: 100, scrollHeight: 900, clientHeight: 400, children: [{}] }
-  vm.runInNewContext(source.slice(start, end), {
+  const rememberStart = source.indexOf('function useRememberedDetailScroll(')
+  const rememberEnd = source.indexOf('function useDetailScrollMask(', rememberStart)
+  vm.runInNewContext(source.slice(rememberStart, rememberEnd) + source.slice(start, end), {
     manageRef: { current: scroller },
     setManageMaskClass: value => { mask = value },
     useCallback: callback => callback,
     useLayoutEffect: callback => layouts.push(callback),
     useEffect: callback => effects.push(callback),
-    record: { name: 'example' }, tab: 'skills', tabQuery: '',
+    record: { name: 'example' }, tab: 'skills', tabQuery: '', initialTab: null, scrollState: {},
     setTab() {}, setTabQuery() {}, setSearchOpen() {}, setMenuOpen() {},
     window: { addEventListener() {}, removeEventListener() {} },
     ResizeObserver: class {

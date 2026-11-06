@@ -18,9 +18,10 @@ function findBrowseView(node) {
   }
 }
 // Run the component's render-time sorting, before any effects can run.
-const declarations = new Set(['installedSnapshots', 'sortInstalledSnapshot', 'sortTick', 'currentSourceInstalledNames', 'currentSourcePlugins', 'visible'])
+const declarations = new Set(['sortInstalledSnapshots', 'sortInstalledSnapshot', 'sortInstalledNames', 'currentSourceInstalledNames', 'currentSourcePlugins', 'visible'])
 const sorting = findBrowseView(ast).body.body
-  .filter(node => node.type === 'VariableDeclaration' && node.declarations.some(d => declarations.has(d.id.name || d.id.elements?.[0]?.name)))
+  .filter(node => (node.type === 'VariableDeclaration' && node.declarations.some(d => declarations.has(d.id.name)))
+    || (node.type === 'IfStatement' && client.slice(node.start, node.end).includes('sortInstalledSnapshot')))
   .map(node => client.slice(node.start, node.end)).join('\n')
 const rows = {
   anthropic: [{ name: 'activecampaign' }, { name: 'playwright' }, { name: '42crunch' }],
@@ -28,12 +29,12 @@ const rows = {
 }
 const plugins = [{ sourceId: 'anthropic', name: 'playwright' }, { sourceId: 'other', name: 'zebra' }]
 function render({ activeSourceId = 'anthropic', installed = plugins, sortBy = 'default', session = {} } = {}) {
-  const context = { state: { plugins: installed }, rows, activeSourceId, sortBy, query: '', SESSION_STORE: session,
-    useMemo: fn => fn(), useState: value => [value, () => {}] }
+  const context = { state: { plugins: installed }, rows, activeSourceId, sortBy, filter: 'all', query: '', SESSION_STORE: session,
+    useMemo: fn => fn(), useRef: value => ({ current: value }) }
   return Array.from(vm.runInNewContext(sorting + '\nvisible.map(p => p.name)', context))
 }
 
-test('opening or reopening the panel puts installed plugins first on the first render', () => {
+test('a new Hub session puts installed plugins first on its first render', () => {
   assert.deepEqual(render(), ['playwright', '42crunch', 'activecampaign'])
   assert.deepEqual(render({ session: {} }), ['playwright', '42crunch', 'activecampaign'])
 })
@@ -45,7 +46,7 @@ test('switching sources uses the target installed set immediately', () => {
   assert.equal(render({ session })[0], 'playwright')
 })
 
-test('install and uninstall updates are reflected in the same render as card state', () => {
+test('a newly opened list orders its current installed set immediately', () => {
   assert.deepEqual(render({ installed: [] }), ['42crunch', 'activecampaign', 'playwright'])
   assert.deepEqual(render({ installed: [...plugins, { sourceId: 'anthropic', name: 'activecampaign' }] }), ['activecampaign', 'playwright', '42crunch'])
 })

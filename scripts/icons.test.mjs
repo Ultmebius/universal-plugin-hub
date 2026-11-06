@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import vm from 'node:vm'
+import { PNG } from 'pngjs'
 import { buildPluginIcons, getOrFetchIcon, imageContentType, readLocalIcon } from '../src/icons.js'
 import { readMarketplace, invalidateMarketplaceCache, pluginDetail } from '../src/parser.js'
 import { sourceRepositoryDir } from '../src/market.js'
@@ -366,8 +367,17 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       cursor = 0
       state.length = 0
       const remounted = context.Icon({ candidates: ['/remembered'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
-      assert.equal(remounted.children[0].props.style.opacity, 0, 'a painted icon must not flash on remount')
-      assert.equal(remounted.children[1].props.style.opacity, 1)
+      assert.equal(remounted.children[0].props.style.opacity, 1, 'a previous mount is not proof this image is ready')
+      assert.equal(remounted.children[1].props.style.opacity, 0)
+      remounted.children[1].props.ref({ complete: true, naturalWidth: 80 })
+      const ready = render()
+      assert.equal(ready.children[0].props.style.opacity, 0, 'confirm a memory-cached image before paint')
+      assert.equal(ready.children[1].props.style.opacity, 1)
+      cursor = 0
+      state.length = 0
+      const waiting = context.Icon({ candidates: ['/remembered'], plugin: { name: 'test' }, fallback: 'fallback', eager: true })
+      waiting.children[1].props.ref({ complete: false, naturalWidth: 0 })
+      assert.equal(render().children[0].props.style.opacity, 1, 'evicted or decoding images retain the preview on reopen')
       // And a remembered icon whose fetch fails must not stay blank either.
       cursor = 0
       state.length = 0
@@ -402,6 +412,64 @@ test('plugin icon parsing, delivery and caching', async (t) => {
       const big = join(root, 'cold-start-big')
       write(join(big, 'assets/icon.svg'), Buffer.alloc(600 * 1024, 32))
       assert.ok(!buildPluginIcons({}, { sourceId: 's', name: 'big', dir: big }).light.some((url) => url.startsWith('data:')))
+    })
+    await t.test('ordinary raster-sized local artwork carries one exact preview shared by both themes', () => {
+      const dir = join(root, 'medium-logo')
+      const bytes = Buffer.concat([svg, Buffer.alloc(48 * 1024, 32)])
+      write(join(dir, 'assets/icon.svg'), bytes)
+      const icons = buildPluginIcons({}, { sourceId: 's', name: 'medium', dir })
+      assert.match(icons.light[0], /\/api\/plugin-icon\?/)
+      assert.equal(icons.light[0], icons.dark[0])
+      assert.deepEqual(Object.keys(icons.previews), [icons.light[0]], 'do not duplicate medium artwork in theme arrays')
+      assert.deepEqual(Buffer.from(icons.previews[icons.light[0]].split(',')[1], 'base64'), bytes)
+      write(join(dir, 'assets/icon.svg'), Buffer.concat([svg, Buffer.alloc(65 * 1024, 32)]))
+      assert.equal(buildPluginIcons({}, { sourceId: 's', name: 'medium', dir }).previews, undefined, 'large artwork stays out of list payloads')
+    })
+    await t.test('large PNG previews preserve aspect ratio and alpha, stay small, and invalidate with the original', () => {
+      const dir = join(root, 'png-preview'), file = join(dir, 'assets/icon.png')
+      const width = 512, height = 256, data = Buffer.alloc(width * height * 4)
+      let seed = 123456
+      for (let i = 0; i < data.length; i += 4) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+        data[i] = data[i + 1] = data[i + 2] = seed >>> 24
+        data[i + 3] = 128
+      }
+      const original = PNG.sync.write({ width, height, data })
+      assert.ok(original.length > 64 * 1024)
+      write(file, original)
+      const icons = buildPluginIcons({ icon: 'assets/icon.png' }, { sourceId: 's', name: 'png', dir })
+      const bytes = Buffer.from(icons.previews[icons.light[0]].split(',')[1], 'base64')
+      assert.ok(bytes.length <= 12 * 1024)
+      const preview = PNG.sync.read(bytes)
+      assert.equal(preview.width, 96)
+      assert.equal(preview.height, 48)
+      assert.equal(preview.data[3], 128, 'retain translucent pixels rather than flattening onto white')
+      assert.deepEqual(readFileSync(file), original, 'preserve the full-resolution original')
+      data.fill(255)
+      write(file, PNG.sync.write({ width, height, data }))
+      const updated = buildPluginIcons({ icon: 'assets/icon.png' }, { sourceId: 's', name: 'png', dir })
+      assert.notEqual(updated.light[0], icons.light[0], 'changed artwork must replace the displayed bytes')
+    })
+    await t.test('cached avatar-only rows carry exact disk bytes without fetching and retain the refresh URL', () => {
+      const url = 'https://github.com/PreviewFixture.png?size=80'
+      const file = join(marketRoot(), 'icons', `icon_${createHash('md5').update(url).digest('hex')}.bin`)
+      write(file, svg)
+      utimesSync(file, new Date(0), new Date(0))
+      const previousFetch = globalThis.fetch
+      let fetches = 0
+      globalThis.fetch = () => { fetches++; throw Error('parsing must not fetch icons') }
+      try {
+        const icons = buildPluginIcons({}, { source: { url: 'https://github.com/PreviewFixture/plugin.git' } })
+        const [proxy] = Object.keys(icons.previews)
+        assert.equal(new URL(proxy, 'http://localhost').searchParams.get('u'), url)
+        assert.deepEqual(Buffer.from(icons.previews[proxy].split(',')[1], 'base64'), svg)
+        assert.deepEqual(icons.light, [], 'keep avatar resolution and refresh on the normal client path')
+        assert.equal(buildPluginIcons({}, { source: { url: 'https://github.com/UncachedPreviewFixture/plugin.git' } }).previews, undefined)
+        const remote = buildPluginIcons({ icon: url })
+        assert.equal(new URL(remote.light[0], 'http://localhost').searchParams.get('u'), url)
+        assert.equal(remote.previews[remote.light[0]], icons.previews[proxy])
+        assert.equal(fetches, 0)
+      } finally { globalThis.fetch = previousFetch }
     })
     await t.test('loaded icons remain ready after many icons and decode synchronously when remounted', () => {
       const state = []

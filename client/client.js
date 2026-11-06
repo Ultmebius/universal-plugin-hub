@@ -593,11 +593,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	pointer-events: none !important;
 }
 .cpm-tab.is-shifting {
-	transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), background .15s ease, color .15s ease !important;
+	transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background .15s ease, color .15s ease !important;
 	will-change: transform;
 }
 .cpm-tab-drag-overlay {
 	position: fixed !important;
+	left: 0;
+	top: 0;
 	z-index: 9999999 !important;
 	pointer-events: none !important;
 	box-sizing: border-box !important;
@@ -618,7 +620,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.32), 0 8px 16px -2px rgba(37, 99, 235, 0.25), 0 0 0 1px rgba(37, 99, 235, 0.4) !important;
 	backdrop-filter: blur(8px);
 	-webkit-backdrop-filter: blur(8px);
-	will-change: left, top, transform, box-shadow;
+	will-change: transform;
 }
 .cpm-dark .cpm-tab-drag-overlay,
 .cpm-tab-drag-overlay.cpm-dark {
@@ -1051,7 +1053,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-detail {
 	flex: 1;
 	overflow-y: auto;
-	padding: 16px 24px 28px 24px;
+	padding: 11px 24px 28px 24px;
 	width: 100%;
 	display: flex;
 	flex-direction: column;
@@ -1088,6 +1090,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 4px;
 }
 .cpm-back:hover { color: var(--cpm-text); }
+/* The top bar leaves 10px below its rule: 10 + 11 above Back matches
+   the 21px below it, keeping Back centered without moving the title row. */
+.cpm-detail:not(.cpm-skill-detail) > .cpm-back { padding-bottom: 21px; }
 .cpm-title-row {
 	display: flex;
 	align-items: center;
@@ -1303,7 +1308,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-manage {
 	flex: 1;
 	overflow-y: auto;
-	padding: 16px 24px 28px 24px;
+	padding: 11px 24px 28px 24px;
 	width: 100%;
 	background: var(--cpm-bg);
 	display: flex;
@@ -1332,7 +1337,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 8px;
+	margin-bottom: 21px;
 }
 .cpm-meta {
 	display: flex;
@@ -1624,6 +1629,99 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 12px;
 	margin-top: 12px;
 	margin-bottom: 6px;
+}
+.cpm-agent-list {
+	display: grid;
+	gap: .625rem;
+	list-style: none;
+	margin: .25rem 0 0;
+	padding: 0;
+}
+.cpm-agent-item {
+	min-inline-size: 0;
+	padding: .875rem 1rem;
+	border: 1px solid var(--cpm-border);
+	border-radius: .875rem;
+	background: var(--cpm-card-bg);
+}
+.cpm-agent-header, .cpm-agent-meta {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: .375rem .625rem;
+}
+.cpm-agent-name {
+	min-inline-size: 0;
+	margin: 0;
+	font-size: .9375rem;
+	font-weight: 600;
+	line-height: 1.4;
+	letter-spacing: -.015em;
+	color: var(--cpm-text);
+	overflow-wrap: anywhere;
+}
+.cpm-agent-meta {
+	min-inline-size: 0;
+	max-inline-size: 100%;
+	margin-inline-start: auto;
+	color: var(--cpm-muted);
+	font-size: .6875rem;
+	line-height: 1.5;
+	font-variant-numeric: tabular-nums;
+}
+.cpm-agent-model {
+	box-sizing: border-box;
+	max-inline-size: 100%;
+	padding: .125rem .4375rem;
+	border-radius: .375rem;
+	background: var(--cpm-pill-bg);
+	color: var(--cpm-text-sub);
+	overflow-wrap: anywhere;
+}
+.cpm-agent-description {
+	margin-block: .4375rem 0;
+	font-size: .8125rem;
+	line-height: 1.55;
+	color: var(--cpm-text-sub);
+	overflow-wrap: anywhere;
+}
+.cpm-agent-description .cpm-smart-md { font-size: inherit; line-height: inherit; color: inherit; }
+.cpm-agent-tools { display: grid; gap: .375rem; margin-block-start: .625rem; }
+.cpm-agent-tool-group {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: .375rem .75rem;
+}
+.cpm-agent-tool-source {
+	flex: 0 1 13rem;
+	min-inline-size: 0;
+	font-size: .6875rem;
+	line-height: 1.6;
+	color: var(--cpm-muted);
+	overflow-wrap: anywhere;
+}
+.cpm-agent-tool-list {
+	display: flex;
+	flex: 1 1 24rem;
+	flex-wrap: wrap;
+	flex-wrap: balance;
+	gap: .25rem .375rem;
+	min-inline-size: 0;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.cpm-agent-tool-list > li { min-inline-size: 0; max-inline-size: 100%; }
+.cpm-agent-tool {
+	display: block;
+	padding: .125rem .375rem;
+	border-radius: .3125rem;
+	background: var(--cpm-pill-bg);
+	font: .6875rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+	color: var(--cpm-text-sub);
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 .cpm-skill-list { margin-top: 4px; }
 .cpm-skill-item {
@@ -2416,6 +2514,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 @media (prefers-reduced-motion: reduce) {
 	.cpm-oauth-pending { animation: none; }
+	.cpm-tab.is-shifting, .cpm-tab-drag-overlay { transition: none !important; }
 	/* The spring is decoration; the state change is the message. A user who
 	   asked for less motion gets the knob in place immediately. */
 	.cpm-toggle, .cpm-toggle::after {
@@ -3377,23 +3476,62 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-family: var(--cpm-mono, monospace);
 }
 
+.cpm-mcp-discovery {
+	display: inline-flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 8px;
+	min-width: 0;
+	max-width: 100%;
+	color: var(--cpm-muted);
+	font-size: 11.5px;
+	line-height: 1.6;
+}
+.cpm-mcp-discovery.is-error { color: var(--cpm-text-secondary, var(--cpm-muted)); }
+.cpm-mcp-discovery-message { overflow-wrap: anywhere; }
+.cpm-mcp-retry {
+	min-height: 24px;
+	border: 1px solid var(--cpm-border);
+	border-radius: 7px;
+	background: var(--cpm-pill-bg);
+	color: var(--cpm-text);
+	padding: 2px 8px;
+	font: inherit;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background 120ms ease, transform 100ms ease;
+}
+.cpm-mcp-retry:hover { background: var(--cpm-hover); }
+.cpm-mcp-retry:active { transform: scale(0.97); }
+.cpm-mcp-retry:focus-visible, .cpm-mcp-expand:focus-visible { outline: 2px solid #3b82f6; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+	.cpm-toast { animation: none !important; }
+	.cpm-mcp-discovery .cpm-spin-ring { animation: none; }
+	.cpm-mcp-retry { transition: none; }
+	.cpm-mcp-retry:active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+	.cpm-root .cpm-toast { background: var(--cpm-bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
 .cpm-toast {
-	position: fixed;
+	position: absolute;
 	bottom: 28px;
 	left: 50%;
 	transform: translateX(-50%);
-	background: rgba(255, 255, 255, 0.95);
+	background: rgba(255, 255, 255, 0.72);
 	color: #09090b;
 	border: 1px solid rgba(0, 0, 0, 0.08);
 	border-radius: 12px;
 	padding: 11px 16px;
 	font-size: 13px;
 	z-index: 100001;
-	max-width: min(92vw, 500px);
+	max-width: min(calc(100% - 32px), 500px);
+	box-sizing: border-box;
 	width: max-content;
-	box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8) inset, 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 16px 36px -6px rgba(0, 0, 0, 0.12);
-	-webkit-backdrop-filter: blur(20px) saturate(190%);
-	backdrop-filter: blur(20px) saturate(190%);
+	box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.04);
+	-webkit-backdrop-filter: blur(20px) saturate(180%);
+	backdrop-filter: blur(20px) saturate(180%);
 	display: flex;
 	align-items: center;
 	gap: 20px;
@@ -3402,10 +3540,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	user-select: none;
 }
 .cpm-dark .cpm-toast {
-	background: rgba(24, 24, 27, 0.95);
+	background: rgba(55, 55, 57, 0.75);
 	color: #f4f4f5;
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.12) inset, 0 4px 12px -2px rgba(0, 0, 0, 0.4), 0 20px 48px -8px rgba(0, 0, 0, 0.7);
+	backdrop-filter: blur(22px) saturate(180%);
+	-webkit-backdrop-filter: blur(22px) saturate(180%);
+	border: 1px solid var(--cpm-modal-border);
+	box-shadow: var(--cpm-shadow);
 }
 @keyframes cpm-toast-in {
 	from { opacity: 0; transform: translate(-50%, 14px) scale(0.97); }
@@ -3425,6 +3565,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	to { transform: rotate(360deg); }
 }
 .cpm-toast-content {
+	text-align: center;
 	flex: 1;
 	min-width: 0;
 	display: flex;
@@ -3432,6 +3573,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: center;
 }
 .cpm-toast-title {
+	justify-content: center;
 	color: #09090b;
 	font-size: 13px;
 	font-weight: 600;
@@ -3448,9 +3590,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 12px;
 	line-height: 1.4;
 	margin-top: 2px;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 .cpm-dark .cpm-toast-body {
 	color: #a1a1aa;
@@ -4093,9 +4234,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	// visible only on the rows that actually hit the network, which read as
 	// "these few icons reload every time".
 	const LOADED_AVATARS = new Set();
-	// Only a successful load in this session may skip the placeholder. Restored
-	// history helps fetch and decode quickly, but must not expose an empty box.
-	const PAINTED_AVATARS = new Set();
 		const FAILED_ICON_URLS = new Map();
 	const LOADED_AVATARS_KEY = "cpm_loaded_icons_v1";
 	// Deferred: touching localStorage while this module is still being evaluated
@@ -4123,7 +4261,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 	function trackLoadedAvatar(url) {
 		if (!url || url.startsWith("data:")) return;
-		PAINTED_AVATARS.add(url);
 		restoreLoadedAvatars();
 		// Only a real change is worth a write: a restart re-reports every icon it
 		// already knows, and rewriting an identical 2048-entry set on each boot is
@@ -4138,7 +4275,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 	function forgetLoadedAvatar(url) {
 		restoreLoadedAvatars();
-		PAINTED_AVATARS.delete(url);
 		if (!LOADED_AVATARS.delete(url)) return;
 		loadedAvatarsDirty = true;
 		defer(persistLoadedAvatars);
@@ -4146,8 +4282,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		function PluginIcon({ plugin, isDark, eager = false }) {
 			const candidates = useMemo(() => getPluginIconCandidates(plugin, isDark), [plugin, isDark]);
-			const embedded = candidates.find((url) => url.startsWith("data:image/"));
-			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark });
+			const embedded = plugin?.icons?.previews?.[candidates[0]] || candidates.find((url) => url.startsWith("data:image/"));
+			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, decoding: "sync", style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark });
 			return candidates.length ? h(PluginIconImage, { key: candidates.join("|"), candidates, plugin, fallback, eager }) : fallback;
 		}
 
@@ -4155,21 +4291,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const [index, setIndex] = useState(0);
 			const [loaded, setLoaded] = useState("");
 			const avatarUrl = candidates.slice(index).find((url) => !(FAILED_ICON_URLS.get(url) > Date.now()));
-			// Once this session's onLoad has confirmed an icon, every later mount
-			// shows it immediately: re-mounting into a detail page used to reset
-			// `loaded` to "" and paint the placeholder until the same bytes were
-			// decoded again, which flashed on every click. A restored entry that
-			// has not yet loaded in this session still holds the placeholder, so
-			// a cold start never paints an empty container either.
+			// History controls scheduling, not visibility: a new <img> can still be
+			// fetching or decoding even if this URL loaded on an earlier mount.
 			const known = !!avatarUrl && isKnownAvatar(avatarUrl);
-			const painted = !!avatarUrl && PAINTED_AVATARS.has(avatarUrl);
-			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || painted || loaded === avatarUrl);
+			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || loaded === avatarUrl);
 			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
 				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, fallback),
 				// A plugin-local icon is a same-origin disk read, so deferring it to
 				// the viewport buys nothing and costs a visible placeholder on scroll.
 				// Only remote avatars are worth deferring — and never above the fold.
 				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: known ? "sync" : "async", loading: (eager || known || avatarUrl.indexOf("/api/plugin-icon") >= 0) ? "eager" : "lazy",
+					ref: (image) => {
+						// A memory-cached image can be ready at commit, before onLoad.
+						// Confirm this element before paint to avoid a fallback flash.
+						if (image?.complete && image.naturalWidth > 0 && loaded !== avatarUrl) {
+							trackLoadedAvatar(avatarUrl);
+							setLoaded(avatarUrl);
+						}
+					},
 					style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", borderRadius: "inherit", opacity: imgLoaded ? 1 : 0 },
 					onLoad: () => { trackLoadedAvatar(avatarUrl); setLoaded(avatarUrl); },
 					onError: () => {
@@ -4256,7 +4395,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				h("div", { className: "cpm-card-name" },
 					h("span", { className: "cpm-card-name-text" }, plugin.displayName || plugin.name),
 				),
-				h("div", { className: "cpm-card-desc" }, plugin.description || (plugin.author ? `by ${plugin.author}` : "")),
+				h("div", { className: "cpm-card-desc" }, plugin.shortDescription || plugin.description || (plugin.author ? `by ${plugin.author}` : "")),
 			),
 			action || (installed
 				? h("button", {
@@ -4278,7 +4417,41 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				onClick: e => e.stopPropagation(), onChange: e => { setInteractive(true); onToggle(skill, e.currentTarget.checked); } });
 	}
 
-		function useDetailScrollMask(identity, containerRef, content) {
+		function useRememberedDetailScroll(identity, containerRef, page, updateMask, content) {
+			useLayoutEffect(() => {
+				const el = containerRef.current;
+				if (!el) return;
+				const positions = page ? (page.scrollPositions ||= {}) : {};
+				let pending = positions[identity] || 0;
+				const restore = () => {
+					if (pending !== null) {
+						el.scrollTop = pending;
+						if (el.scrollTop === pending) pending = null;
+					}
+					updateMask();
+				};
+				const save = () => { if (pending === null) positions[identity] = el.scrollTop; };
+				const interact = () => { pending = null; save(); };
+				restore();
+				el.addEventListener?.("scroll", save);
+				el.addEventListener?.("wheel", interact, { passive: true });
+				el.addEventListener?.("pointerdown", interact);
+				el.addEventListener?.("keydown", interact);
+				const observer = typeof ResizeObserver === "function" ? new ResizeObserver(restore) : null;
+				observer?.observe(el);
+				Array.from(el.children || []).forEach(child => observer?.observe(child));
+				return () => {
+					save();
+					observer?.disconnect();
+					el.removeEventListener?.("scroll", save);
+					el.removeEventListener?.("wheel", interact);
+					el.removeEventListener?.("pointerdown", interact);
+					el.removeEventListener?.("keydown", interact);
+				};
+			}, [identity, containerRef, page, updateMask, content]);
+		}
+
+		function useDetailScrollMask(identity, containerRef, content, scrollState) {
 			const localRef = useRef(null);
 			const detailRef = containerRef || localRef;
 			const [maskClass, setMaskClass] = useState(" mask-bottom");
@@ -4287,10 +4460,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (!el) return;
 				setMaskClass(el.scrollHeight - el.clientHeight > 4 && el.scrollTop < el.scrollHeight - el.clientHeight - 4 ? " mask-bottom" : "");
 			}, [detailRef]);
-			useLayoutEffect(() => {
-				if (detailRef.current) detailRef.current.scrollTop = 0;
-				updateMask();
-			}, [identity, detailRef, updateMask]);
+			useRememberedDetailScroll(identity, detailRef, scrollState, updateMask, content);
 			useLayoutEffect(() => {
 				updateMask();
 				const el = detailRef.current;
@@ -4302,11 +4472,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return { detailRef, maskClass, updateMask };
 		}
 
-		function SkillDetail({ skill, onBack, onToggle, onRemove, busy, isDark, containerRef }) {
+		function SkillDetail({ skill, onBack, onToggle, onRemove, busy, isDark, containerRef, scrollState }) {
 		const [detail, setDetail] = useState(null);
 		const [error, setError] = useState("");
 		const [removing, setRemoving] = useState(false);
-			const { detailRef, maskClass, updateMask } = useDetailScrollMask(skill.id, containerRef, detail || error);
+			const { detailRef, maskClass, updateMask } = useDetailScrollMask(skill.id, containerRef, detail || error, scrollState);
 		useEffect(() => {
 			let live = true;
 			setDetail(null); setError("");
@@ -4520,23 +4690,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			style: { flexShrink: 0, marginRight: 2 },
 		},
 			h("polyline", { points: "15 18 9 12 15 6" }),
-		);
-
-	const IconMore = ({ size = 14, color = "currentColor" }) =>
-		h("svg", {
-			width: size,
-			height: size,
-			viewBox: "0 0 24 24",
-			fill: "none",
-			stroke: color,
-			strokeWidth: 2,
-			strokeLinecap: "round",
-			strokeLinejoin: "round",
-			style: { flexShrink: 0 },
-		},
-			h("circle", { cx: 12, cy: 12, r: 1.3, fill: "currentColor" }),
-			h("circle", { cx: 12, cy: 5, r: 1.3, fill: "currentColor" }),
-			h("circle", { cx: 12, cy: 19, r: 1.3, fill: "currentColor" }),
 		);
 
 	const IconEye = ({ size = 14, color = "currentColor" }) =>
@@ -4829,8 +4982,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	const SESSION_STORE = {
 		view: { type: "browse" },
 		sourceViews: {},
-		manageFor: null,
-		prevView: null,
+		browseSortSnapshots: Object.create(null),
 		query: "",
 		filter: "all",
 		sortBy: "default",
@@ -4857,10 +5009,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const [isDark, setIsDark] = useState(getEffectiveTheme);
 		const [view, setViewRaw] = useState(() => SESSION_STORE.view);
-		const [manageFor, setManageForRaw] = useState(() => SESSION_STORE.manageFor);
-		const [manageTab, setManageTab] = useState(null);
-		const [manageConnector, setManageConnector] = useState(null);
-		const [prevView, setPrevViewRaw] = useState(() => SESSION_STORE.prevView);
 
 		// Persistent browse state across views and sidebar tab switching
 		const [query, setQueryRaw] = useState(() => SESSION_STORE.query);
@@ -4898,16 +5046,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const targetView = SESSION_STORE.sourceViews[newSourceId] || { type: "browse", sourceId: newSourceId };
 			SESSION_STORE.view = targetView;
 			setViewRaw(targetView);
-		}, []);
-
-		const setManageFor = useCallback((m) => {
-			SESSION_STORE.manageFor = m;
-			setManageForRaw(m);
-		}, []);
-
-		const setPrevView = useCallback((pv) => {
-			SESSION_STORE.prevView = pv;
-			setPrevViewRaw(pv);
 		}, []);
 
 		const setQuery = useCallback((q) => {
@@ -5083,8 +5221,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// The plugin panel itself is being closed (MarketApp unmounts). Reset
 		// the scroll memory so a fresh open of the panel starts at the top —
 		// the user explicitly wants panel close/reopen to reset scroll. This
-		// does NOT run on the manage-page round trip (that only conditionally
-		// swaps BrowseView/ManagePage inside the same MarketApp), so returning
+		// does NOT run when opening management inside BrowseView, so returning
 		// from manage still restores the saved position.
 		useEffect(() => {
 			return () => {
@@ -5095,21 +5232,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			};
 		}, []);
 
-		const openManage = useCallback((record, fromView, tab, connector) => {
-			setManageFor(record ? record.name : null);
-			setManageTab(tab || null);
-			setManageConnector(connector || null);
-			setPrevView(fromView || view || { type: "browse" });
-		}, [view, setManageFor, setPrevView]);
-
-		const closeManage = useCallback(() => {
-			setManageFor(null);
-			if (prevView && prevView.type === "detail") {
-				setView(prevView);
-			} else {
-				setView({ type: "browse", sourceId: activeSourceId });
-			}
-		}, [prevView, setManageFor, setView, activeSourceId]);
+		const openManage = useCallback((record, fromView, tab, connector, returnToMcp = false) => {
+			if (!record) return;
+			setView({ type: "manage", sourceId: activeSourceId, pluginName: record.name,
+				initialTab: tab || null, initialConnector: connector || null,
+				returnView: returnToMcp || fromView?.type === "detail" ? fromView : undefined, returnToMcp });
+		}, [activeSourceId, setView]);
 
 		return h("div", {
 			ref: rootRef,
@@ -5117,7 +5245,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			onMouseOver: handleRootMouseOver,
 			onMouseOut: handleRootMouseOut,
 		},
-			!manageFor && h(BrowseView, {
+			h(BrowseView, {
 				view,
 				setView,
 				state,
@@ -5139,20 +5267,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				setRows,
 				scrollTopRef,
 			}),
-			manageFor && h(ManagePage, {
-				record: state.plugins.find((p) => p.name === manageFor) || null,
-				state,
-				rows,
-				isDark,
-				refreshState,
-				showToast,
-				initialTab: manageTab,
-				initialConnector: manageConnector,
-				onBack: closeManage,
-				onClose: closeManage,
-			}),
 			toast && h("div", {
-				className: "cpm-toast",
+				className: "cpm-toast", role: "status", "aria-live": "polite", "aria-atomic": "true",
 			},
 				h("div", { className: "cpm-toast-content" },
 					h("div", { className: "cpm-toast-title" },
@@ -5779,7 +5895,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		setState,
 		refreshState,
 		showToast,
-		openManage,
+		openManage: openManageView,
 		onInstalled,
 		isDark,
 		query,
@@ -5817,6 +5933,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			SESSION_STORE.mcpsOpen = v;
 			setMcpsOpenRaw(v);
 		}, []);
+		const openManage = (record, fromView, tab, connector) => {
+			setMcpsOpen(false);
+			openManageView(record, mcpsOpen ? view : fromView, tab, connector, mcpsOpen);
+		};
 		const [editMcp, setEditMcp] = useState(null);
 		// Plugin name when the editor was opened from a plugin-provided server;
 		// null means the editor targets a user-added MCP.
@@ -5868,47 +5988,42 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		), [state.plugins]);
 		const hasMcps = mcps.some((m) => m?.name) || pluginMcpRows.length > 0;
 
-		const loadGlobalTools = useCallback(async (owner, connectorName) => {
+			const loadGlobalTools = useCallback(async (owner, connectorName, forceFresh = false) => {
 			const key = `${owner}::${connectorName}`;
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
-			const hasCachedTools = Array.isArray(cached?.tools) && cached.tools.length > 0;
-			if (!hasCachedTools) {
 				setGlobalToolData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), loading: true, error: null } }));
-			}
 			try {
 				const url = owner === "user-mcp"
 					? `/mcps/${encodeURIComponent(connectorName)}/tools`
 					: `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(connectorName)}/tools`;
-				const res = await api(url);
+					const res = await api(url + (forceFresh ? "?fresh=1" : ""));
 				const tools = Array.isArray(res.tools) ? res.tools : [];
 				const disabledTools = Array.isArray(res.disabledTools) ? res.disabledTools : [];
-				if (tools.length > 0) saveMcpToolsCache(key, { tools, disabledTools });
+					if (res.ok) saveMcpToolsCache(key, { tools, disabledTools });
 				setGlobalToolData((prev) => ({
 					...prev,
 					[key]: {
 						loading: false,
 						error: res.ok ? null : (res.message || "获取能力列表失败"),
-						tools: tools.length > 0 ? tools : (prev[key]?.tools || []),
+							tools: res.ok ? tools : (prev[key]?.tools || tools),
 						disabledTools,
 					},
 				}));
 			} catch (e) {
-				if (!hasCachedTools) {
-					setGlobalToolData((prev) => ({ ...prev, [key]: { loading: false, error: e.message, tools: [], disabledTools: [] } }));
-				}
+					setGlobalToolData((prev) => ({ ...prev, [key]: { ...(prev[key] || cached), loading: false, error: e.message } }));
 			}
 		}, []);
 
-		const toggleGlobalExpand = useCallback((owner, connectorName) => {
+			useAutoMcpTools([
+				...pluginMcpRows.map(row => ({ owner: row.owner, name: row.name, connected: row.connected, revision: JSON.stringify([row.record.installedAt, row.conn]) })),
+				...mcps.map(row => ({ owner: "user-mcp", name: row.name, connected: row.enabled === true, revision: JSON.stringify(row) })),
+			], loadGlobalTools);
+
+			const toggleGlobalExpand = useCallback((owner, connectorName) => {
 			const key = `${owner}::${connectorName}`;
 			const willExpand = !globalExpanded[key];
 			setGlobalExpanded((prev) => ({ ...prev, [key]: willExpand }));
-			// Load outside the updater: React may replay updaters, and this one
-			// spawns a local MCP server.
-			if (willExpand && (!globalToolData[key] || !globalToolData[key].tools || globalToolData[key].tools.length === 0)) {
-				loadGlobalTools(owner, connectorName);
-			}
-		}, [globalExpanded, globalToolData, loadGlobalTools]);
+			}, [globalExpanded]);
 
 		const toggleGlobalTool = useCallback(async (owner, connectorName, toolName) => {
 			const key = `${owner}::${connectorName}`;
@@ -5948,7 +6063,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const info = globalToolData[key];
 			const toolsList = info?.tools || [];
 			const disabledTools = info?.disabledTools || [];
-			const activeCount = toolsList.filter((t) => !disabledTools.includes(typeof t === "string" ? t : t.name)).length;
 
 			const onToggleServer = async () => {
 				try {
@@ -6018,18 +6132,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						// inline-flex so the pill's text baseline is the one that aligns,
 						// instead of the padded box being pushed around as a block.
 						h("span", { style: { display: "inline-flex", alignItems: "center", fontSize: 11, lineHeight: "16px", padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, transport === "stdio" ? "stdio" : "http"),
-						// Must render before the tool list is fetched: this button is
-						// what triggers the fetch.
-						connected && h("button", {
-							type: "button",
-							className: "cpm-mcp-expand",
-							onClick: () => toggleGlobalExpand(owner, name),
-						},
-							h("span", null, toolsList.length > 0
-								? `${activeCount} tools enabled${disabledTools.length > 0 ? ` (${disabledTools.length} disabled)` : ""}`
-								: "Tools"),
-							h("span", { className: "cpm-connector-collapse-btn" + (isExpanded ? " is-expanded" : "") }, h(IconArrow, { size: 10 })),
-						),
+							connected && h(McpDiscoveryStatus, { info, expanded: isExpanded,
+								onExpand: () => toggleGlobalExpand(owner, name), onRetry: () => loadGlobalTools(owner, name, true) }),
 					),
 					h("button", {
 						type: "button",
@@ -6045,12 +6149,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						onClick: onToggleServer,
 					}),
 				),
-				isExpanded && connected && h(McpToolsPanel, {
+					isExpanded && connected && info && !info.loading && !info.error && h(McpToolsPanel, {
 					loading: info?.loading,
 					error: info?.error,
 					tools: toolsList,
 					disabledTools,
-					onRetry: () => loadGlobalTools(owner, name),
+						onRetry: () => loadGlobalTools(owner, name, true),
 					onHoverTool: (tool, rect, anchor, pointer, keyboard) => globalHover.enter({ owner, connectorName: name, tool, rect }, anchor, pointer, keyboard),
 					onHoverEnd: (anchor) => globalHover.leave(anchor),
 					onToggleTool: (toolName) => toggleGlobalTool(owner, name, toolName),
@@ -6375,6 +6479,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const autoScrollRafRef = useRef(null);
 		const isLongPressTriggeredRef = useRef(false);
 		const snapTimerRef = useRef(null);
+		const snapFinishRef = useRef(null);
+		const dragOverlayRef = useRef(null);
 
 		const stopAutoScroll = useCallback(() => {
 			if (autoScrollRafRef.current) {
@@ -6397,45 +6503,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			// Visual center of dragged tab in container scroll content coordinate
 			const contentCenter = (overlayX + (draggedWidth / 2)) - cRect.left + curScroll;
-			const numSlots = baseSlots.length;
-
 			let newIdx = fromIndex;
-
-			if (numSlots >= 3) {
-				const firstMoveable = 1;
-				const lastMoveable = numSlots - 1;
-
-				const firstCenter = baseSlots[firstMoveable].offsetLeft + (baseSlots[firstMoveable].width / 2);
-				// The last slot's center may be scrolled past the container's
-				// right edge, where the cursor can never reach it. Clamp the
-				// drop boundary to the right edge (in content coordinates) so
-				// dragging the tab to the visible end of the bar actually
-				// lands in the last slot instead of silently stopping at the
-				// second-to-last one.
-				const lastCenter = Math.min(
-					baseSlots[lastMoveable].offsetLeft + (baseSlots[lastMoveable].width / 2),
-					curScroll + cRect.width
-				);
-
-				if (contentCenter <= firstCenter) {
-					newIdx = firstMoveable;
-				} else if (contentCenter >= lastCenter) {
-					newIdx = lastMoveable;
-				} else {
-					newIdx = firstMoveable;
-					for (let i = firstMoveable; i < lastMoveable; i++) {
-						const currentSlot = baseSlots[i];
-						const nextSlot = baseSlots[i + 1];
-						const midBoundary = (currentSlot.offsetLeft + (currentSlot.width / 2) + nextSlot.offsetLeft + (nextSlot.width / 2)) / 2;
-						if (contentCenter > midBoundary) {
-							newIdx = i + 1;
-						}
-					}
+			let nearestDistance = Infinity;
+			// Each candidate is where THIS tab's center would land after reordering,
+			// not the original occupant's center. This keeps every insertion slot
+			// reachable even when a short tab sits between two much wider tabs.
+			// Frozen geometry also prevents animated neighbors feeding back on hit tests.
+			for (const slot of baseSlots) {
+				if (!slot || !slot.movable) continue;
+				const left = slot.offsetLeft + (slot.index > fromIndex ? slot.width - draggedWidth : 0);
+				const distance = Math.abs(contentCenter - (left + draggedWidth / 2));
+				if (distance < nearestDistance) {
+					nearestDistance = distance;
+					newIdx = slot.index;
 				}
 			}
-
-			newIdx = Math.max(1, Math.min(numSlots - 1, newIdx));
-
+			if (dragOverlayRef.current) {
+				dragOverlayRef.current.style.transform = `translate3d(${overlayX}px, ${startOverlayY - 4}px, 0) scale(1.04)`;
+			}
+			// Pointer tracking stays off React's render path. Only crossing an
+			// insertion boundary needs to render a new surrounding-tab preview.
+			if (newIdx === dragLiveRef.current.toIndex) return;
 			dragLiveRef.current.toIndex = newIdx;
 			setDragState((prev) => prev ? {
 				...prev,
@@ -6470,13 +6558,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				longPressTimerRef.current = null;
 			}
 			stopAutoScroll();
+			if (dragLiveRef.current.isSnapping && snapFinishRef.current) {
+				snapFinishRef.current();
+				return;
+			}
 			if (snapTimerRef.current) {
 				clearTimeout(snapTimerRef.current);
 				snapTimerRef.current = null;
 			}
+			snapFinishRef.current = null;
 
-			if (dragLiveRef.current.active) {
-				const { pointerId, fromIndex, toIndex } = dragLiveRef.current;
+			const { pointerId } = dragLiveRef.current;
+			const wasActive = dragLiveRef.current.active;
+			dragLiveRef.current.active = false;
+			dragLiveRef.current.isSnapping = false;
+			dragLiveRef.current.pointerId = null;
+			if (wasActive || pointerId !== null) {
 				if (pointerId !== null) {
 					try {
 						const el = tabRefs.current[dragLiveRef.current.sourceId];
@@ -6486,36 +6583,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					} catch {}
 				}
 
-				if (toIndex !== fromIndex && fromIndex >= 1 && toIndex >= 1) {
-					const scrollEl = tabsRef.current;
-					if (scrollEl) savedTabScrolls.set(activeSourceId, scrollEl.scrollLeft);
-					const newSources = [...state.sources];
-					const [moved] = newSources.splice(fromIndex, 1);
-					newSources.splice(toIndex, 0, moved);
-					setState((prev) => ({ ...prev, sources: newSources }));
-					SESSION_STORE.state = { ...(SESSION_STORE.state || {}), sources: newSources };
-					try {
-						localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(SESSION_STORE.state));
-					} catch {}
-					api("/sources/reorder", {
-						method: "POST",
-						body: JSON.stringify({ sourceIds: newSources.map((item) => item.id) }),
-					}).catch(() => {});
-				}
-
-				dragLiveRef.current.active = false;
-				dragLiveRef.current.isSnapping = false;
-				dragLiveRef.current.pointerId = null;
 				dragLiveRef.current.startX = 0;
 				dragLiveRef.current.startY = 0;
 				isLongPressTriggeredRef.current = false;
 				setDragState(null);
 				updateTabsMask();
 			}
-		}, [state.sources, setState, stopAutoScroll, updateTabsMask]);
+		}, [stopAutoScroll, updateTabsMask]);
 
 		const handleTabPointerDown = useCallback((e, s, idx) => {
-			if (e.button !== 0) return;
+			if (e.button !== 0 || e.isPrimary === false) return;
 			if (e.target && e.target.closest && e.target.closest(".cpm-tab-del-zone")) return;
 			if (dragLiveRef.current.active || dragState) {
 				cancelOrResetDrag();
@@ -6539,33 +6616,40 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			dragLiveRef.current.startY = clientY;
 			dragLiveRef.current.lastClientX = clientX;
 			dragLiveRef.current.pointerId = pointerId;
+			dragLiveRef.current.sourceId = s.id;
 			dragLiveRef.current.active = false;
 			dragLiveRef.current.isSnapping = false;
-
-			const container = tabsRef.current;
-			const curScroll = container ? container.scrollLeft : 0;
+			try { targetEl.setPointerCapture(pointerId); } catch {}
 
 			if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
 			longPressTimerRef.current = setTimeout(() => {
+				longPressTimerRef.current = null;
+				const cont = tabsRef.current;
+				if (!cont || !targetEl.isConnected) return;
+				if (currentTabAnim) cancelAnimationFrame(currentTabAnim);
+				currentTabAnim = null;
+				currentTabTarget = null;
 				isLongPressTriggeredRef.current = true;
 				if (targetEl && typeof targetEl.setPointerCapture === "function") {
 					try { targetEl.setPointerCapture(pointerId); } catch {}
 				}
-				const cont = tabsRef.current;
-				if (!cont) return;
 				const cRect = cont.getBoundingClientRect();
 				const tRect = targetEl.getBoundingClientRect();
+				const curScroll = cont.scrollLeft;
 
-				// Capture invariant base slots (offsetLeft / offsetWidth are immune to CSS transforms)
+				// Use one scroll-content coordinate system; offsetLeft may refer to
+				// an ancestor outside this scroller. Hidden sources have no slot.
 				const baseSlots = state.sources.map((item, mIdx) => {
 					const el = tabRefs.current[item.id];
-					if (!el) return { id: item.id, index: mIdx, offsetLeft: 0, width: 60, height: 30 };
+					if (!el || !el.isConnected || !el.getClientRects().length) return null;
+					const rect = el.getBoundingClientRect();
 					return {
 						id: item.id,
 						index: mIdx,
-						offsetLeft: el.offsetLeft,
-						width: el.offsetWidth,
-						height: el.offsetHeight || 30,
+						movable: mIdx !== 0 && !item.builtin && item.id?.toLowerCase() !== "anthropic",
+						offsetLeft: rect.left - cRect.left + curScroll,
+						width: rect.width,
+						height: rect.height || 30,
 					};
 				});
 
@@ -6577,7 +6661,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const pointerOffsetX = clientX - startOverlayX;
 				const draggedWidth = draggedSlot.width;
 				const draggedHeight = draggedSlot.height;
-				const slotSize = draggedWidth + 2;
+				const slotSize = draggedWidth + (parseFloat(getComputedStyle(cont).columnGap) || 0);
 
 				dragLiveRef.current = {
 					active: true,
@@ -6622,6 +6706,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [state.sources, cancelOrResetDrag, dragState]);
 
 		const handleTabPointerMove = useCallback((e) => {
+			if (e.pointerId !== dragLiveRef.current.pointerId) return;
 			if (longPressTimerRef.current && !dragLiveRef.current.active) {
 				if (Math.hypot(e.clientX - dragLiveRef.current.startX, e.clientY - dragLiveRef.current.startY) > 8) {
 					clearTimeout(longPressTimerRef.current);
@@ -6652,6 +6737,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [startAutoScroll, stopAutoScroll, updateDragPosition]);
 
 		const handleTabPointerUp = useCallback((e, s, idx) => {
+			if (dragLiveRef.current.isSnapping) return;
+			if (dragLiveRef.current.pointerId !== null && e?.pointerId !== dragLiveRef.current.pointerId) return;
 			if (longPressTimerRef.current) {
 				clearTimeout(longPressTimerRef.current);
 				longPressTimerRef.current = null;
@@ -6659,14 +6746,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			stopAutoScroll();
 
 			const wasActive = dragLiveRef.current.active;
+			if (wasActive && Number.isFinite(e?.clientX)) updateDragPosition(e.clientX);
 			const { fromIndex, toIndex, pointerId, baseSlots, draggedWidth } = dragLiveRef.current;
+			// Mark the handoff before releasing capture: lostpointercapture is a
+			// cancellation only while tracking, never during the settle animation.
+			if (wasActive) dragLiveRef.current.isSnapping = true;
 
 			if (e && e.currentTarget && typeof e.currentTarget.releasePointerCapture === "function" && pointerId !== null) {
 				try { e.currentTarget.releasePointerCapture(pointerId); } catch {}
 			}
 
-			if (wasActive && !dragLiveRef.current.isSnapping) {
-				dragLiveRef.current.isSnapping = true;
+			if (wasActive) {
 				const container = tabsRef.current;
 				const cRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 };
 				const curScroll = container ? container.scrollLeft : 0;
@@ -6690,7 +6780,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					snapTargetY: snapY,
 				} : null);
 
-				snapTimerRef.current = setTimeout(() => {
+				snapFinishRef.current = () => {
+					if (!dragLiveRef.current.isSnapping) return;
+					clearTimeout(snapTimerRef.current);
+					snapFinishRef.current = null;
 					if (toIndex !== fromIndex && fromIndex >= 1 && toIndex >= 1) {
 						// Keep the tab bar where the user left it: the state.sources
 						// change re-runs the tab-scroll restore layout effect, which
@@ -6722,7 +6815,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					setDragState(null);
 					snapTimerRef.current = null;
 					updateTabsMask();
-				}, 190);
+				};
+				// transitionend is the normal completion path; the timer handles
+				// interrupted transitions and reduced-motion (which has no event).
+				const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+				snapTimerRef.current = setTimeout(() => snapFinishRef.current?.(), reducedMotion ? 0 : 320);
 				return;
 			}
 
@@ -6731,7 +6828,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const isBrowseView = !view || view.type === "browse";
 				const sInstalledCount = (state.plugins || []).filter((p) => (p.sourceId || "").toLowerCase() === s.id.toLowerCase() || (p.id && p.id.startsWith(s.id + "/"))).length;
 				if (s.id !== activeSourceId) {
-					if (gridRef.current && isBrowseView) {
+					if (gridRef.current && isBrowseView && !mcpsOpen) {
 						if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 						SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
 					}
@@ -6747,7 +6844,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						targetFilter = SESSION_STORE.sourceFilters[s.id] || SESSION_STORE.preferredFilter || (filter === "installed" ? "installed" : "all");
 					}
 					setActiveSourceId(s.id, targetFilter);
-				} else {
+				} else if (!mcpsOpen) {
 					// Clicking the current source's tab scrolls its list back to the top.
 					scrollActiveTabIntoView(s.id, true);
 					if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
@@ -6755,17 +6852,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					scrollContentToTop();
 				}
 			}
-		}, [state.sources, state.plugins, activeSourceId, view, filter, setActiveSourceId, scrollActiveTabIntoView, scrollContentToTop, setState, showToast, stopAutoScroll, updateTabsMask]);
+		}, [state.sources, state.plugins, activeSourceId, view, filter, mcpsOpen, setActiveSourceId, scrollActiveTabIntoView, scrollContentToTop, setState, showToast, stopAutoScroll, updateTabsMask, updateDragPosition]);
 
 		useEffect(() => {
 			const handleWindowBlurOrCancel = () => {
-				if (dragLiveRef.current.active) {
-					cancelOrResetDrag();
-				}
+				cancelOrResetDrag();
 			};
 
 			const handleGlobalPointerUp = (e) => {
-				if (dragLiveRef.current.active && !dragLiveRef.current.isSnapping) {
+				if ((dragLiveRef.current.active || longPressTimerRef.current) && !dragLiveRef.current.isSnapping) {
 					handleTabPointerUp(e, null, dragLiveRef.current.fromIndex);
 				}
 			};
@@ -6784,6 +6879,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (autoScrollRafRef.current) cancelAnimationFrame(autoScrollRafRef.current);
 			};
 		}, [cancelOrResetDrag, handleTabPointerUp]);
+		useEffect(() => () => {
+			clearTimeout(snapTimerRef.current);
+			snapFinishRef.current = null;
+		}, []);
 
 		const cleanError = (err) => {
 			if (!err) return "操作失败";
@@ -6792,7 +6891,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return msg;
 		};
 
-		const isBrowse = !view || view.type === "browse";
+		// MCP is a separate surface; keep the source's list/detail view intact
+		// underneath it so returning to that source resumes the same page.
+		const isBrowse = mcpsOpen || !view || view.type === "browse";
+		const isSourceBrowse = isBrowse && !mcpsOpen;
 
 		// Per-source Scroll restoration and wheel scroll suppression
 		const onGridWheel = useCallback(() => {
@@ -6849,15 +6951,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// must NOT re-detect "filter changed". Only genuine user-driven
 		// changes set a new pending intent.
 		//
-		// Ref-based, so the apply-step's dependency array stays stable (only
-		// `isBrowse`, which flips once per mount). The restore therefore never
+		// Ref-based, so the apply-step only tracks the visible source surface
+		// and source identity. The restore therefore never
 		// fires spuriously on unrelated re-renders and never gets clobbered by
 		// onGridScroll overwriting the store with a stale value.
 		const pendingScrollTopRef = useRef(null);
 		const lastActiveSourceRef = useRef(activeSourceId);
 		const lastFilterRef = useRef(filter);
 		const lastSortByRef = useRef(sortBy);
-		const prevIsBrowseRef = useRef(isBrowse);
+		const prevIsBrowseRef = useRef(isSourceBrowse);
 		const firstBrowseRenderRef = useRef(true);
 
 		if (lastActiveSourceRef.current !== activeSourceId) {
@@ -6881,18 +6983,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				pendingScrollTopRef.current = { type: "reset", filter, sortBy };
 			}
 		}
-		// Returning from the detail view unmounts the grid (isBrowse flips to
-		// false while the detail overlay shows). When coming back (false→true)
-		// the grid is freshly mounted at scrollTop 0 — restore the position
-		// that was saved right before the detail was opened.
-		if (isBrowse && prevIsBrowseRef.current === false && pendingScrollTopRef.current?.type !== "restore") {
+		// Details and MCP both unmount the source grid. Returning to either the
+		// same source or another source must restore that source's saved position.
+		if (isSourceBrowse && prevIsBrowseRef.current === false && pendingScrollTopRef.current?.type !== "restore") {
 			pendingScrollTopRef.current = { type: "restore" };
 		}
-		prevIsBrowseRef.current = isBrowse;
-		// BrowseView itself is unmounted while the manage page is open. When
-		// it remounts (manage closed), there is no isBrowse flip — detect the
-		// fresh mount and restore the position saved before manage opened.
-		if (firstBrowseRenderRef.current && isBrowse && pendingScrollTopRef.current === null) {
+		prevIsBrowseRef.current = isSourceBrowse;
+		// A fresh panel mount can reuse a remembered source position. Management
+		// round trips are handled by the source-surface transition above.
+		if (firstBrowseRenderRef.current && isSourceBrowse && pendingScrollTopRef.current === null) {
 			const saved = SESSION_STORE.scrollTops && SESSION_STORE.scrollTops[activeSourceId];
 			if (typeof saved === "number") {
 				pendingScrollTopRef.current = { type: "restore" };
@@ -6908,7 +7007,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// yet, and the browser clamps scrollTop when it exceeds the current
 		// scrollHeight. Re-applying on the next frame makes the restore stick.
 		//
-		// NOTE: the apply layout effect deliberately depends on `isBrowse`
+		// NOTE: the apply layout effect deliberately depends on `isSourceBrowse`
 		// and `activeSourceId` — a tab switch changes activeSourceId, and
 		// that MUST trigger the restore. The change-detection (last-* refs)
 		// above runs during render and only sets pending for genuine changes,
@@ -6916,7 +7015,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// fire this.
 		const appliedScrollTopRef = useRef(null);
 		useSafeLayoutEffect(() => {
-			if (!isBrowse || !gridRef.current) return;
+			if (!isSourceBrowse || !gridRef.current) return;
 			const pending = pendingScrollTopRef.current;
 			if (!pending) return;
 			if (pending.type === "reset" && (pending.filter !== filter || pending.sortBy !== sortBy)) return;
@@ -6937,10 +7036,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			gridRef.current.scrollTop = target;
 			pendingScrollTopRef.current = null;
 			updateGridMask();
-		}, [isBrowse, activeSourceId, updateGridMask]);
+		}, [isSourceBrowse, activeSourceId, updateGridMask]);
 
 		useEffect(() => {
-			if (!isBrowse) return;
+			if (!isSourceBrowse) return;
 			const applied = appliedScrollTopRef.current;
 			if (applied === null) return;
 			const { sourceId, target } = applied;
@@ -6960,7 +7059,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 			});
 			return () => cancelAnimationFrame(raf);
-		}, [isBrowse, activeSourceId, updateGridMask]);
+		}, [isSourceBrowse, activeSourceId, updateGridMask]);
 
 		useEffect(() => {
 			const onDocClick = (e) => {
@@ -7006,6 +7105,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [activeSourceId, setRows, showToast]);
 
 		const currentSourceInstalledNames = useMemo(() => new Set((state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)), [state.plugins, activeSourceId]);
+		// Each source retains its browsing order for this Hub session, including
+		// tab navigation and panel remounts. Filtering or sorting takes a new snapshot.
+		const sortInstalledSnapshots = SESSION_STORE.browseSortSnapshots ||= Object.create(null);
+		let sortInstalledSnapshot = sortInstalledSnapshots[activeSourceId];
+		if (!sortInstalledSnapshot || sortInstalledSnapshot.filter !== filter
+			|| sortInstalledSnapshot.query !== query || sortInstalledSnapshot.sortBy !== sortBy) {
+			sortInstalledSnapshot = { filter, query, sortBy, names: currentSourceInstalledNames };
+			sortInstalledSnapshots[activeSourceId] = sortInstalledSnapshot;
+		}
+		const sortInstalledNames = sortInstalledSnapshot.names;
 		const installedNames = useMemo(() => new Set(state.plugins.map((p) => p.name)), [state.plugins]);
 		const totalInstalledCount = state.plugins.length;
 		const currentSourcePlugins = useMemo(() => (rows && rows[activeSourceId]) || [], [rows, activeSourceId]);
@@ -7158,17 +7267,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			} else if (sortBy === "name-desc") {
 				list = [...list].sort((a, b) => (b.displayName || b.name).localeCompare(a.displayName || a.name));
 			} else if (!query.trim()) {
-				// Use the same installed set for sorting and card actions on the first render.
+				// Use the installed set captured when this browsing order was chosen.
 				list = [...list].sort((a, b) => {
-					const instA = currentSourceInstalledNames.has(a.name) ? 1 : 0;
-					const instB = currentSourceInstalledNames.has(b.name) ? 1 : 0;
+					const instA = sortInstalledNames.has(a.name) ? 1 : 0;
+					const instB = sortInstalledNames.has(b.name) ? 1 : 0;
 					if (instB !== instA) return instB - instA;
 					return (a.displayName || a.name).localeCompare(b.displayName || b.name);
 				});
 			}
 
 			return list;
-		}, [currentSourcePlugins, query, sortBy, currentSourceInstalledNames]);
+		}, [currentSourcePlugins, query, sortBy, sortInstalledNames]);
 
 		const refresh = async () => {
 			setIsRefreshing(true);
@@ -7242,6 +7351,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		const currentDetailPlugin = detail || (view && view.type === "detail" ? view.plugin : null);
+		const manageRecord = view.type === "manage" ? state.plugins.find(r => r.name === view.pluginName) : null;
+		const closeManage = () => {
+			// A removal can finish after the user has switched to another tab.
+			if (SESSION_STORE.view !== view) return;
+			setView(view.returnView || { type: "browse", sourceId: activeSourceId });
+			if (view.returnToMcp) setMcpsOpen(true);
+		};
+		const openPlugin = (plugin) => {
+			closePluginHover();
+			if (gridRef.current) {
+				if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
+				SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
+			}
+			const record = state.plugins.find(r => r.name === plugin.name);
+			if (record) openManage(record);
+			else setView({ type: "detail", sourceId: activeSourceId, plugin });
+		};
 
 		return h("div", { className: "cpm-main" },
 			// Top bar matching Claude official: Row 1 (Full width search) & Row 2 (Tabs on Left + Filter & Sort on Right)
@@ -7269,7 +7395,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						hasMcps && h("button", {
 							key: "__mcps",
 							className: "cpm-tab" + (mcpsOpen ? " active" : ""),
-							onClick: () => { setMcpsOpen(true); refreshMcps(); setView({ type: "browse", sourceId: activeSourceId }); },
+							onClick: () => {
+								if (isSourceBrowse && gridRef.current) {
+									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
+									SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
+								}
+								stopScrollTopAnim();
+								setMcpsOpen(true); refreshMcps();
+							},
 						}, h("span", null, "MCP")),
 						state.sources.map((s, idx) => {
 							if (s.id === "local" && !hasLocalPlugins) return null;
@@ -7307,13 +7440,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 							return h("button", {
 								key: s.id,
-								ref: (el) => { if (el) tabRefs.current[s.id] = el; },
+								ref: (el) => { tabRefs.current[s.id] = el; },
 								className: "cpm-tab" + (s.id === activeSourceId && !mcpsOpen ? " active" : "") + tabClassExtra,
 								style: tabTransform ? { transform: tabTransform } : undefined,
 								onPointerDown: (e) => handleTabPointerDown(e, s, idx),
 								onPointerMove: handleTabPointerMove,
 								onPointerUp: (e) => handleTabPointerUp(e, s, idx),
-								onPointerCancel: (e) => handleTabPointerUp(e, s, idx),
+								onPointerCancel: cancelOrResetDrag,
+								onLostPointerCapture: (e) => {
+									if (e.pointerId === dragLiveRef.current.pointerId && !dragLiveRef.current.isSnapping) cancelOrResetDrag();
+								},
 								onContextMenu: (e) => e.preventDefault(),
 								onMouseDown: (e) => e.preventDefault(),
 								onClick: () => setMcpsOpen(false),
@@ -7418,19 +7554,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 			),
 
-			view.type === "skill-detail" && (() => {
+			!mcpsOpen && view.type === "skill-detail" && (() => {
 				const selected = ((rows && rows["skills-local"]) || []).find(s => s.id === view.skill.id) || view.skill;
-				return h(SkillDetail, { skill: selected, isDark, containerRef: detailContainerRef, busy: skillBusy === selected.id, onToggle: toggleSkill, onRemove: removeUploadedSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
+				return h(SkillDetail, { skill: selected, isDark, containerRef: detailContainerRef, scrollState: view, busy: skillBusy === selected.id, onToggle: toggleSkill, onRemove: removeUploadedSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
 			})(),
 
 			// Detail view — 0ms instant transition without intermediate loading screen
-			view.type === "detail" && currentDetailPlugin && h(DetailView, {
+			!mcpsOpen && view.type === "detail" && !manageRecord && currentDetailPlugin && h(DetailView, {
 				plugin: {
 					...currentDetailPlugin,
 					installed: installedNames.has(currentDetailPlugin.name),
 					enabled: state.plugins.find((r) => r.name === currentDetailPlugin.name)?.enabled !== false,
 				},
 				pluginRecord: state.plugins.find((r) => r.name === currentDetailPlugin.name),
+				scrollState: view,
 				isDark,
 				containerRef: detailContainerRef,
 				onBack: () => setView({ type: "browse", sourceId: activeSourceId }),
@@ -7445,6 +7582,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					await refreshState();
 				},
 				showToast,
+			}),
+			!mcpsOpen && view.type === "manage" && h(ManagePage, {
+				key: view.pluginName || manageRecord?.name,
+				record: manageRecord || null, state, rows, isDark, refreshState, showToast,
+				containerRef: detailContainerRef,
+				initialTab: view.initialTab, initialConnector: view.initialConnector,
+				scrollState: view,
+				onBack: closeManage, onClose: closeManage,
 			}),
 
 			// Browse View — Mode A: Grouped Installed across all sources (Selected active tab source displayed first)
@@ -7473,22 +7618,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									isDark,
 							onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
 									onMouseLeave: () => handleCardMouseLeave(p),
-									onClick: () => {
-										closePluginHover();
-										if (gridRef.current) {
-											if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-											SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-										}
-										setView({ type: "detail", sourceId: p.sourceId || grp.source.id, plugin: p });
-									},
+									onClick: () => openPlugin(p),
 									onManage: (e) => {
 										e.stopPropagation();
-										closePluginHover();
-										if (gridRef.current) {
-											if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-											SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-										}
-										openManage(state.plugins.find((r) => r.name === p.name), { type: "browse" });
+										openPlugin(p);
 									},
 									onInstall: (e) => {
 										e.stopPropagation();
@@ -7544,22 +7677,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								isDark,
 								onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
 								onMouseLeave: () => handleCardMouseLeave(p),
-								onClick: () => {
-									closePluginHover();
-									if (gridRef.current) {
-										if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-										SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-									}
-									setView({ type: "detail", sourceId: activeSourceId, plugin: p });
-								},
+								onClick: () => openPlugin(p),
 								onManage: (e) => {
 									e.stopPropagation();
-									closePluginHover();
-									if (gridRef.current) {
-										if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
-										SESSION_STORE.scrollTops[activeSourceId] = gridRef.current.scrollTop;
-									}
-									openManage(state.plugins.find((r) => r.name === p.name && (r.sourceId === activeSourceId || r.sourceId === p.sourceId)) || state.plugins.find((r) => r.name === p.name), { type: "browse" });
+									openPlugin(p);
 								},
 								onInstall: (e) => {
 									e.stopPropagation();
@@ -7653,7 +7774,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast,
 			}),
 
-			confirmRemoveSource && h("div", { className: "cpm-dialog", onClick: () => setConfirmRemoveSource(null) },
+			confirmRemoveSource && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemoveSource(null)) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
 					h("div", { className: "cpm-dialog-title" }, `删除插件源「${confirmRemoveSource.name}」`),
 					h("div", { className: "cpm-field", style: { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" } },
@@ -7700,14 +7821,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			// ────────────────────────────── Modern Floating Drag Overlay (Zero Container Clipping) ──────────────────────────────
 			dragState?.active && h("div", {
+				ref: dragOverlayRef,
 				className: "cpm-tab-drag-overlay" + (isDark ? " cpm-dark" : ""),
+				onTransitionEnd: (e) => {
+					if (e.target === e.currentTarget && e.propertyName === "transform") snapFinishRef.current?.();
+				},
 				style: {
-					left: dragState.isSnapping ? dragState.snapTargetX : dragState.overlayX,
-					top: dragState.isSnapping ? dragState.snapTargetY : dragState.overlayY,
 					width: dragState.width || "auto",
 					height: dragState.height || 30,
-					transform: dragState.isSnapping ? "translate3d(0, 0, 0) scale(1)" : "translate3d(0, -4px, 0) scale(1.08)",
-					transition: dragState.isSnapping ? "left 0.18s cubic-bezier(0.2, 0, 0, 1), top 0.18s cubic-bezier(0.2, 0, 0, 1), transform 0.18s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.18s ease" : "none",
+					transform: dragState.isSnapping
+						? `translate3d(${dragState.snapTargetX}px, ${dragState.snapTargetY}px, 0) scale(1)`
+						: `translate3d(${dragLiveRef.current.currentOverlayX}px, ${dragLiveRef.current.startOverlayY - 4}px, 0) scale(1.04)`,
+					transition: dragState.isSnapping ? "transform 260ms cubic-bezier(0.16, 1, 0.3, 1)" : "none",
 				},
 			},
 				h("span", null, dragState.sourceName)
@@ -7715,10 +7840,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
+	function backdropDismissProps(onDismiss) {
+		let pressedBackdrop = false;
+		return {
+			onPointerDown: (event) => { pressedBackdrop = event.button === 0 && event.target === event.currentTarget; },
+			onPointerCancel: () => { pressedBackdrop = false; },
+			onClick: (event) => {
+				const dismiss = pressedBackdrop && event.target === event.currentTarget;
+				pressedBackdrop = false;
+				if (dismiss) onDismiss();
+			},
+		};
+	}
+
 	// ────────────────────────────── Modern Install Dialog ──────────────────────────────
 	function InstallDialog({ plugin, isDark, onCancel, onConfirm }) {
 		const [busy, setBusy] = useState(false);
-		return h("div", { className: "cpm-dialog", onClick: onCancel },
+		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
 			h("div", { className: "cpm-dialog-box cpm-install-dialog", onClick: (e) => e.stopPropagation() },
 				h("div", { className: "cpm-install-dialog-header" },
 					h(PluginIcon, { plugin, isDark }),
@@ -8025,7 +8163,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		return h("div", { className: "cpm-dialog", onClick: onCancel },
+		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
 			h("div", {
 				role: "dialog",
 				"aria-modal": "true",
@@ -8517,7 +8655,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		return h("div", { className: "cpm-dialog", onClick: onCancel },
+		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
 			h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
 				h("button", { className: "cpm-mcp-close-top", onClick: onCancel }, h(IconClose, { size: 14 })),
 				h("div", { className: "cpm-mcp-body" },
@@ -8755,7 +8893,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}, saving ? "保存中…" : "保存并启用"),
 				),
 			),
-			confirmDelete && h("div", { className: "cpm-dialog", onClick: () => setConfirmDelete(false) },
+			confirmDelete && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmDelete(false)) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
 					h("div", { className: "cpm-dialog-title" }, `删除 MCP「${initial.name}」`),
 					h("div", { className: "cpm-field", style: { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" } },
@@ -8896,11 +9034,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Detail View ──────────────────────────────
-	function DetailView({ plugin, pluginRecord, isDark, onBack, onInstall, onRemove, onManage, onTogglePlugin, showToast, containerRef }) {
+	function DetailView({ plugin, pluginRecord, isDark, onBack, onInstall, onRemove, onManage, onTogglePlugin, showToast, containerRef, scrollState }) {
 		const [busy, setBusy] = useState(false);
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [toggling, setToggling] = useState(false);
-			const { detailRef, maskClass: detailMaskClass, updateMask: updateDetailMask } = useDetailScrollMask(plugin?.name, containerRef, plugin);
+			const { detailRef, maskClass: detailMaskClass, updateMask: updateDetailMask } = useDetailScrollMask(plugin?.name, containerRef, plugin, scrollState);
 
 		if (!plugin) return null;
 		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
@@ -9105,7 +9243,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}),
 			),
 
-			confirmRemove && h("div", { className: "cpm-dialog", onClick: () => setConfirmRemove(false) },
+			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemove(false)) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
 					h("div", { className: "cpm-dialog-title" }, `卸载 ${plugin.displayName || plugin.name}？`),
 					h("div", { className: "cpm-field", style: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" } }, "将删除插件副本、技能与子代理注册及 MCP 配置。"),
@@ -9145,7 +9283,38 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		} catch {}
 	}
 
-	// Shared tool grid for the MCP page and the plugin manage page: the
+		function useAutoMcpTools(servers, loadTools) {
+			const attempted = useRef(new Map());
+			useEffect(() => {
+				const active = new Set();
+				for (const server of servers) {
+					if (!server.connected || !server.name) continue;
+					const key = `${server.owner}::${server.name}`;
+					active.add(key);
+					if (attempted.current.has(key) && attempted.current.get(key) === server.revision) continue;
+					attempted.current.set(key, server.revision);
+					void loadTools(server.owner, server.name);
+				}
+				for (const key of attempted.current.keys()) if (!active.has(key)) attempted.current.delete(key);
+			}, [servers, loadTools]);
+		}
+
+		function McpDiscoveryStatus({ info, expanded, onExpand, onRetry }) {
+			if (!info || info.loading) return h("span", { className: "cpm-mcp-discovery", role: "status", "aria-live": "polite" },
+				h("span", { className: "cpm-spin-ring", "aria-hidden": "true" }),
+				h("span", null, "正在解析工具…"));
+			if (info.error) return h("span", { className: "cpm-mcp-discovery is-error", role: "status", "aria-live": "polite" },
+				h("span", { className: "cpm-mcp-discovery-message" }, `解析失败：${info.error}`),
+				h("button", { type: "button", className: "cpm-mcp-retry", onClick: event => { event.stopPropagation(); onRetry(); } }, "重新解析"));
+			const tools = info.tools || [], disabled = info.disabledTools || [];
+			const active = tools.filter(tool => !disabled.includes(typeof tool === "string" ? tool : tool.name)).length;
+			return h("button", { type: "button", className: "cpm-mcp-expand", "aria-expanded": !!expanded,
+				onClick: event => { event.stopPropagation(); onExpand(); } },
+				h("span", { className: "cpm-connector-collapse-btn" + (expanded ? " is-expanded" : ""), "aria-hidden": "true" }, h(IconArrow, { size: 10 })),
+				h("span", null, `${active} tools enabled${disabled.length ? ` (${disabled.length} disabled)` : ""}`));
+		}
+
+		// Shared tool grid for the MCP page and the plugin manage page: the
 	// loading/error/empty branches and the hoverable pill grid are identical
 	// there, and keeping one copy is what stops the two views drifting apart.
 	function McpToolsPanel({ loading, error, tools, disabledTools, loadingText, onRetry, onHoverTool, onHoverEnd, onToggleTool }) {
@@ -9283,13 +9452,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Manage Page ──────────────────────────────
-	function ManagePage({ record, state, rows, isDark, refreshState, showToast, onBack, onClose, initialTab, initialConnector }) {
+	function ManagePage(props) {
+		useEffect(() => { if (!props.record) props.onClose(); }, [props.record, props.onClose]);
+		return props.record ? h(ManagePageContent, props) : null;
+	}
+
+	function ManagePageContent({ record, state, rows, isDark, refreshState, showToast, onBack, onClose, initialTab, initialConnector, containerRef, scrollState }) {
 		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
-		const [tab, setTab] = useState(initialTab || "skills");
+		const [tab, setTabRaw] = useState(scrollState?.manageTab || initialTab || "skills");
+		const setTab = (next) => { if (scrollState) scrollState.manageTab = next; setTabRaw(next); };
 		const [searchOpen, setSearchOpen] = useState(false);
 		const [tabQuery, setTabQuery] = useState("");
 		const searchInputRef = useRef(null);
-		const [menuOpen, setMenuOpen] = useState(false);
 		const [busy, setBusy] = useState(false);
 		const [updating, setUpdating] = useState(false);
 		const [toggling, setToggling] = useState(false);
@@ -9323,22 +9497,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const loadConnectorTools = useCallback(async (connectorName, forceFresh = false) => {
 			const key = `${record.name}::${connectorName}`;
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
-			const hasCachedTools = Array.isArray(cached?.tools) && cached.tools.length > 0;
-
-			// If we already have cached tools, never show a spinner (0ms display)
-			if (!hasCachedTools) {
-				setConnectorToolsData((prev) => ({
-					...prev,
-					[connectorName]: { ...(prev[connectorName] || {}), loading: true, error: null },
-				}));
-			}
+			setConnectorToolsData((prev) => ({
+				...prev,
+				[connectorName]: { ...(prev[connectorName] || {}), loading: true, error: null },
+			}));
 
 			try {
 				const res = await api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(connectorName)}/tools${forceFresh ? "?fresh=1" : ""}`);
 				const tools = Array.isArray(res.tools) ? res.tools : [];
 				const disabledTools = Array.isArray(res.disabledTools) ? res.disabledTools : [];
 
-				if (tools.length > 0) {
+				if (res.ok) {
 					saveMcpToolsCache(key, { tools, disabledTools });
 				}
 
@@ -9347,22 +9516,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					[connectorName]: {
 						loading: false,
 						error: res.ok ? null : (res.message || "获取能力列表失败"),
-						tools: tools.length > 0 ? tools : (prev[connectorName]?.tools || []),
+						tools: res.ok ? tools : (prev[connectorName]?.tools || tools),
 						disabledTools,
 					},
 				}));
 			} catch (e) {
-				if (!hasCachedTools) {
-					setConnectorToolsData((prev) => ({
-						...prev,
-						[connectorName]: {
-							loading: false,
-							error: e.message,
-							tools: [],
-							disabledTools: [],
-						},
-					}));
-				}
+				setConnectorToolsData((prev) => ({
+					...prev, [connectorName]: { ...(prev[connectorName] || cached), loading: false, error: e.message },
+				}));
 			}
 		}, [record?.name]);
 
@@ -9463,28 +9624,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			await oauthFlow.start(payload);
 		};
 
-		useEffect(() => {
-			if (record && Array.isArray(record.connectors)) {
-				record.connectors.forEach((c) => {
-					const cName = typeof c === "string" ? c : c.name;
-					const isConnected = typeof c === "object" ? (c.connected === true) : false;
-					if (isConnected) {
-						loadConnectorTools(cName);
-					}
-				});
-			}
-		}, [record?.name, record?.connectors, loadConnectorTools]);
+		const autoLoadConnectorTools = useCallback((_owner, name) => loadConnectorTools(name), [loadConnectorTools]);
+		useAutoMcpTools((record.connectors || []).map(connector => ({
+			owner: record.name, name: connector.name, connected: connector.connected === true,
+			revision: JSON.stringify([record.installedAt, connector]),
+		})), autoLoadConnectorTools);
 
 		const toggleExpandConnector = useCallback((connectorName) => {
 			setExpandedConnectors((prev) => {
 				const nextState = !prev[connectorName];
-				const curr = connectorToolsData[connectorName];
-				if (nextState && (!curr || !curr.tools || curr.tools.length === 0)) {
-					loadConnectorTools(connectorName);
-				}
 				return { ...prev, [connectorName]: nextState };
 			});
-		}, [loadConnectorTools, connectorToolsData]);
+		}, []);
 
 		const toggleTool = useCallback(async (connectorName, toolName, forcedEnabled) => {
 			const key = `${record.name}::${connectorName}`;
@@ -9573,7 +9724,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const latestVersion = (marketPlugin && (marketPlugin.version || (marketPlugin.detail && marketPlugin.detail.version))) || null;
 		const hasUpdate = !!(latestVersion && compareSemver(latestVersion, installedVersion) > 0);
 
-		const manageRef = useRef(null);
+		const localManageRef = useRef(null);
+		const manageRef = containerRef || localManageRef;
 		const [manageMaskClass, setManageMaskClass] = useState("");
 
 		const updateManageMask = useCallback(() => {
@@ -9606,16 +9758,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		useLayoutEffect(() => {
 			if (record) {
-				setTab("skills");
+				setTab(scrollState?.manageTab || initialTab || "skills");
 				setTabQuery("");
 				setSearchOpen(false);
-				setMenuOpen(false);
-				if (manageRef.current) {
-					manageRef.current.scrollTop = 0;
-				}
 				updateManageMask();
 			}
-		}, [record?.name, updateManageMask]);
+		}, [record?.name, initialTab, updateManageMask]);
+		useRememberedDetailScroll(`${record?.name}:${tab}`, manageRef, scrollState, updateManageMask, record);
 
 		useLayoutEffect(() => { updateManageMask(); });
 		useEffect(() => {
@@ -9632,26 +9781,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [searchOpen]);
 
 		useEffect(() => {
-			if (!record) onClose();
-		}, [record, onClose]);
-
-		useEffect(() => {
 			refreshState();
 		}, []);
-
-		useEffect(() => {
-			const onDocClick = (e) => {
-				if (!e.target.closest(".cpm-menu")) {
-					setMenuOpen(false);
-				}
-			};
-			if (menuOpen) {
-				document.addEventListener("mousedown", onDocClick);
-				return () => document.removeEventListener("mousedown", onDocClick);
-			}
-		}, [menuOpen]);
-
-		if (!record) return null;
 
 		const source = state.sources.find((s) => s.id === record.sourceId);
 		const skills = (Array.isArray(record.skills) && record.skills.length > 0)
@@ -9899,7 +10030,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					h("button", { className: "cpm-back", style: { padding: 0 }, onClick: onBack }, h(IconChevronLeft), "Back"),
 				),
 
-			h("div", { className: "cpm-title-row", style: { marginTop: 8 } },
+			h("div", { className: "cpm-title-row" },
 				h("div", { className: "cpm-title-group" },
 					h(PluginIcon, {
 						plugin: marketPlugin ? {
@@ -9924,19 +10055,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					onClick: hasUpdate && !updating ? update : undefined,
 				}, updating ? "Updating…" : "Update"),
 				h("button", {
+					type: "button", className: "cpm-btn cpm-btn-danger",
+					disabled: busy || updating || toggling,
+					onClick: () => setConfirmRemove(true),
+				}, "Remove"),
+				h("button", {
 					className: "cpm-toggle" + (record.enabled ? " on" : ""),
 					onClick: toggling ? undefined : toggle,
 					disabled: toggling || updating || busy,
 				}),
-				h("div", { className: "cpm-menu" },
-					h("button", { className: "cpm-icon-btn", style: { width: 32, height: 32, padding: 0 }, onClick: () => setMenuOpen(!menuOpen) }, h(IconMore)),
-					menuOpen && h("div", { className: "cpm-menu-pop" },
-						h("div", {
-							className: "cpm-menu-item danger",
-							onClick: () => { setMenuOpen(false); setConfirmRemove(true); },
-						}, "卸载插件"),
-					),
-				),
 			),
 
 			h("div", { className: "cpm-meta" },
@@ -10076,56 +10203,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}),
 			),
 
-			activeTab === "agents" && h("div", { className: "cpm-skill-list" },
+			activeTab === "agents" && h("div", null,
 				visibleAgents.length === 0 && h("div", { className: "cpm-empty" }, tabQuery ? "未找到匹配的 agents" : "没有可用 agents"),
-				visibleAgents.map((a) => {
-					const aFile = typeof a === "string" ? a : a.file || a.name || String(a);
-					const aDisplayName = typeof a === "object" && a.displayName ? a.displayName : (typeof a === "object" && a.name ? a.name : aFile.replace(/\.[^.]+$/, ""));
-					let aDesc = typeof a === "object" && a.description ? a.description : "Autonomous sub-agent workflow";
-					if (aDesc === ">" || aDesc === "|" || aDesc === ">-" || aDesc === "|-") aDesc = "Autonomous sub-agent workflow";
-					const tools = typeof a === "object" && a.tools ? a.tools : null;
-					const model = typeof a === "object" && a.model ? a.model : null;
-
-					return h("div", { key: aFile, className: "cpm-skill-item" },
-						h("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
-							h("div", { className: "cpm-skill-name" }, aDisplayName),
-							h("span", {
-								style: {
-									fontSize: 10.5,
-									fontWeight: 600,
-									padding: "2px 6px",
-									borderRadius: 4,
-									background: "rgba(168, 85, 247, 0.12)",
-									color: "#a855f7",
-									letterSpacing: "0.5px",
-								},
-							}, "SUBAGENT"),
-							model && h("span", {
-								style: {
-									fontSize: 10.5,
-									padding: "1px 5px",
-									borderRadius: 3,
-									background: "rgba(161, 161, 170, 0.12)",
-									color: "var(--cpm-muted)",
-								},
-							}, model),
-						),
-						aDesc ? h("div", { className: "cpm-skill-desc", style: { marginTop: 4 } }, h(SmartMarkdown, { text: aDesc })) : null,
-						tools && h("div", {
-							style: {
-								fontSize: 11.5,
-								color: "var(--cpm-muted)",
-								marginTop: 4,
-								display: "flex",
-								alignItems: "center",
-								gap: 4,
-							},
-						},
-							h("span", { style: { opacity: 0.7 } }, "Tools:"),
-							h("code", { style: { fontSize: 11, background: "rgba(128,128,128,0.1)", padding: "1px 4px", borderRadius: 3 } }, tools),
-						),
-					);
-				}),
+				visibleAgents.length > 0 && h("ul", { className: "cpm-agent-list", "aria-label": "Agents" },
+					visibleAgents.map((agent, index) => h(AgentCard, { key: (typeof agent === "string" ? agent : agent?.file || agent?.name) || index, agent }))),
 			),
 
 			activeTab === "hooks" && h("div", { className: "cpm-skill-list" },
@@ -10224,7 +10305,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const toolsInfo = connectorToolsData[cName];
 					const toolsList = toolsInfo?.tools || [];
 					const disabledTools = toolsInfo?.disabledTools || [];
-					const activeToolsCount = toolsList.filter((t) => !disabledTools.includes(typeof t === "string" ? t : t.name)).length;
 
 					return h("div", {
 						key: cName,
@@ -10256,33 +10336,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										onClick: isPendingVerify ? () => openAuthDialog(cName, c) : undefined,
 									}, isConnected ? "● 已连接" : (isPendingVerify ? "○ 待验证" : "○ 未连接")),
 
-									// Figure 2: Dropdown Chevron + Tool count badge (Clean minimal arrow, tight spacing, no tooltip)
-									isConnected && isAuthenticated && h("div", {
-										style: {
-											display: "inline-flex",
-											alignItems: "center",
-											gap: 4,
-											cursor: "pointer",
-											marginLeft: 2,
-										},
-										onClick: (e) => {
-											e.stopPropagation();
-											toggleExpandConnector(cName);
-										},
-									},
-										h("button", {
-											type: "button",
-											className: "cpm-connector-collapse-btn" + (isExpanded ? " is-expanded" : ""),
-										}, h(IconArrow, { size: 10 })),
-										toolsList.length > 0 && h("span", {
-											style: {
-												fontSize: 11.5,
-												fontWeight: 500,
-												color: "var(--cpm-muted)",
-												userSelect: "none",
-											},
-										}, `${activeToolsCount} tools enabled${disabledTools.length > 0 ? ` (${disabledTools.length} disabled)` : ""}`),
-									),
+									isConnected && isAuthenticated && h(McpDiscoveryStatus, {
+										info: toolsInfo, expanded: isExpanded,
+										onExpand: () => toggleExpandConnector(cName), onRetry: () => loadConnectorTools(cName, true),
+									}),
 								),
 								h("div", { className: "cpm-skill-desc", style: { marginTop: 4 } },
 									endpoint ? `${transport.toUpperCase()} · ${endpoint}` : "Model Context Protocol (MCP) 服务连接器",
@@ -10310,13 +10367,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						),
 
 						// Figure 1 & Figure 3: Expandable Capabilities Panel
-						isConnected && isAuthenticated && isExpanded && h(McpToolsPanel, {
+						isConnected && isAuthenticated && isExpanded && toolsInfo && !toolsInfo.loading && !toolsInfo.error && h(McpToolsPanel, {
 							loading: toolsInfo?.loading,
 							error: toolsInfo?.error,
 							tools: toolsList,
 							disabledTools,
 							loadingText: "正在启动本地 MCP 服务并解析工具列表（首次启动可能需要下载组件）…",
-							onRetry: () => loadConnectorTools(cName),
+							onRetry: () => loadConnectorTools(cName, true),
 							onHoverTool: (tool, rect, anchor, pointer, keyboard) => toolHover.enter({ connectorName: cName, tool, rect }, anchor, pointer, keyboard),
 							onHoverEnd: (anchor) => toolHover.leave(anchor),
 							onToggleTool: (toolName) => toggleTool(cName, toolName),
@@ -10326,7 +10383,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 			),
 
-			authDialog && h("div", { className: "cpm-dialog", onClick: closeAuthDialog },
+			authDialog && h("div", { className: "cpm-dialog", ...backdropDismissProps(closeAuthDialog) },
 				h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
 					h("button", {
 						className: "cpm-mcp-close-top",
@@ -10668,7 +10725,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 			),
 
-			confirmRemove && h("div", { className: "cpm-dialog", onClick: () => setConfirmRemove(false) },
+			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemove(false)) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
 					h("div", { className: "cpm-dialog-title" }, `卸载 ${record.displayName || record.name}？`),
 					h("div", { className: "cpm-field", style: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" } }, "将删除插件副本、技能与子代理注册及 MCP 配置。"),
@@ -10690,6 +10747,45 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				});
 			})()
 		);
+	}
+
+	function groupAgentTools(tools) {
+		const names = (Array.isArray(tools) ? tools : [tools])
+			.flatMap(value => typeof value === "string" ? value.split(/,(?![^()]*\))/) : [])
+			.map(name => name.trim()).filter(Boolean);
+		const groups = new Map();
+		for (const fullName of names) {
+			const separator = fullName.startsWith("mcp__") ? fullName.indexOf("__", 5) : -1;
+			const qualified = separator > 5 && separator + 2 < fullName.length;
+			const namespace = qualified ? fullName.slice(0, separator) : "";
+			if (!groups.has(namespace)) groups.set(namespace, { namespace, tools: [] });
+			groups.get(namespace).tools.push({ fullName, name: qualified ? fullName.slice(separator + 2) : fullName });
+		}
+		return [...groups.values()];
+	}
+
+	function AgentCard({ agent }) {
+		const info = agent && typeof agent === "object" ? agent : {};
+		const file = typeof agent === "string" ? agent : info.file || info.name || "Agent";
+		const name = info.displayName || info.name || file.replace(/\.[^.]+$/, "");
+		const rawDescription = info.description || "Autonomous sub-agent workflow";
+		const description = [">", "|", ">-", "|-"].includes(rawDescription) ? "Autonomous sub-agent workflow" : rawDescription;
+		const groups = groupAgentTools(info.tools);
+		const count = groups.reduce((total, group) => total + group.tools.length, 0);
+		return h("li", { className: "cpm-agent-item" },
+			h("div", { className: "cpm-agent-header" },
+				h("h3", { className: "cpm-agent-name" }, name),
+				h("div", { className: "cpm-agent-meta" },
+					h("span", null, "Subagent"),
+					info.model && h("span", { className: "cpm-agent-model" }, info.model),
+					count > 0 && h("span", null, `${count} ${count === 1 ? "tool" : "tools"}`))),
+			h("div", { className: "cpm-agent-description" }, h(SmartMarkdown, { text: description })),
+			count > 0 && h("div", { className: "cpm-agent-tools" },
+				groups.map(group => h("div", { key: group.namespace, className: "cpm-agent-tool-group" },
+					h("span", { className: "cpm-agent-tool-source" }, group.namespace || "Tools"),
+					h("ul", { className: "cpm-agent-tool-list", "aria-label": group.namespace || "Tools" },
+						group.tools.map((tool, index) => h("li", { key: index },
+							h("code", { className: "cpm-agent-tool", "aria-label": tool.fullName, "data-tool-name": tool.fullName }, tool.name))))))));
 	}
 
 	class ErrorBoundary extends React.Component {

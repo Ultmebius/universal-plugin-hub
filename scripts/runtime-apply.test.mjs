@@ -183,7 +183,7 @@ test('plugin installation schedules a live profile reconciliation', async (t) =>
   writeFileSync(join(local, 'hot-plugin', 'skills', 'hello', 'SKILL.md'), '---\nname: hello\ndescription: test\n---\n')
   mkdirSync(join(local, 'hot-plugin', '.codex-plugin'), { recursive: true })
   writeFileSync(join(local, 'hot-plugin', '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'hot-plugin', version: '1.0.0' }))
-  writeFileSync(join(local, 'hot-plugin', '.mcp.json'), JSON.stringify({ mcpServers: { demo: { type: 'stdio', command: process.execPath } } }))
+  writeFileSync(join(local, 'hot-plugin', '.mcp.json'), JSON.stringify({ mcpServers: { demo: { type: 'stdio', command: process.execPath, args: ['-e', 'process.exit(0)'] } } }))
   const state = readState()
   writeState({ ...state, sources: [...state.sources, { id: 'local', name: 'Local', url: 'local://' }] })
 

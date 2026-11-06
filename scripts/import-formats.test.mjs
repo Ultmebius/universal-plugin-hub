@@ -229,7 +229,9 @@ test('DSH Hub import formats', async (t) => {
           return path === '/sources/ensure' ? { pluginCount: 1, suggestedName: 'Codex', normalizedUrl: 'https://github.com/example/codex.git' } : { ok: true, plugin: { name: 'preview', displayName: 'Preview', skillsCount: 1 } }
         },
       }
-      const Dialog = vm.runInNewContext(`(${client.slice(start, end)}\n)`, context)
+      const dismissStart = client.indexOf('function backdropDismissProps(')
+      const dismissEnd = client.indexOf('// ────────────────────────────── Modern Install Dialog', dismissStart)
+      const Dialog = vm.runInNewContext(client.slice(dismissStart, dismissEnd) + `\n(${client.slice(start, end)}\n)`, context)
       const props = { initialPhase: 'upload', onCancel() {}, onAdded() {}, showToast(title, detail) { throw new Error(`${title}: ${detail}`) } }
       const render = () => { cursor = 0; return Dialog(props) }
       const all = (node) => typeof node === 'object' ? [node, ...node.children.flatMap(all)] : []

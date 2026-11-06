@@ -501,7 +501,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     // ── user MCP tool list / per-tool toggle (same shape as plugin connectors) ──
     if (method === 'GET' && path.startsWith('/mcps/') && path.endsWith('/tools')) {
       const name = safeSegment(normalizeMcpName(path.slice('/mcps/'.length, -'/tools'.length)), 'MCP 名称')
-      const result = await fetchConnectorTools('user-mcp', name)
+      const result = await fetchConnectorTools('user-mcp', name, url.searchParams.get('fresh') === '1')
       return sendJson(res, 200, result)
     }
 

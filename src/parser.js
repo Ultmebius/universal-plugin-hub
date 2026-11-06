@@ -66,6 +66,23 @@ function extractMdDescription(text) {
   return ''
 }
 
+// Presentation only: read Codex's card copy without changing which manifest
+// owns the plugin's description, components, or installation behavior.
+function readPluginShortDescription(dir) {
+  if (!dir) return ''
+  const text = value => typeof value === 'string' ? value.trim() : ''
+  try {
+    const root = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8'))
+    const openai = root?.extensions?.['com.openai']
+    // An inline OpenAI extension replaces the compatibility overlay entirely.
+    if (openai && typeof openai === 'object' && !Array.isArray(openai)) return text(openai.interface?.shortDescription)
+  } catch {}
+  try {
+    const codex = JSON.parse(readFileSync(join(dir, '.codex-plugin', 'plugin.json'), 'utf8'))
+    return text(codex?.interface?.shortDescription)
+  } catch { return '' }
+}
+
 function normalizeRow(row, sourceId, dir) {
   if (!row) return null
   const name = typeof row.name === 'string' ? row.name : (typeof row.identifier === 'string' ? row.identifier : '')
@@ -81,6 +98,8 @@ function normalizeRow(row, sourceId, dir) {
   const description = typeof row.description === 'string'
     ? row.description
     : (row.interface?.shortDescription || meta.description || '')
+  const shortDescription = readPluginShortDescription(dir)
+    || (typeof row.interface?.shortDescription === 'string' ? row.interface.shortDescription.trim() : '')
 
   const source = row.source?.source === 'local' ? row.source.path : (row.source || './')
   if (row.source?.source === 'local' && (typeof source !== 'string' || !source.startsWith('./'))) return null
@@ -91,6 +110,7 @@ function normalizeRow(row, sourceId, dir) {
     name: cleanName,
     displayName,
     description,
+    ...(shortDescription ? { shortDescription } : {}),
     author: typeof author === 'string' ? author : (meta.author || undefined),
     version: typeof row.version === 'string' ? row.version : (meta.version || undefined),
     category: typeof row.category === 'string' ? row.category : (meta.category || undefined),

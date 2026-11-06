@@ -69,6 +69,16 @@ test('declared logos retain priority and the semantic cache includes description
   assert.match(fs.readFileSync(new URL('../assets/licenses/fluent-emoji.txt', import.meta.url), 'utf8'), /MIT License[\s\S]*Microsoft Corporation/)
 })
 
+test('pending original logos use their exact inline preview before a generic brand fallback', () => {
+  const url = '/universal-plugin-hub/api/plugin-icon?sourceId=s&name=medium&path=icon.png'
+  const preview = 'data:image/png;base64,EXACT_ORIGINAL'
+  const generic = 'data:image/png;base64,GENERIC_BRAND'
+  const icon = context.icon({ plugin: { name: 'medium', icons: { light: [url, generic], previews: { [url]: preview } } } })
+  assert.equal(icon.props.candidates[0], url, 'the original request still validates and refreshes normally')
+  assert.equal(icon.props.fallback.props.src, preview)
+  assert.equal(icon.props.fallback.props.decoding, 'sync')
+})
+
 test('bundled originals match their source hashes and need no network', async () => {
   const manifest = JSON.parse(fs.readFileSync(new URL('../assets/fluent-3d/manifest.json', import.meta.url), 'utf8'))
   const previousFetch = globalThis.fetch

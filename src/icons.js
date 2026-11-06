@@ -1,7 +1,8 @@
-import { statSync, realpathSync, readFileSync, readdirSync, openSync, readSync, closeSync } from 'node:fs'
+import { statSync, realpathSync, readFileSync, readdirSync, openSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import { join, relative, isAbsolute, posix } from 'node:path'
 import { createHash } from 'node:crypto'
+import { PNG } from 'pngjs'
 import { marketRoot } from './store.js'
 import { pluginPath } from './market.js'
 
@@ -160,17 +161,16 @@ function discoverIconFiles(dir, pluginName) {
   return found.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
 }
 
-// A plugin-local icon is at most a few hundred KB and sits on a local disk, so
-// carrying its bytes in the row costs one decode and removes the request the
-// first paint would otherwise wait on. Remote avatars (GitHub, favicons) stay
-// behind the proxy: they are not ours to inline and would be far too big.
-//
-// The inline set is a budget, not a rule: every icon carried in the list is
-// paid again on each /state fetch, and the card renders at 38px. At 12KB the
-// whole marketplace payload stays under 1MB and 67 rows still paint with no
-// request; the rest keep the served URL, which is a local disk read.
+// Small local artwork can travel in the row directly. Larger PNGs use a
+// bounded 96px preview, cached separately from the original. Remote images
+// only contribute a preview when bytes already exist in the proxy cache;
+// parsing a catalog never waits on an upstream image request.
 
 const INLINE_LIMIT = 12 * 1024
+// A preview is carried once per URL rather than duplicated in both theme arrays.
+// This covers ordinary raster logos while keeping large artwork out of list JSON.
+const PREVIEW_LIMIT = 64 * 1024
+const previewMemory = new Map()
 
 /** A local file's bytes as a data URL, or null when it is too big or unreadable. */
 function inlineFile(file) {
@@ -181,6 +181,70 @@ function inlineFile(file) {
     const contentType = imageContentType(buffer)
     return contentType ? `data:${contentType};base64,${buffer.toString('base64')}` : null
   } catch { return null }
+}
+
+function inlinePreview(buffer) {
+  const contentType = imageContentType(buffer)
+  if (!contentType) return null
+  if (contentType === 'image/png' && buffer.length > INLINE_LIMIT) {
+    // Version the derived cache by content and algorithm, so replacing artwork
+    // cannot leave an old thumbnail behind. Originals are never overwritten.
+    const key = createHash('sha256').update(buffer).digest('hex')
+    const directory = join(marketRoot(), 'icons', 'previews')
+    const file = join(directory, `96-v1-${key}.png`)
+    try {
+      const saved = readFileSync(file)
+      if (saved.length <= INLINE_LIMIT && imageContentType(saved) === 'image/png') return `data:image/png;base64,${saved.toString('base64')}`
+    } catch {}
+    if (buffer.length < 24) return null
+    const w = buffer.readUInt32BE(16), h = buffer.readUInt32BE(20)
+    if (!w || !h || w * h > 4_194_304) return null
+    const image = PNG.sync.read(buffer)
+    const ratio = Math.min(1, 96 / Math.max(w, h))
+    const width = Math.max(1, Math.round(w * ratio)), height = Math.max(1, Math.round(h * ratio))
+    const data = Buffer.alloc(width * height * 4)
+    // Area sampling with premultiplied alpha preserves fine edges on both
+    // themes; simply averaging transparent RGB creates dark logo fringes.
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const left = x * w / width, right = (x + 1) * w / width
+      const top = y * h / height, bottom = (y + 1) * h / height
+      let red = 0, green = 0, blue = 0, alpha = 0
+      for (let sy = Math.floor(top); sy < Math.ceil(bottom); sy++) for (let sx = Math.floor(left); sx < Math.ceil(right); sx++) {
+        const weight = (Math.min(right, sx + 1) - Math.max(left, sx)) * (Math.min(bottom, sy + 1) - Math.max(top, sy))
+        const i = (sy * w + sx) * 4, a = image.data[i + 3] / 255 * weight
+        alpha += a; red += image.data[i] * a; green += image.data[i + 1] * a; blue += image.data[i + 2] * a
+      }
+      const i = (y * width + x) * 4
+      if (alpha) { data[i] = Math.round(red / alpha); data[i + 1] = Math.round(green / alpha); data[i + 2] = Math.round(blue / alpha) }
+      data[i + 3] = Math.round(255 * alpha / ((right - left) * (bottom - top)))
+    }
+    const thumbnail = PNG.sync.write({ width, height, data }, { deflateLevel: 9, deflateStrategy: 0 })
+    if (thumbnail.length > INLINE_LIMIT) return null
+    try { mkdirSync(directory, { recursive: true }); writeFileSync(file, thumbnail) } catch {}
+    return `data:image/png;base64,${thumbnail.toString('base64')}`
+  }
+  return buffer.length <= PREVIEW_LIMIT ? `data:${contentType};base64,${buffer.toString('base64')}` : null
+}
+
+function previewFile(file) {
+  try {
+    const info = statSync(file)
+    if (!info.isFile() || info.size > MAX_BYTES) return null
+    const key = `${file}:${info.mtimeMs}:${info.size}`
+    if (previewMemory.has(key)) return previewMemory.get(key)
+    const preview = inlinePreview(readFileSync(file))
+    if (previewMemory.size >= 256) previewMemory.delete(previewMemory.keys().next().value)
+    previewMemory.set(key, preview)
+    return preview
+  } catch { return null }
+}
+
+function cachedIconPreview(url) {
+  const cached = memory.get(url)
+  if (cached) {
+    try { return inlinePreview(cached.buffer) } catch { return null }
+  }
+  return previewFile(iconCacheFile(url))
 }
 
 /**
@@ -197,6 +261,7 @@ export function buildPluginIcons(meta, { sourceId, name, dir, source } = {}) {
   // Local files are stat'd once here and the same File is reused for the inline
   // copy, so discovering artwork and inlining it is one pass over the disk.
   const files = new Map()
+  const previews = {}
   const toUrl = (value) => {
     if (typeof value !== 'string' || !value.trim()) return null
     if (/^https?:\/\//i.test(value)) return proxy(value)
@@ -238,18 +303,41 @@ export function buildPluginIcons(meta, { sourceId, name, dir, source } = {}) {
       : [ui.iconLight, ui.logoLight, meta?.iconLight, ...values('light'), ...plain, ...shade]
     const urls = [...new Set(declared.map(toUrl).filter(Boolean))]
     // The inline copy leads, so the first candidate needs no request at all.
-    // Only the local files this call already stat'd are considered; a remote
-    // candidate never reaches the disk and so can never be inlined.
+    // Only local files lead with their bytes. The separately carried preview
+    // never changes candidate priority or replaces the normal refresh request.
     const inline = urls.map((url) => files.get(url) && inlineFile(files.get(url))).find(Boolean)
+    if (!inline && urls[0]) {
+      const first = urls[0]
+      const remote = first.startsWith('/universal-plugin-hub/api/icon?') ? new URL(first, 'http://localhost').searchParams.get('u') : null
+      const preview = files.has(first) ? previewFile(files.get(first)) : remote && cachedIconPreview(remote)
+      if (preview) previews[first] = preview
+    }
     return inline ? [inline, ...urls.filter((url) => url !== inline)] : urls
   }
   const served = (paths) => [...new Set(paths.map(toUrl).filter(Boolean))]
   // Reported apart from the tile candidates so the client can try them after
   // the brand artwork it knows about, instead of leading every row with them.
+  const light = build('light')
+  const dark = build('dark')
+  // Avatar-only rows already have reusable bytes in the proxy's disk cache.
+  // Expose those as a preview without starting network work during parsing;
+  // the normal image request still refreshes expired cache entries.
+  if (!light.length || !dark.length) {
+    const githubOwner = (url) => typeof url === 'string' ? url.match(/github\.com\/([^/]+)/i)?.[1] : null
+    let owner = [source?.url || meta?.source?.url, meta?.homepage].map(githubOwner).find((value) => value && !value.toLowerCase().includes('anthropics'))
+    const author = (typeof meta?.author === 'string' ? meta.author : meta?.author?.name || '').trim().toLowerCase()
+    if (!owner && /^[a-z0-9_-]+$/i.test(author) && author !== 'anthropic') owner = author
+    if (owner) {
+      const url = `https://github.com/${encodeURIComponent(owner)}.png?size=80`
+      const preview = cachedIconPreview(url)
+      if (preview) previews[proxy(url)] = preview
+    }
+  }
   return {
-    light: build('light'),
-    dark: build('dark'),
+    light,
+    dark,
     portrait: { light: served(portrait), dark: served(portrait) },
+    ...(Object.keys(previews).length ? { previews } : {}),
   }
 }
 

@@ -1248,7 +1248,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   let result
   try {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 8000)
+    const timer = setTimeout(() => controller.abort(), MCP_TOOLS_TIMEOUT_MS)
     const res = await fetch(url, {
       method: 'POST',
       headers: reqHeaders,
@@ -1389,10 +1389,7 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
       writeMcpToolsState(savedState)
     }
   }
-  if (MEMORY_TOOLS_CACHE.has(toolsKey)) {
-    const mem = MEMORY_TOOLS_CACHE.get(toolsKey)
-    MEMORY_TOOLS_CACHE.set(toolsKey, { ...mem, tools: [], disabledTools: mem.disabledTools || [] })
-  }
+  if (result.ok) MEMORY_TOOLS_CACHE.delete(toolsKey)
   return result
 }
 
@@ -1466,6 +1463,9 @@ function quoteArgForShell(value) {
  * an (possibly empty) tool list, so callers can tell "no tools" from "the
  * probe never reached the server".
  */
+const MCP_STARTUP_TIMEOUT_MS = 180000
+const MCP_TOOLS_TIMEOUT_MS = 60000
+
 export function queryStdioToolsList(cmd, args, extraEnv = {}) {
   return new Promise((resolve) => {
     const argv = Array.isArray(args) ? args : []
@@ -1498,7 +1498,15 @@ export function queryStdioToolsList(cmd, args, extraEnv = {}) {
       settled = true
       clearTimeout(timer)
       try { cp.kill() } catch {}
-      resolve({ tools: tools || [], error: tools ? null : error })
+      resolve({ tools: tools || [], error: error || null })
+    }
+
+    const armTimeout = (ms, phase) => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
+        finish([], `MCP ${phase}超时（${ms / 1000} 秒）${detail ? `：${detail}` : ''}`)
+      }, ms)
     }
 
     cp.stderr.on('data', (d) => { stderr += d.toString() })
@@ -1516,19 +1524,25 @@ export function queryStdioToolsList(cmd, args, extraEnv = {}) {
             finish(json.result.tools, null)
             return
           }
-          if (json.id === 0 && json.result) {
+          if (json.id === 0 && json.result && !answered) {
+            answered = true
+            armTimeout(MCP_TOOLS_TIMEOUT_MS, '工具解析')
             cp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
             cp.stdin.write(toolsReq)
           }
-          if (json.id === 0 && json.error) finish([], json.error.message || 'MCP initialize failed')
+          if ((json.id === 0 || json.id === 1) && json.error) {
+            finish([], json.error.message || 'MCP 工具解析失败')
+            return
+          }
         } catch {}
       }
     })
 
     cp.on('error', (err) => finish([], `无法启动 ${cmd}: ${err.message}`))
+    cp.stdin.on?.('error', (err) => finish([], `MCP 输入连接失败: ${err.message}`))
 
     cp.on('close', (code) => {
-      if (!answered) {
+      if (!settled) {
         const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
         finish([], detail || `MCP 服务提前退出（exit ${code}）`)
       }
@@ -1548,29 +1562,38 @@ export function queryStdioToolsList(cmd, args, extraEnv = {}) {
       params: {}
     }) + '\n'
 
+    armTimeout(MCP_STARTUP_TIMEOUT_MS, '启动')
     try {
       cp.stdin.write(initReq)
-    } catch {}
-
-    timer = setTimeout(() => {
-      if (!settled) {
-        const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
-        finish([], detail || 'MCP 服务在 25 秒内没有返回工具列表')
-      }
-    }, 25000)
+    } catch (err) { finish([], err.message) }
   })
 }
 
 const MEMORY_TOOLS_CACHE = new Map()
+const MCP_TOOLS_INFLIGHT = new Map()
 
 export async function fetchConnectorTools(pluginName, connectorName, forceFresh = false) {
+  const key = `${pluginName}::${connectorName}`
+  if (MCP_TOOLS_INFLIGHT.has(key)) return MCP_TOOLS_INFLIGHT.get(key)
+  const request = discoverConnectorTools(pluginName, connectorName, forceFresh)
+  MCP_TOOLS_INFLIGHT.set(key, request)
+  try {
+    const result = await request
+    MEMORY_TOOLS_CACHE.set(key, { tools: result.tools || [], ok: result.ok, message: result.message })
+    return result
+  } finally {
+    if (MCP_TOOLS_INFLIGHT.get(key) === request) MCP_TOOLS_INFLIGHT.delete(key)
+  }
+}
+
+async function discoverConnectorTools(pluginName, connectorName, forceFresh = false) {
   const key = `${pluginName}::${connectorName}`
   const state = readMcpToolsState()
   const disabledTools = Array.isArray(state[key]?.disabledTools) ? state[key].disabledTools : []
 
   if (!forceFresh && MEMORY_TOOLS_CACHE.has(key)) {
     const mem = MEMORY_TOOLS_CACHE.get(key)
-    return { ok: true, tools: mem.tools || [], disabledTools }
+    return { ok: mem.ok !== false, tools: mem.tools || [], disabledTools, ...(mem.message ? { message: mem.message } : {}) }
   }
 
   const target = installedDir(pluginName)
@@ -1601,9 +1624,9 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
 
   // 1. HTTP / SSE fetch
   if (transport !== 'stdio' && url) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), MCP_TOOLS_TIMEOUT_MS)
     try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 6000)
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -1612,14 +1635,15 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
         },
         signal: controller.signal,
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-      }).finally(() => clearTimeout(timer))
+      })
 
       if (res.status === 200) {
         const text = await res.text()
-        let tools = []
+        let tools = null
         try {
           const data = JSON.parse(text)
           if (Array.isArray(data.result?.tools)) tools = data.result.tools
+          else if (data.error) probeError = data.error.message || 'MCP 工具解析失败'
         } catch {
           const lines = text.split('\n')
           for (const line of lines) {
@@ -1635,18 +1659,17 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
           }
         }
 
-        if (tools.length > 0) {
-          if (!state[key]) state[key] = { disabledTools, cachedTools: [] }
-          state[key].cachedTools = tools
-          writeMcpToolsState(state)
+        if (tools) {
+          cacheConnectorTools(key, tools)
           return { ok: true, tools, disabledTools }
         }
+        probeError ||= 'MCP 响应中未包含有效的工具列表'
       } else {
         probeError = `MCP 服务返回 HTTP ${res.status}`
       }
     } catch (err) {
-      probeError = `连接 MCP 服务失败: ${err.message}`
-    }
+      probeError = controller.signal.aborted ? `MCP 工具解析超时（${MCP_TOOLS_TIMEOUT_MS / 1000} 秒）` : `连接 MCP 服务失败: ${err.message}`
+    } finally { clearTimeout(timer) }
   }
 
   // 2. Stdio fetch
@@ -1657,9 +1680,7 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
       try {
         const probe = await queryStdioToolsList(cmd, args, entryCfg.env || found?.env || {})
         if (probe.tools.length > 0 || !probe.error) {
-          if (!state[key]) state[key] = { disabledTools, cachedTools: [] }
-          state[key].cachedTools = probe.tools
-          writeMcpToolsState(state)
+          cacheConnectorTools(key, probe.tools)
           return { ok: true, tools: probe.tools, disabledTools }
         }
         probeError = probe.error
@@ -1671,18 +1692,28 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
     }
   }
 
-  // 3. Return cached fallback
-  if (cached.length > 0) {
-    return { ok: true, tools: cached, disabledTools }
-  }
-
   // A probe that never reached the server is an error, not an empty tool list;
   // reporting ok:true here made the UI claim the server exposes no tools.
   if (probeError) {
-    return { ok: false, tools: [], disabledTools, message: probeError }
+    return { ok: false, tools: cached, disabledTools, message: probeError }
   }
 
   return { ok: true, tools: [], disabledTools }
+}
+
+function cacheConnectorTools(key, tools) {
+  const state = readMcpToolsState()
+  state[key] = { ...state[key], cachedTools: tools }
+  writeMcpToolsState(state)
+  MEMORY_TOOLS_CACHE.set(key, { tools })
+}
+
+function warmInstalledConnectorTools(pluginName, connectors) {
+  for (const connector of connectors) {
+    if (getConnectorEntry(pluginName, connector.name)) {
+      void fetchConnectorTools(pluginName, connector.name, true).catch(() => {})
+    }
+  }
 }
 
 export function isScanDirRegistered(path) {
@@ -2040,14 +2071,7 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   writeState(state)
   invalidateParserCaches()
 
-  // Proactively warm up and cache tools for local stdio/npx MCP servers in the background
-  for (const c of pluginConnectors) {
-    if (c.command === 'npx' || (c.args && c.args.some((a) => typeof a === 'string' && a.includes('@')))) {
-      setTimeout(() => {
-        fetchConnectorTools(pluginName, c.name, true).catch(() => {});
-      }, 500);
-    }
-  }
+  warmInstalledConnectorTools(pluginName, pluginConnectors)
 
   return {
     ok: true,
@@ -2350,6 +2374,7 @@ export function installedDetails() {
     return {
       ...rec,
       ...detail,
+      description: rec.description || targetManifest?.description || marketRow?.description || '',
       author: author || rec.author,
       // Identity fields the icon chain reads. The detail page already merges
       // these from the marketplace row before rendering, which is why the same

@@ -266,6 +266,9 @@ test('R3: ManagePage displays matched icon (Playwright & 3D fallback) to the lef
 
   vm.runInNewContext(
     clientSource.slice(iconStart, iconEnd) + '\n' +
+    clientSource.slice(clientSource.indexOf('function useRememberedDetailScroll('), clientSource.indexOf('function useDetailScrollMask(')) + '\n' +
+    clientSource.slice(clientSource.indexOf('function backdropDismissProps('), clientSource.indexOf('// ────────────────────────────── Modern Install Dialog')) + '\n' +
+    clientSource.slice(clientSource.indexOf('function useAutoMcpTools('), clientSource.indexOf('// Shared tool grid for the MCP page')) + '\n' +
     clientSource.slice(manageStart, manageEnd) + '\n' +
     'globalThis.ManagePage = ManagePage; globalThis.PluginIcon = PluginIcon; globalThis.BRAND_ICONS = BRAND_ICONS;',
     context
@@ -302,6 +305,21 @@ test('R3: ManagePage displays matched icon (Playwright & 3D fallback) to the lef
   assert.equal(pwTitle.props.className, 'cpm-title');
   assert.equal(pwTitle.children[0], 'Playwright Manager');
 
+  const actions = viewPw.root.findByProps({ className: 'cpm-title-row' });
+  const buttons = actions.findAllByType('button');
+  const removeButton = buttons.find(button => button.children.join('') === 'Remove');
+  const toggleIndex = buttons.findIndex(button => button.props.className.includes('cpm-toggle'));
+  assert.ok(removeButton, 'Remove is directly available in the header');
+  assert.equal(removeButton.props.type, 'button');
+  assert.equal(removeButton.props.className, 'cpm-btn cpm-btn-danger');
+  assert.equal(buttons.indexOf(removeButton), toggleIndex - 1, 'Remove sits immediately left of the switch');
+  assert.equal(viewPw.root.findAllByProps({ className: 'cpm-menu' }).length, 0);
+  assert.equal(viewPw.root.findAllByProps({ className: 'cpm-dialog' }).length, 0);
+  act(() => removeButton.props.onClick());
+  assert.equal(viewPw.root.findAllByProps({ className: 'cpm-dialog' }).length, 1, 'Remove opens the existing confirmation');
+  act(() => viewPw.root.findAllByType('button').find(button => button.children.join('') === '取消').props.onClick());
+  assert.equal(viewPw.root.findAllByProps({ className: 'cpm-dialog' }).length, 0);
+
   // 2. ManagePage with fallback plugin (without custom icon)
   let viewFallback;
   act(() => {
@@ -324,6 +342,14 @@ test('R3: ManagePage displays matched icon (Playwright & 3D fallback) to the lef
   assert.ok(fbIconContainer.props.className.includes('cpm-fallback-icon'), 'Fallback plugin in manage view uses 3D icon');
   const fbImg = fbIconContainer.children.find((c) => c && c.type === 'img');
   assert.ok(fbImg.props.src.includes('microscope_3d.png'), 'Fallback plugin in manage view uses 3D fluent icon');
+  // A refresh may remove the installed record before the remove handler closes
+  // the page. This is a real React update, so Hook-order regressions surface.
+  act(() => viewPw.update(React.createElement(context.ManagePage, {
+    record: null, state: { sources: [], plugins: [] }, rows: {},
+    refreshState() {}, isDark: false, onBack() {}, onClose() {},
+  })));
+  assert.equal(viewPw.toJSON(), null);
+  act(() => { viewPw.unmount(); viewFallback.unmount(); });
 });
 
 test('CSS styling conformance for .cpm-title-group and typography', () => {
@@ -422,6 +448,9 @@ test('Edge cases: Theme resolution fallback, missing record handling, name-only 
     clientSource.slice(themeStart, themeEnd) + '\n' +
     clientSource.slice(iconStart, iconEnd) + '\n' +
     clientSource.slice(detailStart, detailEnd) + '\n' +
+    clientSource.slice(clientSource.indexOf('function useRememberedDetailScroll('), clientSource.indexOf('function useDetailScrollMask(')) + '\n' +
+    clientSource.slice(clientSource.indexOf('function backdropDismissProps('), clientSource.indexOf('// ────────────────────────────── Modern Install Dialog')) + '\n' +
+    clientSource.slice(clientSource.indexOf('function useAutoMcpTools('), clientSource.indexOf('// Shared tool grid for the MCP page')) + '\n' +
     clientSource.slice(manageStart, manageEnd) + '\n' +
     'globalThis.isDarkMode = isDarkMode; globalThis.DetailView = DetailView; globalThis.ManagePage = ManagePage; globalThis.PluginIcon = PluginIcon;',
     context
