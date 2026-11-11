@@ -123,13 +123,16 @@ function normalizeRow(row, sourceId, dir) {
 }
 
 const MARKETPLACE_CACHE = new Map()
+const MARKETPLACE_SELECTION_CACHE = new Map()
 const MARKETPLACE_CACHE_TTL = 30000 // 30 seconds
 
 export function invalidateMarketplaceCache(sourceId) {
   if (sourceId) {
     MARKETPLACE_CACHE.delete(sourceId)
+    MARKETPLACE_SELECTION_CACHE.delete(sourceId)
   } else {
     MARKETPLACE_CACHE.clear()
+    MARKETPLACE_SELECTION_CACHE.clear()
   }
 }
 
@@ -137,7 +140,7 @@ export function invalidateMarketplaceCache(sourceId) {
  * Universal Marketplace Reader.
  * Inspects a source repository cache and extracts all discoverable plugins.
  */
-export function readMarketplace(sourceId) {
+export function readMarketplace(sourceId, names) {
   safeSegment(sourceId, 'source id')
   const cache = sourceCacheDir(sourceId)
   if (!existsSync(cache)) return []
@@ -145,9 +148,17 @@ export function readMarketplace(sourceId) {
   const now = Date.now()
   const cached = MARKETPLACE_CACHE.get(sourceId)
   if (cached && (now - cached.time < MARKETPLACE_CACHE_TTL)) {
-    return cached.data
+    return names ? cached.data.filter(row => names.has(row.name)) : cached.data
   }
 
+  if (names) {
+    const key = JSON.stringify([...names].sort())
+    const selection = MARKETPLACE_SELECTION_CACHE.get(sourceId)
+    if (selection?.key === key && now - selection.time < MARKETPLACE_CACHE_TTL) return selection.data
+    const data = parseMarketplaceFromDisk(sourceId, cache, names).filter(row => names.has(row.name))
+    MARKETPLACE_SELECTION_CACHE.set(sourceId, { key, time: now, data })
+    return data
+  }
   const rows = parseMarketplaceFromDisk(sourceId, cache)
   MARKETPLACE_CACHE.set(sourceId, { time: now, data: rows })
   return rows
@@ -198,7 +209,7 @@ export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
   }, sourceId, entryDir)
 }
 
-export function parseMarketplaceFromDisk(sourceId, cache) {
+export function parseMarketplaceFromDisk(sourceId, cache, names) {
   // 1. Check Multi-Plugin Manifest Candidates
   const manifestCandidates = [
     join(cache, '.claude-plugin', 'marketplace.json'),
@@ -221,22 +232,26 @@ export function parseMarketplaceFromDisk(sourceId, cache) {
         const content = JSON.parse(readFileSync(manifestPath, 'utf8'))
         // Case A: Claude / standard manifest with plugins array
         if (Array.isArray(content.plugins)) {
+          let skipped = false
           const rows = content.plugins.map((r) => {
             const source = r.source?.source === 'local' ? r.source.path : r.source
-            let manifest = null
-            let dir = null
-            if (typeof source === 'string' && source.startsWith('./')) {
-              dir = pluginPath(cache, source)
-            } else if (source && typeof source === 'object' && r.name) {
+            let dir = typeof source === 'string' && source.startsWith('./') ? pluginPath(cache, source) : null
+            if (source && typeof source === 'object' && r.name) {
               dir = sourceRepositoryDir(cache, source) || pluginContentDir(sourceId, r.name, source, false)
             }
-            if (dir) manifest = readPluginManifest(dir, false)
+            if (names && typeof r.name === 'string' && !names.has(r.name.toLowerCase())) {
+              skipped = true
+              return null
+            }
+            const manifest = dir ? readPluginManifest(dir, false) : null
             return normalizeRow({ ...manifest, ...r,
               displayName: r.displayName || r.interface?.displayName || manifest?.displayName,
               description: r.description || r.interface?.shortDescription || manifest?.description,
             }, sourceId, dir)
           }).filter(Boolean)
           if (rows.length > 0) return rows
+          // Preserve manifest precedence and discovery fallbacks on a miss.
+          if (skipped) return parseMarketplaceFromDisk(sourceId, cache)
         }
         // Case B: Direct array of plugin descriptors
         if (Array.isArray(content)) {

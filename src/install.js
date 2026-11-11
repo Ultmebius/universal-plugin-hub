@@ -2430,11 +2430,19 @@ export function toolCallIconGroups() {
     const server = key.slice(separator + 2)
     if (byServer.get(server) === getConnectorId(owner, server)) owners.add(owner)
   }
+  const installed = readState().plugins.filter(rec =>
+    rec.enabled !== false && rec.name !== 'user-mcp' && owners.has(rec.name))
+  const namesBySource = new Map()
+  for (const rec of installed) {
+    if (!namesBySource.has(rec.sourceId)) namesBySource.set(rec.sourceId, new Set())
+    namesBySource.get(rec.sourceId).add(rec.name)
+  }
+  const rowsBySource = new Map()
   const claimedTools = new Map()
   const groups = []
-  for (const rec of readState().plugins) {
+  for (const rec of installed) {
     const target = installedDir(rec.name)
-    if (rec.enabled === false || rec.name === 'user-mcp' || !owners.has(rec.name) || !existsSync(target)) continue
+    if (!existsSync(target)) continue
     const manifest = readPluginManifest(target)
     const tools = new Map()
     for (const { name } of getPluginConnectors(target, manifest)) {
@@ -2448,10 +2456,20 @@ export function toolCallIconGroups() {
       }
     }
     if (!tools.size) continue
+    if (!rowsBySource.has(rec.sourceId)) {
+      const rows = new Map()
+      // Keep the first matching descriptor, as the full lookup does.
+      try {
+        for (const row of readMarketplace(rec.sourceId, namesBySource.get(rec.sourceId))) {
+          if (!rows.has(row.name)) rows.set(row.name, row)
+        }
+      } catch {}
+      rowsBySource.set(rec.sourceId, rows)
+    }
     for (const name of tools.keys()) claimedTools.set(name, (claimedTools.get(name) || 0) + 1)
     groups.push({
       plugin: {
-        ...installedPluginIconIdentity(rec, target, manifest, findMarketRowSync(rec.sourceId, rec.name)),
+        ...installedPluginIconIdentity(rec, target, manifest, rowsBySource.get(rec.sourceId).get(rec.name)),
         displayName: rec.displayName || rec.name,
       },
       tools: Array.from(tools, ([name, rawName]) => ({ name, rawName })),

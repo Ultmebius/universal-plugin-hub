@@ -3809,6 +3809,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		let body = null;
 		try { body = await res.json(); } catch { /* no body */ }
 		if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+		if (body?.ok !== false && !body?.error && /^(POST|PUT|PATCH|DELETE)$/.test(options?.method || "") &&
+			/^\/(plugins|mcps)(\/|$)/.test(path) && !/\/(verify|oauth-status|inspect|tools\/toggle)$/.test(path)) {
+			document.dispatchEvent(new Event("uph-mcp-branding-changed"));
+		}
 		return body;
 	}
 
@@ -10877,7 +10881,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return label + summary.slice(name.length);
 	}
 
-	function createToolCallLabels() {
+	function createToolCallLabels(onRow) {
 		const rowSelector = `${TOOL_CALL_ROW}[data-tool]`;
 		const headerSelector = ':scope > div > [data-disclosure-header] > [data-disclosure-row]';
 		const shimmerAttribute = "data-shimmer-text";
@@ -10888,6 +10892,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		if (brandHighlight) registry.set(brandKey, brandHighlight);
 		const changes = new Map();
 		let labelsByName = new Map();
+		let observedTextRows = new WeakSet();
 		const read = (node, attribute) => attribute ? node.getAttribute(attribute) : node.data;
 		const write = (node, attribute, value) => {
 			if (!attribute) node.data = value;
@@ -10906,13 +10911,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		function restore() {
 			observer?.disconnect();
+			observedTextRows = new WeakSet();
 			for (const node of changes.keys()) restoreChange(node);
 		}
 
 		function updateRow(row) {
 			const name = row.getAttribute("data-tool");
+			if (name?.startsWith("mcp__")) onRow?.(name);
 			const identity = labelsByName.get(name);
 			if (!identity && !row.querySelector(`[${summaryAttribute}]`)) return;
+			if (identity && observer && !observedTextRows.has(row)) {
+				observer.observe(row, { subtree: true, characterData: true });
+				observedTextRows.add(row);
+			}
 			const header = row.querySelector(headerSelector);
 			if (!header) return;
 			for (const summary of header.querySelectorAll("[data-shimmer-decoration] + *")) {
@@ -10974,10 +10985,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				labelsByName = new Map(groups.flatMap(({ plugin, tools }) =>
 					tools.map(({ name, rawName }) => [name, { pluginName: plugin.displayName || plugin.name, rawName }])
 				));
-				if (!labelsByName.size || !observer || !document.body) return;
+				if ((!labelsByName.size && !onRow) || !observer || !document.body) return;
 				for (const row of document.querySelectorAll(rowSelector)) updateRow(row);
 				observer.observe(document.body, {
-					childList: true, subtree: true, characterData: true,
+					childList: true, subtree: true,
 					attributes: true, attributeFilter: [shimmerAttribute, "data-tool"],
 				});
 			},
@@ -11002,97 +11013,121 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }`;
 		style.textContent = chatCss;
 		document.head.append(style);
-		const labels = createToolCallLabels();
-		const loaded = new Set();
+		const labels = createToolCallLabels(onRow);
+		const images = new Map();
+		const byName = new Map();
+		const mcpRowSelector = `${TOOL_CALL_ROW}[data-tool^="mcp__"]`;
 		let disposed = false;
-		let refreshing = false;
+		let request;
+		let checkedAt = -Infinity;
 		let current = "";
 		let generation = 0;
-		const mcpRowSelector = `${TOOL_CALL_ROW}[data-tool^="mcp__"]`;
-		// While idle, only watch for tool rows entering the DOM. This also
-		// catches the first MCP call immediately between refresh intervals.
-		const presence = typeof MutationObserver === "undefined" ? null : new MutationObserver(records => {
-			if (document.hidden) return;
-			for (const { target, addedNodes } of records) {
-				if (target.matches?.(mcpRowSelector) || Array.from(addedNodes).some(node =>
-					node.nodeType === 1 && (node.matches(mcpRowSelector) || node.querySelector(mcpRowSelector)))) {
-					void refresh();
-					return;
-				}
-			}
-		});
+		const refreshInterval = 10000;
 
-		async function resolveIcon(plugin, dark) {
-			const candidates = getPluginIconCandidates(plugin, dark);
-			for (const url of candidates.flatMap(candidate => [plugin.icons?.previews?.[candidate], candidate]).filter(Boolean)) {
-				if (loaded.has(url)) return url;
-				if (disposed) break;
+		function decodeIcon(url, warm) {
+			if (!images.has(url)) {
 				const image = new Image();
+				if (warm) image.fetchPriority = "low";
 				image.src = url;
-				try {
-					await image.decode();
-					loaded.add(url);
-					return url;
-				} catch {}
+				const decoded = image.decode().then(() => true, () => {
+					if (images.get(url) === decoded) images.delete(url);
+					return false;
+				});
+				if (images.size >= 128) images.delete(images.keys().next().value);
+				images.set(url, decoded);
 			}
-			return null;
+			return images.get(url);
 		}
 
-		async function refresh() {
-			if (disposed || refreshing || document.hidden) return;
-			if (!document.querySelector(mcpRowSelector)) {
-				if (current) {
-					generation++;
-					labels.update([]);
-					style.textContent = chatCss;
-					current = "";
-				}
-				if (document.body) presence?.observe(document.body, {
-					childList: true, subtree: true, attributes: true, attributeFilter: ["data-tool"],
-				});
+		async function publishIcon(group, warm = false) {
+			const revision = generation;
+			const candidates = warm ? group.urls.slice(0, 1) : group.urls;
+			for (const url of candidates) {
+				if (disposed || revision !== generation || group.published) return;
+				if (!await decodeIcon(url, warm)) continue;
+				if (disposed || revision !== generation || group.published) return;
+				const rule = toolCallIconCss(group.names, url);
+				if (rule && style.sheet) style.sheet.insertRule(rule, style.sheet.cssRules.length);
+				group.published = true;
 				return;
 			}
-			presence?.disconnect();
-			refreshing = true;
+		}
+
+		function onRow(name) {
+			const group = byName.get(name);
+			const now = Date.now();
+			if (group && !group.loading && !group.published && now >= (group.retryAt ?? 0)) {
+				group.loading = true;
+				void publishIcon(group).catch(() => {}).finally(() => {
+					group.loading = false;
+					if (!group.published) group.retryAt = Date.now() + refreshInterval;
+				});
+			}
+			if (now - checkedAt >= refreshInterval) void refresh(true);
+		}
+
+		function setGroups(groups, dark) {
+			const signature = JSON.stringify([dark, groups]);
+			if (signature === current) return;
+			generation++;
+			current = signature;
+			byName.clear();
+			style.textContent = chatCss;
+			// Only decode small, already available artwork on the startup path.
+			let warmCount = 0;
+			let warmBytes = 0;
+			for (const { plugin, tools } of groups) {
+				const names = tools.map(tool => tool.name);
+				const urls = getPluginIconCandidates(plugin, dark)
+					.flatMap(url => [plugin.icons?.previews?.[url], url]).filter(Boolean);
+				const group = { names, urls };
+				for (const name of names) byName.set(name, group);
+				const inline = urls[0];
+				if (warmCount < 12 && inline?.startsWith("data:image/") && warmBytes + inline.length <= 256 * 1024) {
+					warmCount++;
+					warmBytes += inline.length;
+					void publishIcon(group, true).catch(() => {});
+				}
+			}
+			labels.update(groups);
+		}
+
+		async function refresh(force = false) {
+			if (disposed || request || document.hidden) return;
+			if (!force && !document.querySelector(mcpRowSelector)) return;
+			const controller = new AbortController();
+			request = controller;
+			checkedAt = Date.now();
 			try {
-				const { groups } = await api("/tool-call-icons", { cache: "no-store" });
-				if (disposed) return;
-				const dark = isDarkMode(ctx, document.documentElement);
-				const signature = JSON.stringify([dark, groups]);
-				if (signature === current) return;
-				const revision = ++generation;
-				labels.update(groups);
-				style.textContent = chatCss;
-				current = signature;
-				// Publish each decoded icon independently. A pending image also
-				// leaves the metadata refresh free to pick up plugin changes.
-				for (const { plugin, tools } of groups) {
-					void resolveIcon(plugin, dark).then(url => {
-						if (!url || disposed || revision !== generation) return;
-						const rule = toolCallIconCss(tools.map(tool => tool.name), url);
-						if (rule && style.sheet) style.sheet.insertRule(rule, style.sheet.cssRules.length);
-					}).catch(() => {});
-				}
+				const { groups } = await api("/tool-call-icons", { cache: "no-store", signal: controller.signal });
+				if (request === controller) setGroups(groups, isDarkMode(ctx, document.documentElement));
 			} catch {
-				if (!disposed) {
-					generation++;
-					style.textContent = chatCss;
-					labels.update([]);
-				}
-				current = "";
+				if (request === controller) setGroups([], false);
 			} finally {
-				refreshing = false;
+				if (request === controller) request = undefined;
 			}
 		}
 
-		const timer = setInterval(refresh, 10000);
-		document.addEventListener("visibilitychange", refresh);
-		void refresh();
+		function invalidate() {
+			request?.abort();
+			request = undefined;
+			checkedAt = -Infinity;
+			void refresh(true);
+			setGroups([], false);
+		}
+
+		const onVisibility = () => void refresh(!current || Date.now() - checkedAt >= refreshInterval);
+		const timer = setInterval(refresh, refreshInterval);
+		document.addEventListener("visibilitychange", onVisibility);
+		document.addEventListener("uph-mcp-branding-changed", invalidate);
+		void refresh(true);
 		return () => {
 			disposed = true;
+			request?.abort();
+			request = undefined;
 			clearInterval(timer);
-			presence?.disconnect();
-			document.removeEventListener("visibilitychange", refresh);
+			document.removeEventListener("visibilitychange", onVisibility);
+			document.removeEventListener("uph-mcp-branding-changed", invalidate);
 			labels.dispose();
 			style.remove();
 		};
