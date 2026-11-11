@@ -57,8 +57,41 @@ export function readCordisPatch() {
   }
 }
 
+/**
+ * Refuse to rewrite a patch file that cannot be parsed.
+ *
+ * `readCordisPatch` is intentionally tolerant: it returns `[]` when the file
+ * does not parse, so read-only views keep working. Every mutation, however,
+ * serializes that array back over the whole file, so a tolerated parse
+ * failure would silently erase the user's patch. DSH's `!!js` tags are the
+ * common trigger: plain js-yaml cannot parse them, and the resulting `[]`
+ * drops entries such as `sandbox-policy` or `agent-default-model`.
+ *
+ * Fail closed instead: leave the file untouched and surface the error, so the
+ * user can edit the file by hand instead of losing it.
+ */
+function assertPatchReplaceable(file) {
+  if (!existsSync(file)) return
+  let parsed
+  try {
+    parsed = yaml.load(readFileSync(file, 'utf8'))
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `cordis.patch.yml 解析失败，已中止写入以免覆盖现有配置（${detail}）。` +
+      `该文件可能包含 DSH 的 !!js 自定义标签；请手动编辑 ${file}，或先移除无法解析的内容后重试。`
+    )
+  }
+  if (parsed != null && !Array.isArray(parsed)) {
+    throw new Error(
+      `cordis.patch.yml 顶层必须是数组，当前为 ${typeof parsed}；已中止写入以免覆盖现有配置。`
+    )
+  }
+}
+
 export function writeCordisPatch(patch) {
   const file = cordisPatchPath()
+  assertPatchReplaceable(file)
   mkdirSync(dirname(file), { recursive: true })
   const content = yaml.dump(patch, { indent: 2, lineWidth: -1 })
   const tmp = join(dirname(file), `.cordis.patch.${process.pid}.${Date.now().toString(36)}.tmp`)
