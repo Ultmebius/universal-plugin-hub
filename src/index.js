@@ -8,7 +8,7 @@
  */
 import { mountRoutes } from './routes.js'
 import { cancelAllOAuthVerifications } from './oauth.js'
-import { syncAllInstalledSkillsToDsh, installProfilePackages, findDshMainNodeModules, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
+import { syncAllInstalledSkillsToDsh, installProfilePackages, findDshMainNodeModules, toolCallIconGroups, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
 import { createSkillsManager } from './skills.js'
 import { restoreUploadedSkills } from './skill-uploads.js'
 import { createProfileApplicator } from './runtime.js'
@@ -76,7 +76,23 @@ export function apply(ctx) {
   ctx.inject(['webServer'], (hostCtx) => {
     hostCtx.effect(() => {
       const unmount = mountRoutes(hostCtx.webServer, skills, createProfileApplicator(ctx))
-      return () => { unmount(); cancelAllOAuthVerifications() }
+      const offBoot = hostCtx.on?.('webserver/index-inject', (table) => {
+        try {
+          const value = []
+          let bytes = 2
+          for (const group of toolCallIconGroups()) {
+            const size = Buffer.byteLength(JSON.stringify(group)) + 1
+            if (bytes + size > 128 * 1024) continue
+            value.push(group)
+            bytes += size
+            if (value.length === 12) break
+          }
+          if (value.length) table.push({ kind: 'global', name: '__UPH_TOOL_CALL_ICONS__', value })
+        } catch (error) {
+          ctx.logger?.warn?.(`[universal-plugin-hub] MCP tool icon boot data unavailable: ${error.message}`)
+        }
+      })
+      return () => { offBoot?.(); unmount(); cancelAllOAuthVerifications() }
     }, 'universal-plugin-hub: http routes')
   })
 }

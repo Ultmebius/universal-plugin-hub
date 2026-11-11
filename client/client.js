@@ -246,6 +246,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	const ICON_SHAPE_CSS = `
 :root {
 	--cpm-icon-corner-shape: squircle;
+	--cpm-card-icon-radius: 12px;
 	--cpm-connector-icon-radius: calc(100% / 3);
 }
 `;
@@ -713,7 +714,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	width: 380px;
 	max-width: calc(100vw - 32px);
 	padding: 14px 16px 12px;
-	border-radius: 8px;
 	background: rgba(255, 255, 255, 0.72);
 	backdrop-filter: blur(20px) saturate(180%);
 	-webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -922,7 +922,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-card-icon {
 	width: 38px;
 	height: 38px;
-	border-radius: 12px;
+	border-radius: var(--cpm-card-icon-radius);
+	corner-shape: var(--cpm-icon-corner-shape);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -3032,23 +3033,39 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-mcp-tool-pill-wrap {
 	position: relative;
 	display: inline-flex;
+	isolation: isolate;
+}
+.cpm-mcp-tool-pill-wrap::before {
+	content: "";
+	position: absolute;
+	inset: calc(100% + 1px) 3px -9px;
+	z-index: -1;
+	background: radial-gradient(ellipse at 50% 0, rgba(99, 102, 241, 0.32), transparent 72%);
+	opacity: 0;
+	transition: opacity 180ms ease-out;
+	pointer-events: none;
 }
 .cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover {
 	z-index: 50;
+}
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover:has(> .cpm-mcp-tool-pill:not(.is-disabled))::before {
+	opacity: 1;
 }
 .cpm-mcp-tool-pill {
 	display: inline-flex;
 	align-items: center;
 	gap: 6.5px;
 	padding: 5px 12px;
-	border-radius: 999px;
+	border-radius: var(--cpm-card-icon-radius);
+	corner-shape: var(--cpm-icon-corner-shape);
 	font-size: 12px;
 	font-family: var(--cpm-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
 	background: #ffffff;
 	border: 1px solid rgba(0, 0, 0, 0.12);
 	color: var(--cpm-text);
 	cursor: pointer;
-	transition: all 0.15s ease;
+	translate: 0 0;
+	transition: translate 190ms cubic-bezier(0.18, 0.78, 0.3, 1), background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 	user-select: none;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -3058,17 +3075,28 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: #f4f4f5;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
-.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill:hover {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover > .cpm-mcp-tool-pill:not(.is-disabled) {
 	background: var(--cpm-tab-hover);
 	border-color: #6366f1;
 	color: var(--cpm-text);
-	transform: translateY(-1px);
-	box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
+	box-shadow: none;
 }
-.cpm-dark:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill:hover {
+.cpm-dark:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover > .cpm-mcp-tool-pill:not(.is-disabled) {
 	background: rgba(99, 102, 241, 0.14);
 	border-color: #818cf8;
-	box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
+}
+@media (prefers-reduced-motion: no-preference) {
+	.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover > .cpm-mcp-tool-pill:not(.is-disabled) { translate: 0 -1px; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.cpm-mcp-tool-pill, .cpm-mcp-tool-pill-wrap::before { transition: none; }
+}
+.cpm-mcp-tool-pill:focus-visible {
+	outline: 2px solid #6366f1;
+	outline-offset: 2px;
+}
+.cpm-dark .cpm-mcp-tool-pill:focus-visible {
+	outline-color: #a5b4fc;
 }
 .cpm-mcp-tool-pill.is-disabled {
 	opacity: 0.45;
@@ -3130,7 +3158,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	backdrop-filter: blur(20px) saturate(180%);
 	-webkit-backdrop-filter: blur(20px) saturate(180%);
 	border: 1px solid rgba(0, 0, 0, 0.08);
-	border-radius: 8px;
 	box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.04);
 	padding: 12px 14px;
 	pointer-events: auto;
@@ -3139,8 +3166,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-family: inherit;
 	box-sizing: border-box;
 }
-.cpm-smart-hover { user-select: text; }
-.cpm-root:has(.cpm-smart-hover[data-pointer-inside="true"]) :is(.cpm-card, .cpm-mcp-tool-pill, .cpm-mcp-tool-dot) {
+.cpm-smart-hover {
+	border-radius: var(--dsw-radius-lg, 16px);
+	corner-shape: squircle;
+	user-select: text;
+}
+.cpm-root:has(.cpm-smart-hover[data-pointer-inside="true"]) :is(.cpm-card, .cpm-mcp-tool-dot) {
 	transition: none;
 }
 .cpm-smart-hover .cpm-preview-header,
@@ -3406,28 +3437,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 /* Skill detail is a reading surface; compact popover Markdown stays unchanged. */
 .cpm-skill-detail {
-	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-	font-size: 1rem;
-	padding: 16px 24px 56px;
+	padding-bottom: 56px;
 }
 .cpm-skill-detail > * { flex-shrink: 0; }
-.cpm-skill-detail > .cpm-back:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 2px; }
-.cpm-skill-header { container-type: inline-size; container-name: cpm-skill-header; padding: .75rem 0 1.5rem; border-bottom: 1px solid var(--cpm-border); }
-.cpm-skill-identity { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1rem; }
-.cpm-skill-identity > .cpm-toggle { grid-column: 2; grid-row: 1; justify-self: end; }
-/* The header reads as a title block, not a display headline: the icon and
-   title step down one size from the old 56px/32px lockup, and the body below
-   keeps the same optical ratio to it. Tracking tightens as the type grows, so
-   the smaller title takes slightly less negative tracking than a hero would. */
-.cpm-skill-identity > .cpm-card-icon { width: 2.75rem; height: 2.75rem; border-radius: .75rem; }
-.cpm-skill-title {
-	grid-column: 1 / -1; grid-row: 2; min-width: 0; margin: 0; color: var(--cpm-text);
-	font-size: clamp(1.25rem, 1.05rem + .7vw, 1.625rem); font-weight: 650;
-	line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; text-wrap: balance;
-}
-@container cpm-skill-header (min-width: 28rem) {
-	.cpm-skill-identity { grid-template-columns: auto minmax(0, 1fr) auto; }
-	.cpm-skill-title, .cpm-skill-identity > .cpm-toggle { grid-column: auto; grid-row: auto; }
+.cpm-skill-detail .cpm-back:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 2px; }
+.cpm-skill-header { padding: 0 0 1.5rem; border-bottom: 1px solid var(--cpm-border); }
+.cpm-skill-header .cpm-title { margin: 0; }
+.cpm-skill-header .cpm-toggle { flex-shrink: 0; }
+.cpm-skill-summary, .cpm-skill-location, .cpm-skill-content {
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .cpm-skill-summary {
 	margin: 1rem 0 0; color: var(--cpm-text-sub); font-size: .875rem;
@@ -4073,6 +4091,46 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 		const BRAND_ICON_KEYS = Object.keys(BRAND_ICONS).sort((a, b) => b.length - a.length).map((key) => ({ key, token: ` ${key.replace(/[^a-z0-9]+/g, " ")} ` }));
+	function createMarketplaceIconResolver(installedByName, sources) {
+		const markets = new Map(sources.map(source => [source.id, source.url]));
+		const resolved = new WeakMap();
+		const identity = (plugin) => {
+			const source = plugin.source;
+			const relative = typeof source === "string" && /^\.(?:\/|$)/.test(source);
+			if (!relative && !["url", "git-subdir"].includes(source?.source)) return null;
+			const dir = relative ? source : (source.path ?? "");
+			if (typeof dir !== "string" || /^\/|[:\\]/.test(dir) || dir.split("/").includes("..")) return null;
+			try {
+				const repo = new URL(relative ? markets.get(plugin.sourceId) : source.url);
+				if (!/^https?:$/.test(repo.protocol) || repo.username || repo.password || repo.search || repo.hash) return null;
+				const pathname = repo.pathname.replace(/\/+$/, "").replace(/\.git$/i, "");
+				if (!pathname) return null;
+				const repoPath = repo.hostname === "github.com" ? pathname.toLowerCase() : pathname;
+				return `${repo.origin}${repoPath}\n${dir.split("/").filter(part => part && part !== ".").join("/")}`;
+			} catch { return null; }
+		};
+		return plugin => {
+			const installed = installedByName.get(plugin.name);
+			if (!installed?.icons || installed.sourceId === plugin.sourceId) return plugin;
+			if (resolved.has(plugin)) return resolved.get(plugin);
+			const own = plugin.icons;
+			const missing = theme => !own?.[theme]?.length && !own?.portrait?.[theme]?.length && installed.icons[theme]?.length;
+			const light = missing("light"), dark = missing("dark");
+			const key = (light || dark) && identity(plugin);
+			const result = key && key === identity(installed) ? {
+				...plugin,
+				icons: {
+					...own,
+					light: light ? installed.icons.light : own?.light,
+					dark: dark ? installed.icons.dark : own?.dark,
+					previews: { ...installed.icons.previews, ...own?.previews },
+				},
+			} : plugin;
+			resolved.set(plugin, result);
+			return result;
+		};
+	}
+
 		function getPluginIconCandidates(plugin, isDark) {
 			const declared = plugin?.icons?.[isDark ? "dark" : "light"] || [];
 			const name = String(plugin?.name || "").toLowerCase();
@@ -4293,10 +4351,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		defer(persistLoadedAvatars);
 	}
 
-		function PluginIcon({ plugin, isDark, eager = false }) {
+		function PluginIcon({ plugin, isDark, eager = false, preferPreview = false }) {
 			const candidates = useMemo(() => getPluginIconCandidates(plugin, isDark), [plugin, isDark]);
+			const first = candidates[0];
+			const localPreview = preferPreview && first?.startsWith("/universal-plugin-hub/api/plugin-icon?") && plugin.icons?.previews?.[first];
+			if (localPreview) return h(PluginIconImage, {
+				key: `preview:${first}`, candidates: [localPreview, ...candidates], plugin, eager,
+				fallback: h(PluginIconFallback, { plugin, isDark, eager }),
+			});
 			const embedded = plugin?.icons?.previews?.[candidates[0]] || candidates.find((url) => url.startsWith("data:image/"));
-			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, decoding: "sync", style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark });
+			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, decoding: "sync", style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark, eager });
 			return candidates.length ? h(PluginIconImage, { key: candidates.join("|"), candidates, plugin, fallback, eager }) : fallback;
 		}
 
@@ -4307,13 +4371,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			// History controls scheduling, not visibility: a new <img> can still be
 			// fetching or decoding even if this URL loaded on an earlier mount.
 			const known = !!avatarUrl && isKnownAvatar(avatarUrl);
-			const imgLoaded = avatarUrl && (avatarUrl.startsWith("data:") || loaded === avatarUrl);
+			const inline = avatarUrl?.startsWith("data:");
+			const imgLoaded = inline || loaded === avatarUrl;
 			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
 				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, fallback),
 				// A plugin-local icon is a same-origin disk read, so deferring it to
 				// the viewport buys nothing and costs a visible placeholder on scroll.
 				// Only remote avatars are worth deferring — and never above the fold.
-				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: known ? "sync" : "async", loading: (eager || known || avatarUrl.indexOf("/api/plugin-icon") >= 0) ? "eager" : "lazy",
+				avatarUrl && h("img", { key: avatarUrl, src: avatarUrl, alt: plugin?.displayName || plugin?.name || "", width: 38, height: 38, decoding: (inline || known) ? "sync" : "async", loading: (inline || eager || known || avatarUrl.indexOf("/api/plugin-icon") >= 0) ? "eager" : "lazy",
 					ref: (image) => {
 						// A memory-cached image can be ready at commit, before onLoad.
 						// Confirm this element before paint to avoid a fallback flash.
@@ -4335,7 +4400,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			);
 		}
 
-		function PluginIconFallback({ plugin, isDark }) {
+	function PluginIconFallback({ plugin, isDark, eager = false }) {
 		const name = (plugin?.name || "").toLowerCase();
 		const author = (typeof plugin?.author === "string" ? plugin.author : (plugin?.author && plugin.author.name) || "").trim().toLowerCase();
 		const badge = getPluginBadge(plugin || {});
@@ -4380,12 +4445,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,.04)" : "inset 0 1px 0 #fff, 0 1px 2px rgba(27,31,49,.06)",
 			},
 		},
-			h("img", { src: badge.src, alt: "", width: 34, height: 34, loading: "lazy", decoding: "async", style: { objectFit: "contain" } }),
+			h("img", { src: badge.src, alt: "", width: 34, height: 34, loading: eager ? "eager" : "lazy", decoding: eager ? "sync" : "async", style: { objectFit: "contain" } }),
 		);
 	}
 
 	function PluginCard({
 		plugin,
+		iconPlugin = plugin,
 		installed,
 			eagerIcon = false,
 		isDark,
@@ -4402,7 +4468,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			onMouseLeave,
 			onClick,
 		},
-				h(PluginIcon, { plugin, isDark, eager: eagerIcon }),
+			h(PluginIcon, { plugin: iconPlugin, isDark, eager: eagerIcon, preferPreview: true }),
 			h(action ? "button" : "div", { className: "cpm-card-body" + (action ? " cpm-card-open" : ""), type: action ? "button" : undefined,
 				onClick: action ? (e) => { e.stopPropagation(); onClick?.(e); } : undefined },
 				h("div", { className: "cpm-card-name" },
@@ -4503,10 +4569,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			try { await onRemove(skill); } finally { setRemoving(false); }
 		};
 			return h("div", { ref: detailRef, onScroll: updateMask, className: "cpm-detail cpm-skill-detail" + maskClass },
-				h("button", { className: "cpm-back", onClick: onBack }, h(IconChevronLeft), "Back"),
+				h("div", { className: "cpm-manage-head" },
+					h("button", { type: "button", className: "cpm-back", style: { padding: 0 }, onClick: onBack }, h(IconChevronLeft), "Back")),
 				h("header", { className: "cpm-skill-header" },
-					h("div", { className: "cpm-skill-identity" }, h(PluginIcon, { plugin: skill, isDark }),
-						h("h1", { className: "cpm-skill-title" }, skill.displayName || skill.name),
+					h("div", { className: "cpm-title-row" },
+						h("div", { className: "cpm-title-group" }, h(PluginIcon, { plugin: skill, isDark, eager: true }),
+							h("h1", { className: "cpm-title" }, skill.displayName || skill.name)),
 						h(SkillSwitch, { skill, busy, onToggle })),
 					skill.description && h("p", { className: "cpm-skill-summary" }, skill.description),
 					uploaded && onRemove && h("button", {
@@ -5088,6 +5156,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const setRows = useCallback((r) => {
 			setRowsRaw((prev) => {
 				const next = typeof r === "function" ? r(prev) : r;
+				if (next === prev) return prev;
 				SESSION_STORE.rows = next || {};
 				try {
 					localStorage.setItem(STORAGE_KEY_ROWS, JSON.stringify(SESSION_STORE.rows));
@@ -5791,7 +5860,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Floating Plugin Preview Popover ──────────────────────────────
-	function PluginPreviewPopover({ preview, isDark, session }) {
+	function PluginPreviewPopover({ preview, iconPlugin, isDark, session }) {
 		if (!preview || !preview.plugin || !preview.rect) return null;
 		const p = preview.plugin;
 
@@ -5804,7 +5873,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			className: "cpm-preview-popover",
 		},
 			h("div", { className: "cpm-preview-header" },
-				h(PluginIcon, { plugin: p, isDark }),
+				h(PluginIcon, { plugin: iconPlugin || p, isDark, preferPreview: true }),
 				h("div", { className: "cpm-preview-header-info" },
 					h("div", { className: "cpm-preview-title" }, p.displayName || p.name),
 					h("div", { className: "cpm-preview-sub" },
@@ -5900,6 +5969,47 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
+	function useSkillsCatalog(available, setRows) {
+		const [failed, setFailed] = useState(false);
+		useEffect(() => {
+			if (!available) return;
+			let active = true;
+			const previous = SESSION_STORE.rows?.["skills-local"];
+			setFailed(false);
+			api("/skills").then(body => {
+				if (!active) return;
+				const skills = body.skills || [];
+				setRows(prev => {
+					if (prev?.["skills-local"] !== previous || JSON.stringify(previous) === JSON.stringify(skills)) return prev;
+					return { ...prev, "skills-local": skills };
+				});
+			}).catch(() => {
+				if (active) setFailed(true);
+			});
+			return () => { active = false; };
+		}, [available, setRows]);
+		return failed;
+	}
+
+	function useWarmSkillIcons(skills, isDark) {
+		const warmed = useRef(new Map());
+		useEffect(() => {
+			if (!skills?.length || typeof Image !== "function") return;
+			for (const skill of skills.slice(0, 12)) {
+				const first = getPluginIconCandidates(skill, isDark)[0];
+				const icon = first ? (first.startsWith("/universal-plugin-hub/api/skills/icon?") ? first : null) : getPluginBadge(skill).src;
+				if (!icon || warmed.current.has(icon)) continue;
+				if (warmed.current.size >= 24) warmed.current.delete(warmed.current.keys().next().value);
+				const image = new Image();
+				image.src = icon;
+				warmed.current.set(icon, image);
+				image.decode?.().catch(() => {
+					if (warmed.current.get(icon) === image) warmed.current.delete(icon);
+				});
+			}
+		}, [skills, isDark]);
+	}
+
 	function BrowseView({
 		view,
 		setView,
@@ -5928,6 +6038,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [isRefreshing, setIsRefreshing] = useState(false);
 		const [skillBusy, setSkillBusy] = useState(null);
 		const [loadingSourceId, setLoadingSourceId] = useState(null);
+		const skillsLoadFailed = useSkillsCatalog(state.sources.some(source => source.id === "skills-local"), setRows);
+		useWarmSkillIcons(rows?.["skills-local"], isDark);
 		const [addDialog, setAddDialog] = useState(false);
 		const [showAddMenu, setShowAddMenu] = useState(false);
 		const localSource = state.sources.find((s) => s.id === "local");
@@ -6003,7 +6115,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const loadGlobalTools = useCallback(async (owner, connectorName, forceFresh = false) => {
 			const key = `${owner}::${connectorName}`;
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
-				setGlobalToolData((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), loading: true, error: null } }));
+			setGlobalToolData((prev) => ({
+				...prev,
+				[key]: { ...(cached || prev[key]), loading: forceFresh || !Array.isArray(cached?.tools), error: null },
+			}));
 			try {
 				const url = owner === "user-mcp"
 					? `/mcps/${encodeURIComponent(connectorName)}/tools`
@@ -6016,7 +6131,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					...prev,
 					[key]: {
 						loading: false,
-						error: res.ok ? null : (res.message || "获取能力列表失败"),
+							error: res.ok && !res.stale ? null : (res.message || "获取能力列表失败"),
 							tools: res.ok ? tools : (prev[key]?.tools || tools),
 						disabledTools,
 					},
@@ -6027,7 +6142,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, []);
 
 			useAutoMcpTools([
-				...pluginMcpRows.map(row => ({ owner: row.owner, name: row.name, connected: row.connected, revision: JSON.stringify([row.record.installedAt, row.conn]) })),
+				...pluginMcpRows.map(row => ({ owner: row.owner, name: row.name, connected: row.conn.enabled === true, revision: JSON.stringify([row.record.installedAt, row.conn]) })),
 				...mcps.map(row => ({ owner: "user-mcp", name: row.name, connected: row.enabled === true, revision: JSON.stringify(row) })),
 			], loadGlobalTools);
 
@@ -6068,20 +6183,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [globalToolData, loadGlobalTools, showToast]);
 
+		const [pendingMcpToggles, setPendingMcpToggles] = useState({});
 		const renderMcpServerRow = (opts) => {
 			const { owner, name, transport, connected, canEdit, record, first, conn, plugin: ownerPlugin } = opts;
 			const key = `${owner}::${name}`;
+			const enabled = canEdit ? connected : conn?.enabled === true;
+			const toggling = pendingMcpToggles[key] === true;
 			const isExpanded = !!globalExpanded[key];
 			const info = globalToolData[key];
 			const toolsList = info?.tools || [];
 			const disabledTools = info?.disabledTools || [];
 
 			const onToggleServer = async () => {
+				if (toggling) return;
+				setPendingMcpToggles(prev => ({ ...prev, [key]: true }));
 				try {
 					const url = canEdit
 						? "/mcps/toggle"
 						: `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(name)}/toggle`;
-					const payload = canEdit ? { name, enabled: !connected } : { enabled: !connected };
+					const payload = canEdit ? { name, enabled: !enabled } : { enabled: !enabled };
 					const res = await api(url, { method: "POST", body: JSON.stringify(payload) });
 					if (res && res.ok === false) {
 						showToast("操作失败", res.error || "请稍后重试", { restart: false });
@@ -6091,6 +6211,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					else await refreshState();
 				} catch (err) {
 					showToast("操作失败", cleanError(err), { restart: false });
+				} finally {
+					setPendingMcpToggles(prev => ({ ...prev, [key]: false }));
 				}
 			};
 
@@ -6144,7 +6266,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						// inline-flex so the pill's text baseline is the one that aligns,
 						// instead of the padded box being pushed around as a block.
 						h("span", { style: { display: "inline-flex", alignItems: "center", fontSize: 11, lineHeight: "16px", padding: "2px 8px", borderRadius: 6, background: "var(--cpm-pill-bg)", color: "var(--cpm-text)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", flexShrink: 0 } }, transport === "stdio" ? "stdio" : "http"),
-							connected && h(McpDiscoveryStatus, { info, expanded: isExpanded,
+							enabled && h(McpDiscoveryStatus, { info, expanded: isExpanded,
 								onExpand: () => toggleGlobalExpand(owner, name), onRetry: () => loadGlobalTools(owner, name, true) }),
 					),
 					h("button", {
@@ -6156,12 +6278,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}, h(IconSettings, { size: 15 })),
 					h("button", {
 						type: "button",
-						className: "cpm-toggle" + (connected ? " on" : ""),
-						"aria-label": connected ? "停用" : "启用",
+						className: "cpm-toggle" + (enabled ? " on" : ""),
+						"aria-label": enabled ? "停用" : "启用",
+						"aria-busy": toggling,
+						disabled: toggling,
 						onClick: onToggleServer,
 					}),
 				),
-					isExpanded && connected && info && !info.loading && !info.error && h(McpToolsPanel, {
+						isExpanded && enabled && info && !info.loading && !info.error && h(McpToolsPanel, {
 					loading: info?.loading,
 					error: info?.error,
 					tools: toolsList,
@@ -6177,6 +6301,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [confirmRemoveSource, setConfirmRemoveSource] = useState(null);
 		const [installFor, setInstallFor] = useState(null);
 		const [hoveredPreview, closePluginHover, pluginHover] = useHoverPreview(240);
+		const installedByName = useMemo(() => new Map(state.plugins.map(plugin => [plugin.name, plugin])), [state.plugins]);
+		const resolveMarketplaceIcon = useMemo(() => createMarketplaceIconResolver(installedByName, state.sources), [installedByName, state.sources]);
 		const gridRef = useRef(null);
 		const detailContainerRef = useRef(null);
 		const tabsRef = useRef(null);
@@ -6244,10 +6370,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const gridRect = gridRef.current.getBoundingClientRect();
 				if (rect.bottom >= gridRect.top + 8 && rect.top <= gridRect.bottom - 8) {
 					pluginHover.enter({ plugin, rect, gridRect }, el, pendingHoverRef.current.point);
-					prefetchDetail(plugin.sourceId || activeSourceId, plugin.name);
+					if (!installedByName.has(plugin.name)) prefetchDetail(plugin.sourceId || activeSourceId, plugin.name);
 				}
 			}
-		}, [activeSourceId, prefetchDetail, pluginHover]);
+		}, [activeSourceId, installedByName, prefetchDetail, pluginHover]);
 
 		const handleCardMouseEnter = useCallback((p, el, point) => {
 			pendingHoverRef.current = { plugin: p, el, point };
@@ -6838,7 +6964,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			// Normal click action
 			if (!isLongPressTriggeredRef.current && s) {
 				const isBrowseView = !view || view.type === "browse";
-				const sInstalledCount = (state.plugins || []).filter((p) => (p.sourceId || "").toLowerCase() === s.id.toLowerCase() || (p.id && p.id.startsWith(s.id + "/"))).length;
+				if (mcpsOpen) setMcpsOpen(false);
+				const listedNames = new Set((SESSION_STORE.rows?.[s.id] || []).map(p => p.name));
+				const hasInstalled = (state.plugins || []).some(p => (p.sourceId || "").toLowerCase() === s.id.toLowerCase() || p.id?.startsWith(s.id + "/") || listedNames.has(p.name));
 				if (s.id !== activeSourceId) {
 					if (gridRef.current && isBrowseView && !mcpsOpen) {
 						if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
@@ -6847,7 +6975,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					if (!SESSION_STORE.sourceFilters) SESSION_STORE.sourceFilters = {};
 
 					let targetFilter = filter;
-					if (sInstalledCount === 0) {
+					if (!hasInstalled) {
 						if (filter === "installed") {
 							SESSION_STORE.preferredFilter = "installed";
 						}
@@ -6864,7 +6992,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					scrollContentToTop();
 				}
 			}
-		}, [state.sources, state.plugins, activeSourceId, view, filter, mcpsOpen, setActiveSourceId, scrollActiveTabIntoView, scrollContentToTop, setState, showToast, stopAutoScroll, updateTabsMask, updateDragPosition]);
+		}, [state.sources, state.plugins, activeSourceId, view, filter, mcpsOpen, setMcpsOpen, setActiveSourceId, scrollActiveTabIntoView, scrollContentToTop, setState, showToast, stopAutoScroll, updateTabsMask, updateDragPosition]);
 
 		useEffect(() => {
 			const handleWindowBlurOrCancel = () => {
@@ -7087,36 +7215,33 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [showFilter, showSort, showAddMenu]);
 
-		const loadMarket = useCallback(async (sourceId, force = false) => {
+		const loadMarket = useCallback(async (sourceId) => {
 			if (!sourceId) return;
-			if (!force && rows && rows[sourceId]) {
-				return;
-			}
-			setLoadingSourceId(sourceId);
+			const previous = SESSION_STORE.rows?.[sourceId];
+			if (!previous) setLoadingSourceId(sourceId);
 			try {
-				const body = await api(sourceId === "skills-local" ? "/skills" : "/market?sourceId=" + encodeURIComponent(sourceId));
-				setRows((prev) => ({ ...(prev || {}), [sourceId]: sourceId === "skills-local" ? (body.skills || []) : (body.plugins || []) }));
+				const body = await api("/market?sourceId=" + encodeURIComponent(sourceId));
+				const plugins = body.plugins || [];
+				setRows(prev => prev?.[sourceId] !== previous || JSON.stringify(previous) === JSON.stringify(plugins)
+					? prev : { ...prev, [sourceId]: plugins });
 			} catch (e) {
-				showToast("加载失败", e.message, { restart: false });
-				setRows((prev) => ({ ...(prev || {}), [sourceId]: [] }));
+				SESSION_STORE.checkedCatalogs?.delete(sourceId);
+				if (!previous) showToast("加载失败", e.message, { restart: false });
 			} finally {
-				setLoadingSourceId(null);
+				setLoadingSourceId(current => current === sourceId ? null : current);
 			}
-		}, [showToast, setRows, rows]);
+		}, [showToast, setRows]);
 
 		useEffect(() => {
-			if (!rows || !rows[activeSourceId]) {
-				loadMarket(activeSourceId);
-			}
-		}, [activeSourceId, loadMarket, rows]);
-		useEffect(() => {
-			if (activeSourceId !== "skills-local") return;
-			let active = true;
-			api("/skills").then(body => { if (active) setRows(prev => ({ ...(prev || {}), "skills-local": body.skills || [] })); }).catch(e => { if (active) showToast("加载 Skills 失败", e.message, { restart: false }); });
-			return () => { active = false; };
-		}, [activeSourceId, setRows, showToast]);
+			if (!activeSourceId || activeSourceId === "skills-local") return;
+			const checked = SESSION_STORE.checkedCatalogs ||= new Set();
+			if (checked.has(activeSourceId)) return;
+			checked.add(activeSourceId);
+			void loadMarket(activeSourceId);
+		}, [activeSourceId, loadMarket]);
 
 		const currentSourceInstalledNames = useMemo(() => new Set((state.plugins || []).filter((p) => p.sourceId === activeSourceId).map((p) => p.name)), [state.plugins, activeSourceId]);
+		const crossSourceInstalledNames = useMemo(() => new Set((state.plugins || []).filter(p => p.sourceId !== activeSourceId).map(p => p.name)), [state.plugins, activeSourceId]);
 		// Each source retains its browsing order for this Hub session, including
 		// tab navigation and panel remounts. Filtering or sorting takes a new
 		// snapshot — derived here, committed below, so a render that React
@@ -7297,15 +7422,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			} else if (!query.trim()) {
 				// Use the installed set captured when this browsing order was chosen.
 				list = [...list].sort((a, b) => {
-					const instA = sortInstalledNames.has(a.name) ? 1 : 0;
-					const instB = sortInstalledNames.has(b.name) ? 1 : 0;
+					const instA = sortInstalledNames.has(a.name) || crossSourceInstalledNames.has(a.name) ? 1 : 0;
+					const instB = sortInstalledNames.has(b.name) || crossSourceInstalledNames.has(b.name) ? 1 : 0;
 					if (instB !== instA) return instB - instA;
 					return (a.displayName || a.name).localeCompare(b.displayName || b.name);
 				});
 			}
 
 			return list;
-		}, [currentSourcePlugins, query, sortBy, sortInstalledNames]);
+		}, [currentSourcePlugins, query, sortBy, sortInstalledNames, crossSourceInstalledNames]);
 
 		const refresh = async () => {
 			setIsRefreshing(true);
@@ -7681,7 +7806,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				activeSourceId === "skills-local"
 					? [
 						visible.length === 0 && h("div", { key: "empty", className: "cpm-empty", style: { gridColumn: "1 / -1", textAlign: "center", padding: 30 } },
-							loadingSourceId === activeSourceId ? "正在加载 Skills…" : "没有找到匹配的 Skills"),
+							!rows?.["skills-local"] ? (skillsLoadFailed ? "加载 Skills 失败" : "正在加载 Skills…") : "没有找到匹配的 Skills"),
 						// A skill's identity is its file path, a plugin's its name; the
 						// `skill:` prefix keeps the two from ever colliding while they
 						// share one grid.
@@ -7696,10 +7821,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							loadingSourceId === activeSourceId ? "正在加载插件…" : (query.trim() ? "没有找到匹配的插件" : "该插件源暂无插件")
 						),
 						visible.map((p, index) => {
-							const installed = currentSourceInstalledNames.has(p.name);
+							const installed = installedNames.has(p.name);
 							return h(PluginCard, {
 								key: "plugin:" + p.id,
 								plugin: p,
+									iconPlugin: resolveMarketplaceIcon(p),
 								eagerIcon: index < 12,
 								installed,
 								isDark,
@@ -7763,9 +7889,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			hoveredPreview && isBrowse && h(PluginPreviewPopover, {
 				preview: hoveredPreview,
+				iconPlugin: resolveMarketplaceIcon(hoveredPreview.plugin),
 				session: pluginHover,
 				isDark,
-				installed: currentSourceInstalledNames.has(hoveredPreview.plugin.name),
+				installed: installedNames.has(hoveredPreview.plugin.name),
 			}),
 
 			installFor && h(InstallDialog, {
@@ -8192,7 +8319,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
+		return h("div", { className: "cpm-dialog" },
 			h("div", {
 				role: "dialog",
 				"aria-modal": "true",
@@ -8579,6 +8706,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return {
 				name: form.name.trim(),
 				transport: form.transport,
+				enable: true,
 				url: form.transport === "http" ? form.url : null,
 				command: form.transport === "stdio" ? (form.command.trim() || null) : null,
 				headers,
@@ -8609,7 +8737,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				// A finished sign-in is the whole point of the OAuth mode, so
 				// register the connector now. Otherwise the dialog reopens on
 				// `None` and the user has to save a second time.
-				if (res.ok) await save(verifiedPayloadRef.current);
+				const verified = verifiedPayloadRef.current;
+				if (res.ok && verified?.transport === "http" && verified.oauth !== "none") await save(verified);
 			},
 			onError: (err) => showToast("验证失败", cleanMcpError(err), { restart: false }),
 		});
@@ -8651,7 +8780,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const res = await api(saveUrl, { method: "POST", body: JSON.stringify(data) });
 				if (res && res.ok === false) {
 					showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
-					setSaving(false);
 					return;
 				}
 				if (initial && data.previousName) {
@@ -8662,8 +8790,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				await onSaved();
 			} catch (err) {
 				showToast("保存失败", cleanMcpError(err), { restart: false });
+			} finally {
 				setSaving(false);
-				throw err;
 			}
 		};
 
@@ -8685,9 +8813,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
+		return h("div", { className: "cpm-dialog" },
 			h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
-				h("button", { className: "cpm-mcp-close-top", onClick: onCancel }, h(IconClose, { size: 14 })),
+				h("button", { type: "button", className: "cpm-mcp-close-top", "aria-label": "关闭", onClick: onCancel }, h(IconClose, { size: 14 })),
 				h("div", { className: "cpm-mcp-body" },
 					h("div", { className: "cpm-mcp-row" },
 						h("div", { className: "cpm-mcp-label" }, "Name"),
@@ -9383,12 +9511,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				list.map((t) => {
 					const tName = typeof t === "string" ? t : t.name;
 					const isDisabled = disabled.includes(tName);
-					return h("div", { key: tName, className: "cpm-mcp-tool-pill-wrap" },
+						return h("div", { key: tName, className: "cpm-mcp-tool-pill-wrap",
+							onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget.firstElementChild, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
+							onMouseLeave: (e) => onHoverEnd(e.currentTarget.firstElementChild),
+						},
 						h("button", {
 							type: "button",
 							className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
-								onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
-							onMouseLeave: (e) => onHoverEnd(e.currentTarget),
 							onFocus: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget, null, true),
 							onBlur: (e) => onHoverEnd(e.currentTarget),
 							onClick: (e) => { e.stopPropagation(); onToggleTool(tName); },
@@ -9529,7 +9658,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
 			setConnectorToolsData((prev) => ({
 				...prev,
-				[connectorName]: { ...(prev[connectorName] || {}), loading: true, error: null },
+				[connectorName]: { ...(cached || prev[connectorName]), loading: forceFresh || !Array.isArray(cached?.tools), error: null },
 			}));
 
 			try {
@@ -9545,7 +9674,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					...prev,
 					[connectorName]: {
 						loading: false,
-						error: res.ok ? null : (res.message || "获取能力列表失败"),
+						error: res.ok && !res.stale ? null : (res.message || "获取能力列表失败"),
 						tools: res.ok ? tools : (prev[connectorName]?.tools || tools),
 						disabledTools,
 					},
@@ -9563,22 +9692,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const value = (item.value || "").trim();
 				if (value) headers[(item.key || "").trim() || "Authorization"] = value;
 			}
-			return {
-				transport: authDialog.transport, url: authDialog.url, headers,
-				oauth: authDialog.oauth, oauthClientId: authDialog.oauthClientId,
-				oauthClientSecret: authDialog.oauthClientSecret,
-				oauthCallbackPort: authDialog.oauthCallbackPort, oauthScope: authDialog.oauthScope,
-			};
-		};
-		// Persist the dialog's configuration. Signing in is only half of an OAuth
-		// connector: the tokens live in the credential store, but the connector
-		// itself is not registered until this writes the bridge entry. Without it
-		// the dialog reopened on whatever was saved before — usually `None`.
-		const persistAuthDialog = async (payload) => {
-			const data = payload || buildAuthPayload();
-			const headers = { ...(data.headers || {}) };
 			let parsedArgs = [];
-			if (data.transport === "stdio" && authDialog.args.trim()) {
+			if (authDialog.transport === "stdio" && authDialog.args.trim()) {
 				try {
 					const parsed = JSON.parse(authDialog.args);
 					parsedArgs = Array.isArray(parsed) ? parsed : [String(parsed)];
@@ -9587,27 +9702,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 			}
 			const envMap = {};
-			if (data.transport === "stdio") {
+			if (authDialog.transport === "stdio") {
 				for (const eItem of authDialog.envList) {
 					if (eItem.key.trim()) envMap[eItem.key.trim()] = eItem.value;
 				}
 			}
-			return api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog.connectorName)}/auth`, {
-				method: "POST",
-				body: JSON.stringify({
-					transport: data.transport,
-					url: data.url,
-					headers,
-					oauth: data.oauth,
-					oauthClientId: data.oauthClientId,
-					oauthClientSecret: data.oauthClientSecret,
-					oauthCallbackPort: data.oauthCallbackPort,
-					oauthScope: data.oauthScope,
-					args: parsedArgs,
-					env: envMap,
-				}),
-			});
+			return {
+				transport: authDialog.transport, url: authDialog.url, headers,
+				command: authDialog.transport === "stdio" ? authDialog.command : undefined,
+				oauth: authDialog.oauth, oauthClientId: authDialog.oauthClientId,
+				oauthClientSecret: authDialog.oauthClientSecret,
+				oauthCallbackPort: authDialog.oauthCallbackPort, oauthScope: authDialog.oauthScope,
+				args: parsedArgs, env: envMap,
+			};
 		};
+		const persistAuthDialog = (payload = buildAuthPayload()) =>
+			api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog.connectorName)}/auth`, {
+				method: "POST",
+				body: JSON.stringify(payload),
+			});
 		const setAuthError = (message) => setAuthDialog((prev) => prev ? {
 			...prev, testing: false, status: "error", statusMessage: message,
 			lastResult: { ok: false, message, status: 500, server: prev.connectorName, transport: prev.transport, endpoint: prev.url, errorDetails: message },
@@ -9622,18 +9735,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				// button is what made a completed sign-in reopen as `None`.
 				// A failure here is a save problem and must not read as a failed
 				// verification, so it stays out of the polling error path.
-				if (res.ok) {
+				const verified = verifiedPayloadRef.current;
+				if (res.ok && verified?.transport === "http" && verified.oauth !== "none") {
 					try {
-						const saved = await persistAuthDialog(verifiedPayloadRef.current);
-						if (saved && saved.ok === false) {
+						const saved = await persistAuthDialog(verified);
+						if (saved?.ok === false) {
 							showToast("保存失败", saved.error || "配置校验未通过，请检查填写内容", { restart: false });
+							return;
 						}
+						await refreshState();
+						if (res.server) await loadConnectorTools(res.server);
 					} catch (error) {
 						showToast("保存失败", cleanMcpError(error), { restart: false });
 					}
 				}
-				await refreshState();
-				if (res.ok && res.server) await loadConnectorTools(res.server, true);
 			},
 			onCancel: () => setAuthDialog((prev) => prev ? { ...prev, testing: false, status: "untested", statusMessage: "" } : null),
 			onError: (error) => setAuthError(error.message),
@@ -9656,7 +9771,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const autoLoadConnectorTools = useCallback((_owner, name) => loadConnectorTools(name), [loadConnectorTools]);
 		useAutoMcpTools((record.connectors || []).map(connector => ({
-			owner: record.name, name: connector.name, connected: connector.connected === true,
+			owner: record.name, name: connector.name, connected: connector.enabled === true,
 			revision: JSON.stringify([record.installedAt, connector]),
 		})), autoLoadConnectorTools);
 
@@ -9881,6 +9996,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					method: "POST",
 					body: JSON.stringify({ enabled: !currentConnected }),
 				});
+					if (result?.ok === false) {
+						showToast("操作失败", result.error || "请检查 MCP 配置后重试", { restart: false });
+						return;
+					}
 				await refreshState();
 				void showApplicationToast(showToast, result, !currentConnected ? "已连接 Connector" : "已断开 Connector", `MCP 服务 ${connectorName} 配置已实时更新。`);
 			} catch (e) {
@@ -10007,6 +10126,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				transport: initialTransport,
 				allowedTransports,
 				url: (connObj && connObj.url) || (connectorName === "notion" ? "https://mcp.notion.com/mcp" : (connectorName === "github" ? "https://api.githubcopilot.com/mcp/" : "")),
+				command: connObj?.command,
 				headersList: headerEntries,
 				args: rawArgs,
 				envList: envEntries,
@@ -10366,7 +10486,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										onClick: isPendingVerify ? () => openAuthDialog(cName, c) : undefined,
 									}, isConnected ? "● 已连接" : (isPendingVerify ? "○ 待验证" : "○ 未连接")),
 
-									isConnected && isAuthenticated && h(McpDiscoveryStatus, {
+									isEnabled && h(McpDiscoveryStatus, {
 										info: toolsInfo, expanded: isExpanded,
 										onExpand: () => toggleExpandConnector(cName), onRetry: () => loadConnectorTools(cName, true),
 									}),
@@ -10386,7 +10506,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									"aria-label": isEnabled ? "停用" : "启用",
 									disabled: togglingConn === cName || busy,
 									onClick: () => {
-										if (!isEnabled && ((isRemote && !isConnected) || (needsAuth && !isAuthenticated))) {
+										if (!isEnabled && !c.configured && ((isRemote && !isConnected) || (needsAuth && !isAuthenticated))) {
 											openAuthDialog(cName, c);
 										} else {
 											toggleConn(cName, isEnabled);
@@ -10397,7 +10517,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						),
 
 						// Figure 1 & Figure 3: Expandable Capabilities Panel
-						isConnected && isAuthenticated && isExpanded && toolsInfo && !toolsInfo.loading && !toolsInfo.error && h(McpToolsPanel, {
+						isEnabled && isExpanded && toolsInfo && !toolsInfo.loading && !toolsInfo.error && h(McpToolsPanel, {
 							loading: toolsInfo?.loading,
 							error: toolsInfo?.error,
 							tools: toolsList,
@@ -10413,10 +10533,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 			),
 
-			authDialog && h("div", { className: "cpm-dialog", ...backdropDismissProps(closeAuthDialog) },
+			authDialog && h("div", { className: "cpm-dialog" },
 				h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
 					h("button", {
+						type: "button",
 						className: "cpm-mcp-close-top",
+						"aria-label": "关闭",
 						onClick: closeAuthDialog,
 					}, h(IconClose, { size: 14 })),
 
@@ -10723,9 +10845,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								onClick: runAuthTest,
 							}, authDialog.testing ? (authDialog.oauth !== "none" ? "等待授权…" : "测试中…") : (
 								authDialog.transport === "stdio" ? "测试连接" : (
-									(authDialog.oauth && authDialog.oauth !== "none") ? "登录并连接" : (
-										(authDialog.headersList && authDialog.headersList.some(h => (h.value || '').trim())) ? "验证并连接" : "测试连接"
-									)
+										(authDialog.oauth && authDialog.oauth !== "none") ? "登录并连接" : "测试连接"
 								)
 							)),
 
@@ -10851,7 +10971,28 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	// DSH's keyed slot adds a display:contents anchor around the fallback row.
 	const TOOL_CALL_ROW = ':is([data-chat-call-id], [data-chat-call-id] > [data-slot="tool.call.toolview"]) > [data-variant="others"]';
 
-	function toolCallIconCss(names, url) {
+	function iconNeedsClipping(image, context) {
+		if (!context || !image.naturalWidth || !image.naturalHeight) return true;
+		const size = 16;
+		const scale = size / Math.max(image.naturalWidth, image.naturalHeight);
+		const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+		try {
+			context.clearRect(0, 0, size, size);
+			context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+			const { data } = context.getImageData(0, 0, size, size);
+			const opaque = (x, y) => data[(y * size + x) * 4 + 3] >= 235;
+			// A filled tile reaches both sides of each edge, even if the source
+			// has transparent corners. A circle or a loose mark does not.
+			return [2, 13].every(point => opaque(point, 1) && opaque(point, 14)
+				&& opaque(1, point) && opaque(14, point));
+		} catch {
+			// Keep the existing tile shape when pixels cannot be read.
+			if (context.canvas) context.canvas.width = size;
+			return true;
+		}
+	}
+
+	function toolCallIconCss(names, url, clip = false) {
 		const selectors = [];
 		for (const name of names) {
 			if (!/^mcp__[A-Za-z0-9_-]{1,59}$/.test(name)) continue;
@@ -10862,14 +11003,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			selectors.push(`${leading} > svg:only-child`, `${leading} > span:first-child > svg:only-child`);
 		}
 		if (!selectors.length) return "";
+		const corners = clip ? `
+					border-radius: var(--cpm-connector-icon-radius);
+					@supports (corner-shape: squircle) {
+						border-radius: 50%;
+						corner-shape: var(--cpm-icon-corner-shape);
+					}` : "";
 		return `@media (forced-colors: none) {
 			${selectors.join(",\n")} {
-				background: url(${JSON.stringify(url)}) center / contain no-repeat;
-				border-radius: var(--cpm-connector-icon-radius);
-				@supports (corner-shape: squircle) {
-					border-radius: 50%;
-					corner-shape: var(--cpm-icon-corner-shape);
-				}
+					background: url(${JSON.stringify(url)}) center / contain no-repeat;${corners}
 			}
 			${selectors.map(selector => `${selector} > *`).join(",\n")} { opacity: 0; }
 		}`;
@@ -11023,15 +11165,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		let current = "";
 		let generation = 0;
 		const refreshInterval = 10000;
+		let iconContext;
+
+		function getIconContext() {
+			if (iconContext !== undefined) return iconContext;
+			const canvas = document.createElement("canvas");
+			canvas.width = canvas.height = 16;
+			return iconContext = canvas.getContext?.("2d", { willReadFrequently: true }) ?? null;
+		}
 
 		function decodeIcon(url, warm) {
 			if (!images.has(url)) {
 				const image = new Image();
 				if (warm) image.fetchPriority = "low";
 				image.src = url;
-				const decoded = image.decode().then(() => true, () => {
+				const decoded = image.decode().then(() => ({ clip: iconNeedsClipping(image, getIconContext()) }), () => {
 					if (images.get(url) === decoded) images.delete(url);
-					return false;
+					return null;
 				});
 				if (images.size >= 128) images.delete(images.keys().next().value);
 				images.set(url, decoded);
@@ -11044,9 +11194,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const candidates = warm ? group.urls.slice(0, 1) : group.urls;
 			for (const url of candidates) {
 				if (disposed || revision !== generation || group.published) return;
-				if (!await decodeIcon(url, warm)) continue;
+				const icon = await decodeIcon(url, warm);
+				if (!icon) continue;
 				if (disposed || revision !== generation || group.published) return;
-				const rule = toolCallIconCss(group.names, url);
+				const rule = toolCallIconCss(group.names, url, icon.clip);
 				if (rule && style.sheet) style.sheet.insertRule(rule, style.sheet.cssRules.length);
 				group.published = true;
 				return;
@@ -11068,7 +11219,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		function setGroups(groups, dark) {
 			const signature = JSON.stringify([dark, groups]);
-			if (signature === current) return;
+			if (signature === current) return [];
 			generation++;
 			current = signature;
 			byName.clear();
@@ -11076,6 +11227,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			// Only decode small, already available artwork on the startup path.
 			let warmCount = 0;
 			let warmBytes = 0;
+			const warming = [];
 			for (const { plugin, tools } of groups) {
 				const names = tools.map(tool => tool.name);
 				const urls = getPluginIconCandidates(plugin, dark)
@@ -11086,10 +11238,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (warmCount < 12 && inline?.startsWith("data:image/") && warmBytes + inline.length <= 256 * 1024) {
 					warmCount++;
 					warmBytes += inline.length;
-					void publishIcon(group, true).catch(() => {});
+					warming.push(publishIcon(group, true).catch(() => {}));
 				}
 			}
 			labels.update(groups);
+			return warming;
 		}
 
 		async function refresh(force = false) {
@@ -11102,7 +11255,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const { groups } = await api("/tool-call-icons", { cache: "no-store", signal: controller.signal });
 				if (request === controller) setGroups(groups, isDarkMode(ctx, document.documentElement));
 			} catch {
-				if (request === controller) setGroups([], false);
+				// A temporary fetch failure can keep the current same-page styles.
 			} finally {
 				if (request === controller) request = undefined;
 			}
@@ -11113,15 +11266,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			request = undefined;
 			checkedAt = -Infinity;
 			void refresh(true);
-			setGroups([], false);
 		}
 
 		const onVisibility = () => void refresh(!current || Date.now() - checkedAt >= refreshInterval);
 		const timer = setInterval(refresh, refreshInterval);
 		document.addEventListener("visibilitychange", onVisibility);
 		document.addEventListener("uph-mcp-branding-changed", invalidate);
-		void refresh(true);
-		return () => {
+		const boot = globalThis.__UPH_TOOL_CALL_ICONS__;
+		delete globalThis.__UPH_TOOL_CALL_ICONS__;
+		const warming = Array.isArray(boot) ? setGroups(boot, isDarkMode(ctx, document.documentElement)) : [];
+		const ready = warming.length ? new Promise(resolve => {
+			const timer = setTimeout(resolve, 80);
+			void Promise.allSettled(warming).then(() => { clearTimeout(timer); resolve(); });
+		}) : undefined;
+		if (ready) void ready.then(() => refresh(true));
+		else void refresh(true);
+		const dispose = () => {
 			disposed = true;
 			request?.abort();
 			request = undefined;
@@ -11131,6 +11291,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			labels.dispose();
 			style.remove();
 		};
+		dispose.ready = ready;
+		return dispose;
 	}
 
 	function Section({ ctx }) {
@@ -11163,7 +11325,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	const inject = ["slots", "theme"];
 
 	function apply(ctx) {
-		ctx.effect?.(() => installToolCallIcons(ctx), "universal-plugin-hub: tool call icons");
+		let iconsReady;
+		ctx.effect?.(() => {
+			const dispose = installToolCallIcons(ctx);
+			iconsReady = dispose.ready;
+			return dispose;
+		}, "universal-plugin-hub: tool call icons");
 		ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
 			name: "sidebar.panellist",
 			id: "universal-plugin-hub",
@@ -11175,6 +11342,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			name: "main",
 			key: "universal-plugin-hub",
 		}, () => h(Section, { ctx })));
+		return iconsReady;
 	}
 
 	exports.name = name;

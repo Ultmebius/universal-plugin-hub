@@ -10,6 +10,7 @@ import { mountRoutes } from '../src/routes.js'
 import { installedDir, sourceCacheDir, writeState } from '../src/store.js'
 import { readMarketplace } from '../src/parser.js'
 import { getConnectorId, writeCordisPatch, writeMcpToolsState } from '../src/install.js'
+import { apply as applyHub } from '../src/index.js'
 
 test('tool-call icon API exposes only unambiguous, installed plugin tool names and public icon data', async () => {
   const root = mkdtempSync(join(tmpdir(), 'uph-tool-call-icons-'))
@@ -73,6 +74,22 @@ test('tool-call icon API exposes only unambiguous, installed plugin tool names a
     assert.doesNotMatch(JSON.stringify(data), /fixture-secret|fixture\.invalid|headers/)
     assert.equal(data.groups[0].plugin.homepage, 'https://example.test')
     assert.deepEqual(readMarketplace('fixture').map(row => row.name), ['exa-plugin', 'unrelated'])
+    const listeners = new Map()
+    const cleanups = []
+    const hostCtx = {
+      webServer: { register: () => () => {} },
+      effect(effect) { cleanups.push(effect()) },
+      on(event, listener) { listeners.set(event, listener); return () => listeners.delete(event) },
+    }
+    applyHub({ inject(services, fn) { if (services.includes('webServer')) fn(hostCtx) } })
+    try {
+      const boot = []
+      listeners.get('webserver/index-inject')?.(boot)
+      assert.deepEqual(JSON.parse(JSON.stringify(boot)), [{ kind: 'global', name: '__UPH_TOOL_CALL_ICONS__', value: data.groups }])
+      assert.doesNotMatch(JSON.stringify(boot), /fixture-secret|fixture\.invalid|headers/)
+    } finally {
+      for (const cleanup of cleanups.reverse()) cleanup?.()
+    }
   } finally {
     await new Promise(resolve => server.close(resolve))
     if (previous === undefined) delete process.env.DSH_HOME
@@ -91,11 +108,50 @@ test('tool-call icon CSS targets only exact generic DSH rows and preserves nativ
   assert.match(css, /:is\(\[data-chat-call-id\], \[data-chat-call-id\] > \[data-slot="tool\.call\.toolview"\]\) > \[data-variant="others"\]\[data-tool="mcp__exa__web_search_exa"\]/)
   assert.match(css, /:not\(\[data-open\]\)/)
   assert.match(css, /svg:only-child/)
-  assert.match(css, /border-radius: var\(--cpm-connector-icon-radius\)/)
+  assert.doesNotMatch(css, /border(?:-radius)?:|corner-shape:|box-shadow:/)
   assert.match(source, /\.cpm-connector-owner-icon \{[^}]*border-radius: var\(--cpm-connector-icon-radius\)/)
-  assert.match(css, /@supports \(corner-shape: squircle\) \{\s*border-radius: 50%;\s*corner-shape: var\(--cpm-icon-corner-shape\);/)
   assert.match(css, /data:image\/png;base64,AAAA/)
   assert.doesNotMatch(css, /not a tool|\[data-tool\^=/)
+  const opaqueCss = vm.runInNewContext(source.slice(start, end) +
+    '\ntoolCallIconCss(["mcp__exa__web_search_exa"], "data:image/png;base64,AAAA", true)')
+  assert.match(opaqueCss, /border-radius: var\(--cpm-connector-icon-radius\)/)
+  assert.match(opaqueCss, /corner-shape: var\(--cpm-icon-corner-shape\)/)
+  const alpha = new Uint8ClampedArray(16 * 16 * 4)
+  const sample = { clearRect() {}, drawImage() {}, getImageData: () => ({ data: alpha }) }
+  const needsClipping = vm.runInNewContext(source.slice(start, end) + '\niconNeedsClipping')
+  const image = { naturalWidth: 48, naturalHeight: 48 }
+  alpha.fill(255)
+  assert.equal(needsClipping(image, sample), true)
+  for (const pixel of [0, 15, 240, 255]) alpha[pixel * 4 + 3] = 0
+  assert.equal(needsClipping(image, sample), true, 'a rounded tile still shares the common curve')
+  alpha.fill(0)
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      if ((x - 7.5) ** 2 + (y - 7.5) ** 2 < 64) alpha[(y * 16 + x) * 4 + 3] = 255
+    }
+  }
+  assert.equal(needsClipping(image, sample), false, 'a transparent circular logo keeps its outline')
+  alpha.fill(0)
+  for (const pixel of [0, 17, 34, 51, 119, 135, 221, 238, 255]) alpha[pixel * 4 + 3] = 255
+  assert.equal(needsClipping(image, sample), false)
+})
+
+test('chat preserves Exa’s supplied tile and uses transparent artwork supplied by other plugins', () => {
+  const source = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
+  const start = source.indexOf('const BRAND_ICON_KEYS =')
+  const end = source.indexOf('function AnthropicIcon', start)
+  const tile = 'data:image/png;base64,tile'
+  const artwork = '/universal-plugin-hub/api/plugin-icon?path=assets/Exa.svg'
+  const transparent = 'data:image/svg+xml;base64,transparent'
+  const context = {
+    BRAND_ICONS: { exa: tile },
+    getGithubAvatarUrl: () => null,
+    exa: { name: 'exa', icons: { portrait: { dark: [artwork] } } },
+    custom: { name: 'custom', icons: { dark: [transparent] } },
+  }
+  const first = vm.runInNewContext(source.slice(start, end) + '\n[getPluginIconCandidates(exa, true)[0], getPluginIconCandidates(custom, true)[0]]', context)
+  assert.deepEqual(Array.from(first), [tile, transparent])
+  assert.match(source, /const urls = getPluginIconCandidates\(plugin, dark\)/)
 })
 
 test('tool-call labels show plugin name, MCP and the raw tool name while preserving the query', () => {
@@ -259,7 +315,8 @@ test('chat branding is ready before the first row and survives switching chats',
   }
   const cssStart = source.indexOf('\tconst ICON_SHAPE_CSS =')
   const cssEnd = source.indexOf('\tconst CSS =', cssStart)
-  const dispose = vm.runInNewContext(source.slice(cssStart, cssEnd) + source.slice(start, end) + '\ninstallToolCallIcons({})', context)
+  const code = source.slice(cssStart, cssEnd) + source.slice(start, end) + '\ninstallToolCallIcons({})'
+  const dispose = vm.runInNewContext(code, context)
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(requests, 1, 'prefetch branding before the first MCP row')
   assert.deepEqual(decoded, [icon], 'warm up inline artwork only')
@@ -335,4 +392,16 @@ test('chat branding is ready before the first row and survives switching chats',
   dispose()
   assert.equal(listeners.size, 0)
   assert.equal(style.removed, true)
+
+  // Restoring an old chat on a cold renderer must not wait for the branding API.
+  context.__UPH_TOOL_CALL_ICONS__ = [group('exa')]
+  context.setTimeout = setTimeout
+  context.clearTimeout = clearTimeout
+  decoded.length = 0
+  pending = signal => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
+  const coldStart = vm.runInNewContext(code, { ...context })
+  await coldStart.ready
+  assert.deepEqual(decoded, [icon])
+  assert.ok(style.sheet.cssRules.some(rule => rule.includes(icon)), 'boot icon is styled with the API still pending')
+  coldStart()
 })

@@ -72,14 +72,15 @@ function clickSource(mcpsOpen, target) {
   const end = source.indexOf('\n\t\t}, [state.sources', start)
   assert.ok(start > 0 && end > start)
   const store = { scrollTops: { a: 560, b: 920 } }
-  let reset = false, selected
+  let reset = false, selected, closed = false
   vm.runInNewContext(source.slice(start, end), {
     mcpsOpen, s: { id: target }, activeSourceId: 'a', view: { type: 'browse' }, filter: 'all',
     isLongPressTriggeredRef: { current: false }, state: { plugins: [] }, SESSION_STORE: store,
     gridRef: { current: { scrollTop: 30 } }, setActiveSourceId(id) { selected = id },
+    setMcpsOpen(value) { closed = value === false },
     scrollActiveTabIntoView() {}, scrollContentToTop() { reset = true },
   })
-  return { store, reset, selected }
+  return { store, reset, selected, closed }
 }
 
 test('returning from MCP to the same source preserves its position; clicking the active source still returns to top', () => {
@@ -94,6 +95,7 @@ test('returning from MCP to the same source preserves its position; clicking the
 test('switching from MCP to another source cannot overwrite the previous source with MCP scrollTop', () => {
   const returned = clickSource(true, 'b')
   assert.equal(returned.selected, 'b')
+  assert.equal(returned.closed, true, 'the same pointer action closes the MCP view')
   assert.equal(returned.store.scrollTops.a, 560)
   assert.equal(returned.store.scrollTops.b, 920)
   assert.equal(clickSource(false, 'b').store.scrollTops.a, 30, 'ordinary source switching still saves the outgoing position')

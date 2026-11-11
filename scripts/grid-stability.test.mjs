@@ -67,7 +67,7 @@ test('every switch in the plugin draws the same control', () => {
   // One geometry for the whole plugin: every toggle is `.cpm-toggle`, and the
   // base rule owns track, knob and inset as custom properties so a variant can
   // restate the ratios without restating the look.
-  assert.match(client, /\.cpm-skill-identity > \.cpm-toggle/)
+  assert.match(client, /\.cpm-skill-header \.cpm-toggle/)
   const base = client.match(/(?:^|\n)\.cpm-toggle \{([\s\S]*?)\n\}/)
   assert.ok(base)
   assert.match(base[1], /--sw-w: 40px;/)
@@ -208,35 +208,20 @@ test('a focused text field draws one ring, not two', () => {
   assert.match(custom[1], /outline: none;/)
 })
 
-test('the skill header keeps one size step between title and body', () => {
-  // The detail page is a reading surface: the icon and title set the scale, and
-  // every step below them stays in fixed relation, so shrinking the lockup
-  // cannot leave a 32px title over 12px prose. The title's ceiling stays under
-  // the old 2rem hero size and above the body by at least 1.5x.
-  const icon = client.match(/\.cpm-skill-identity > \.cpm-card-icon \{([\s\S]*?)\n\}/)
-  assert.ok(icon, 'detail icon rule is missing')
-  assert.match(icon[1], /width: 2\.75rem;/)
-  assert.match(icon[1], /height: 2\.75rem;/)
-  const title = client.match(/(?:^|\n)\.cpm-skill-title \{([\s\S]*?)\n\}/)
-  assert.ok(title, 'skill title rule is missing')
-  const clamp = title[1].match(/font-size: clamp\(([\d.]+)rem, [^,]+ \+ ([\d.]+)vw, ([\d.]+)rem\);/)
-  assert.ok(clamp, 'title size should stay a clamped fluid scale')
-  const [, min, , max] = clamp.map(Number)
-  assert.ok(max < 2, 'the title must be smaller than the old 2rem ceiling')
-  assert.ok(max / min <= 1.3, 'title min and max should sit in one optical size')
+test('Skill detail uses the management header geometry and keeps its reading styles', () => {
+  const start = client.indexOf('function SkillDetail(')
+  const skill = client.slice(start, client.indexOf('const IconSearch', start))
+  assert.match(skill, /className: "cpm-manage-head"[\s\S]*className: "cpm-back", style: \{ padding: 0 \}/)
+  assert.match(skill, /className: "cpm-title-row"[\s\S]*className: "cpm-title-group"[^\n]*PluginIcon/)
+  assert.match(skill, /h\("h1", \{ className: "cpm-title" \}/)
+  assert.match(client, /\.cpm-skill-detail \{\s*padding-bottom: 56px;\s*\}/)
   const body = client.match(/\.cpm-root \.cpm-skill-content > div \{([\s\S]*?)\n\}/)
   assert.ok(body, 'content body rule is missing')
-  const bodySize = Number(body[1].match(/font-size: ([\d.]+)rem;/)[1])
-  assert.ok(max / bodySize >= 1.5, 'title should stay clearly above the body size')
-  // Every heading in the body stays between the body size and the page title.
   for (const [tag, size] of [['h1', 1.375], ['h2', 1.125], ['h3', 1]]) {
     const rule = client.match(new RegExp(`\\.cpm-root \\.cpm-skill-content ${tag} \\{ font-size: ([\\d.]+)rem; \\}`))
     assert.ok(rule, `${tag} rule is missing`)
     assert.equal(Number(rule[1]), size)
-    assert.ok(Number(rule[1]) <= max && Number(rule[1]) >= bodySize)
   }
-  // The class the host renders, so the icon rule actually reaches the header.
-  assert.match(client, /className: "cpm-skill-identity"[^\n]*PluginIcon/)
 })
 
 test('the top bar leaves no scrollbar reserve of its own', () => {

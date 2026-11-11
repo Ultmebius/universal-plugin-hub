@@ -10,12 +10,16 @@
 import { existsSync, lstatSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
-import { spawn, execFile, execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { setImmediate as yieldToHost, setTimeout as delay } from 'node:timers/promises'
 import * as yaml from 'js-yaml'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir } from './store.js'
 import { materializePlugin, pullSource, pluginPath } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName } from './parser.js'
@@ -46,12 +50,32 @@ export function cordisPatchPath() {
   return profilePatch
 }
 
-export function readCordisPatch() {
-  const file = cordisPatchPath()
-  if (!existsSync(file)) return []
+function loadCordisPatch(file) {
+  let source
   try {
-    const parsed = yaml.load(readFileSync(file, 'utf8'))
-    return Array.isArray(parsed) ? parsed : []
+    source = readFileSync(file, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') return []
+    throw new Error(`无法读取 ${file}，已中止写入以保护现有配置。`, { cause: error })
+  }
+  // js-yaml can reject an empty stream. An explicit null value is still a document.
+  if (source.replace(/^\uFEFF/, '').split(/\r\n?|\n/).every((line) => /^[ \t]*(?:#.*)?$/.test(line))) return []
+
+  let parsed
+  try {
+    parsed = yaml.load(source)
+  } catch (error) {
+    throw new Error(`无法解析 ${file}，已中止写入以保护现有配置。请通过 DSH 配置文件手动修改。`, { cause: error })
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${file} 的顶层必须是数组，已中止写入以保护现有配置。`)
+  }
+  return parsed
+}
+
+export function readCordisPatch() {
+  try {
+    return loadCordisPatch(cordisPatchPath())
   } catch {
     return []
   }
@@ -59,6 +83,9 @@ export function readCordisPatch() {
 
 export function writeCordisPatch(patch) {
   const file = cordisPatchPath()
+  // A tolerant read can return [] for a DSH-specific or damaged document.
+  // Check the on-disk document before any mutation can replace it.
+  loadCordisPatch(file)
   mkdirSync(dirname(file), { recursive: true })
   const content = yaml.dump(patch, { indent: 2, lineWidth: -1 })
   const tmp = join(dirname(file), `.cordis.patch.${process.pid}.${Date.now().toString(36)}.tmp`)
@@ -206,11 +233,14 @@ function remoteConfigFingerprint(config = {}) {
 }
 
 function setRemoteVerification(pluginName, connectorName, payload, verified) {
+  const fingerprint = remoteConfigFingerprint(payload)
+  const live = getConnectorEntry(pluginName, connectorName)?.config
+  if (live && remoteConfigFingerprint(remoteConfigFromEntry(live) || live) !== fingerprint) return
   const key = `${pluginName}::${connectorName}`
   const state = readMcpToolsState()
   state[key] = {
     ...(state[key] || {}),
-    verifiedRemoteConfig: verified ? remoteConfigFingerprint(payload) : null,
+    verifiedRemoteConfig: verified ? fingerprint : null,
   }
   writeMcpToolsState(state)
 }
@@ -253,7 +283,6 @@ export function substitutePluginRoot(val, pluginRoot) {
 export function registerConnector(pluginName, connectorName, connectorConfig) {
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
-  const existingEntry = patch.flatMap((item) => item?.insert || []).find((item) => item?.id === id)
   const pluginRoot = installedDir(pluginName)
   const resolvedConfig = substitutePluginRoot(connectorConfig, pluginRoot)
 
@@ -293,15 +322,24 @@ export function registerConnector(pluginName, connectorName, connectorConfig) {
   return { ok: true, connected: true }
 }
 
-export function unregisterConnector(pluginName, connectorName) {
+export function unregisterConnector(pluginName, connectorName, { keepDefinition = false } = {}) {
+  const key = `${pluginName}::${connectorName}`
+  MCP_ACTIVATIONS.delete(key)
+  MCP_TOOLS_INFLIGHT.delete(key)
+  MEMORY_TOOLS_CACHE.delete(key)
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
-  const remote = remoteConfigFromEntry(getConnectorEntry(pluginName, connectorName)?.config)
-  if (remote) {
-    const key = `${pluginName}::${connectorName}`
+  const config = getConnectorEntry(pluginName, connectorName)?.config
+  const remote = remoteConfigFromEntry(config)
+  if (remote || (keepDefinition && config)) {
     const state = readMcpToolsState()
-    state[key] = { ...(state[key] || {}), savedOAuthRemoteConfig: remote }
-    writeMcpToolsState(state)
+    const saved = state[key] ||= {}
+    if (remote) saved.savedOAuthRemoteConfig = remote
+    else {
+      saved.savedConnectorDefinition = { ...saved.savedConnectorDefinition, ...config }
+      saved.pluginConnectorOwned = true
+    }
+    writeMcpToolsState(state, { required: keepDefinition })
   }
 
   for (const item of patch) {
@@ -377,7 +415,7 @@ export function userMcpConfig(name, body = {}, fallback = {}) {
   return {
     name,
     usedUrls: [...usedUrls],
-    transport: (body.transport || fallback.transport) === 'http' ? 'http' : 'stdio',
+    transport: connectorTransport(body.transport || fallback.transport, body.url ?? fallback.url, body.command ?? fallback.command),
     url: pick(body.url, fallback.url ?? null),
     command: pick(body.command, fallback.command ?? null),
     args: Array.isArray(body.args) ? body.args : (fallback.args || []),
@@ -398,7 +436,7 @@ export function userMcpConfig(name, body = {}, fallback = {}) {
  * before the re-registration so the new registration reuses the existing
  * sign-in instead of starting a new browser handshake.
  */
-export function renameUserMcp(oldName, newName, payload) {
+export function renameUserMcp(oldName, newName, payload, { enable = false, probe } = {}) {
   if (oldName === newName) {
     return saveConnectorAuth('user-mcp', newName, payload)
   }
@@ -422,22 +460,30 @@ export function renameUserMcp(oldName, newName, payload) {
   const urls = [...new Set([url, saved.url, ...(Array.isArray(saved.usedUrls) ? saved.usedUrls : [])]
     .filter((u) => typeof u === 'string' && u.trim()))]
 
+  const copiedRecords = new Map()
   for (const source of urls) {
     for (const mode of modes) {
       const from = oauthCredentialKey('user-mcp', oldName, source, mode)
       const to = oauthCredentialKey('user-mcp', newName, source, mode)
       const record = readOAuthRecord(from)
-      if (record && Object.keys(record).length > 0) writeOAuthRecord(to, record)
+      const existing = readOAuthRecord(to)
+      if (Object.keys(record).length > 0 && !existing.tokens) {
+        writeOAuthRecord(to, record)
+        copiedRecords.set(to, existing)
+      }
     }
   }
 
-  if (wasEnabled) {
+  if (wasEnabled || enable) {
     const clientId = url ? readSavedOAuthClient('user-mcp', newName, url, 'custom').clientId : ''
     // `saveConnectorAuth` reports failure both by returning `{ok:false}` and by
     // throwing (e.g. a missing OAuth client id), so the rollback lives in one
     // place that both paths reach.
     const rollback = () => {
-      for (const source of urls) for (const mode of modes) deleteOAuthRecord(oauthCredentialKey('user-mcp', newName, source, mode))
+      for (const [key, record] of copiedRecords) {
+        if (Object.keys(record).length > 0) writeOAuthRecord(key, record)
+        else deleteOAuthRecord(key)
+      }
     }
     let result
     try {
@@ -447,7 +493,7 @@ export function renameUserMcp(oldName, newName, payload) {
         // the old client back into the live registration while the definition
         // says empty, and the next toggle would fail on the mismatch.
         oauthClientId: payload?.oauthClientId !== undefined ? payload.oauthClientId : (clientId || ''),
-      })
+      }, { probe })
     } catch (error) {
       // Leave the old server untouched: a failed rename must not strand the
       // user with neither name registered.
@@ -462,7 +508,7 @@ export function renameUserMcp(oldName, newName, payload) {
     // normalized but ids are slugified, so `a.dot` and `a-dot` share one id —
     // unregistering by the old name would delete the entry just written and
     // leave the server silently disabled.
-    if (getConnectorId('user-mcp', oldName) !== getConnectorId('user-mcp', newName)) {
+    if (wasEnabled && getConnectorId('user-mcp', oldName) !== getConnectorId('user-mcp', newName)) {
       unregisterConnector('user-mcp', oldName)
     }
   }
@@ -473,7 +519,10 @@ export function renameUserMcp(oldName, newName, payload) {
   if (toolsState[oldKey] || toolsState[newKey]) {
     const merged = { ...(toolsState[oldKey] || {}), ...(toolsState[newKey] || {}) }
     if (Array.isArray(toolsState[oldKey]?.disabledTools)) merged.disabledTools = toolsState[oldKey].disabledTools
-    delete merged.cachedTools
+    if (!probe?.ok) {
+      delete merged.cachedTools
+      delete merged.cachedToolsResolved
+    }
     toolsState[newKey] = merged
     delete toolsState[oldKey]
     writeMcpToolsState(toolsState)
@@ -1138,44 +1187,31 @@ export function isLspActive(pluginName, serverName) {
 const autoActivatedLspServers = new Set()
 
 export function toggleConnector(pluginName, connectorName, enabled) {
-  const target = installedDir(pluginName)
-  const connectors = getPluginConnectors(target)
-  const found = connectors.find((c) => c.name === connectorName) || { name: connectorName }
+  return enabled
+    ? enableConnector(pluginName, connectorName, undefined, { pluginOwned: true })
+    : unregisterConnector(pluginName, connectorName, { keepDefinition: true })
+}
 
-  if (enabled) {
-    const entry = getConnectorEntry(pluginName, connectorName)
-    const remote = remoteConfigFromEntry(entry?.config) || readMcpToolsState()[`${pluginName}::${connectorName}`]?.savedOAuthRemoteConfig
-    if (remote && isOAuthMode(remote.oauth)) {
-      const saved = remoteConfigFromEntry(entry?.config) ? entry.config : {
-        command: process.execPath, args: [OAUTH_BRIDGE_PATH],
-        env: { UPH_OAUTH_STORE_DIR: oauthStoreDir(), UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(oauthRuntimeConfig({
-          ...remote, credentialKey: oauthCredentialKey(pluginName, connectorName, remote.url, remote.oauth),
-          oauth: { mode: remote.oauth, clientId: remote.oauthClientId, callbackPort: remote.oauthCallbackPort, scope: remote.oauthScope },
-        })) },
-      }
-      return registerConnector(pluginName, connectorName, { ...remote, type: 'stdio', command: saved.command, args: saved.args, env: saved.env })
-    }
-    if (connectorRequiresAuth(found) && !isConnectorAuthenticated(pluginName, connectorName)) {
-      throw new Error(`请先验证并配置 ${connectorName} 的授权访问 Token`)
-    }
-    return registerConnector(pluginName, connectorName, found)
-  } else {
-    return unregisterConnector(pluginName, connectorName)
-  }
+function savedConnectorDefinition(pluginName, connectorName) {
+  const entry = getConnectorEntry(pluginName, connectorName)
+  const state = readMcpToolsState()[`${pluginName}::${connectorName}`]
+  const saved = state?.savedConnectorDefinition
+  if (entry) return remoteConfigFromEntry(entry.config) || { ...saved, ...entry.config }
+  return saved || state?.savedOAuthRemoteConfig
+}
+
+function connectorEnvironment(found, payload) {
+  const base = Object.fromEntries(Object.entries(found?.env || {}).filter(([, value]) =>
+    typeof value !== 'string' || !value.includes('${')))
+  const overrides = payload?.env || found?.env || {}
+  return { ...base, ...overrides }
 }
 
 export async function verifyConnectorAuth(pluginName, connectorName, payload, { pluginOwned = pluginName !== 'user-mcp' } = {}) {
-  const target = installedDir(pluginName)
-  const connectors = getPluginConnectors(target)
-  const found = connectors.find((c) => c.name === connectorName)
-
-  const token = typeof payload === 'string' ? payload : (payload?.token || '')
-  const customHeaders = (typeof payload === 'object' && payload?.headers) ? { ...payload.headers } : {}
-  const transport = (typeof payload === 'object' && payload?.transport) ? payload.transport : (found?.type || 'http')
-  const url = (typeof payload === 'object' && payload?.url) || found?.url || (connectorName === 'notion' ? 'https://mcp.notion.com/mcp' : null)
-  const command = (typeof payload === 'object' && payload?.command) || found?.command || null
-
-  if (transport !== 'stdio' && url && isOAuthMode(payload?.oauth)) {
+  const definition = connectorDefinition(pluginName, connectorName, payload, pluginOwned)
+  const { transport, url } = definition
+  if (transport !== 'stdio' && url && isOAuthMode(definition.oauth)) {
+    payload = { ...payload, ...definition }
     try {
       if (pluginOwned) rememberPluginOAuthUrls(pluginName, connectorName, url)
       setRemoteVerification(pluginName, connectorName, payload, false)
@@ -1188,224 +1224,170 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload, { 
         completeOAuthVerification(session),
         new Promise((resolve) => setTimeout(() => resolve({ pending: true, sessionId: session.id, status: session.status, message: session.message || '正在准备 OAuth 授权…' }), 250)),
       ])
-      if (!session.cancelled) setRemoteVerification(pluginName, connectorName, payload, result.ok === true)
+      if (!session.cancelled && !result.pending) setRemoteVerification(pluginName, connectorName, payload, result.ok === true)
       return { ...result, server: connectorName, transport: 'http', endpoint: url, statusCode: result.statusCode ?? result.status }
     } catch (error) {
       return { ok: false, message: error.message, server: connectorName, transport: 'http', endpoint: url }
     }
   }
 
-  if (transport === 'stdio') {
-    setRemoteVerification(pluginName, connectorName, payload, false)
-    if (found && found.url && !command) {
-      return {
-        ok: false,
-        status: 400,
-        message: `${connectorName} 仅支持远程 HTTP 连接，未提供本地可执行程序`,
-        server: connectorName,
-        transport: 'stdio',
-        endpoint: 'local stdio',
-        errorDetails: 'Remote-only MCP server does not support stdio transport',
-        duration: 5,
-      }
-    }
-    if (!command) {
-      return {
-        ok: false,
-        status: 400,
-        message: '未配置有效的 stdio 启动命令 (command)',
-        server: connectorName,
-        transport: 'stdio',
-        endpoint: 'local stdio',
-        errorDetails: 'Missing executable command in connector configuration',
-        duration: 5,
-      }
-    }
-    const args = (typeof payload === 'object' && Array.isArray(payload?.args)) ? payload.args : (found?.args || [])
-    return {
-      ok: true,
-      message: '本地 Connector (stdio) 服务已就绪',
-      server: connectorName,
-      transport: 'stdio',
-      endpoint: `${command} ${args.join(' ')}`.trim(),
-      duration: 10,
-    }
+  const started = Date.now()
+  const probe = await probeConnectorDefinition(pluginName, connectorName, definition, MCP_AUTH_TIMEOUT_MS)
+  setRemoteVerification(pluginName, connectorName, definition, !probe.error)
+  return {
+    ok: !probe.error,
+    message: probe.error || 'MCP 连接和工具列表验证通过',
+    server: connectorName,
+    transport,
+    endpoint: url || definition.command || '',
+    status: probe.status,
+    duration: Date.now() - started,
   }
-  if (!url) {
-    setRemoteVerification(pluginName, connectorName, payload, false)
-    return {
-      ok: false,
-      message: '请输入有效的服务 URL',
-      server: connectorName,
-      transport,
-      endpoint: '',
-    }
-  }
-
-  const reqHeaders = {
-    'Content-Type': 'application/json',
-    ...customHeaders,
-  }
-  if (token && token.trim()) {
-    if (!reqHeaders.Authorization && !reqHeaders.authorization) {
-      reqHeaders['Authorization'] = token.trim().startsWith('Bearer ') ? token.trim() : `Bearer ${token.trim()}`
-    }
-  }
-
-  const startTime = Date.now()
-  let result
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), MCP_AUTH_TIMEOUT_MS)
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: reqHeaders,
-      signal: controller.signal,
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-    }).finally(() => clearTimeout(timer))
-
-    const duration = Date.now() - startTime
-    if (res.status === 200) {
-      result = {
-        ok: true,
-        message: '验证成功！已连接到 MCP 远程服务并激活权限。',
-        server: connectorName,
-        transport: transport === 'sse' ? 'sse' : 'http',
-        endpoint: url,
-        status: 200,
-        duration,
-      }
-    } else {
-      const body = await res.json().catch(() => ({}))
-      const desc = body.error_description || body.error?.message || body.error || `HTTP 错误状态码 ${res.status}`
-      const authHeader = res.headers.get('www-authenticate') || ''
-      let userFriendly = `认证未通过：${desc}`
-      if ((res.status === 401 || res.status === 403) && !reqHeaders.Authorization && !/[?&](api_key|apiKey|token|key)=/i.test(url)) {
-        if (authHeader.includes('Bearer') || authHeader.includes('oauth') || /token|oauth|unauthorized|access token/i.test(String(desc))) {
-          userFriendly = `认证未通过：缺少访问令牌 (Access Token) 或需要 OAuth 授权`
-        }
-      }
-      result = {
-        ok: false,
-        message: userFriendly,
-        server: connectorName,
-        transport: transport === 'sse' ? 'sse' : 'http',
-        endpoint: url,
-        status: res.status,
-        errorDetails: String(desc),
-        duration,
-      }
-    }
-  } catch (e) {
-    const duration = Date.now() - startTime
-    if (e.name === 'AbortError') {
-      result = {
-        ok: false,
-        message: `连接超时（${MCP_AUTH_TIMEOUT_MS / 1000} 秒未响应），请检查服务 URL 与网络`,
-        server: connectorName,
-        transport,
-        endpoint: url,
-        errorDetails: `Connection timed out (${MCP_AUTH_TIMEOUT_MS / 1000}s limit)`,
-        duration,
-      }
-    } else {
-      result = {
-        ok: false,
-        message: `连接异常：${e.message}`,
-        server: connectorName,
-        transport,
-        endpoint: url,
-        errorDetails: e.message,
-        duration,
-      }
-    }
-  }
-  setRemoteVerification(pluginName, connectorName, { transport, url, headers: reqHeaders, oauth: payload?.oauth }, result.ok === true)
-  return result
 }
 
-export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOwned = pluginName !== 'user-mcp' } = {}) {
+function connectorDefinition(pluginName, connectorName, payload = {}, pluginOwned = pluginName !== 'user-mcp') {
   const target = installedDir(pluginName)
-  const connectors = getPluginConnectors(target)
-  const found = connectors.find((c) => c.name === connectorName) || { name: connectorName }
-
-  let token = typeof payload === 'string' ? payload : (payload?.token || '')
-  let url = (typeof payload === 'object' && payload?.url) || found.url || null
-  let transport = (typeof payload === 'object' && payload?.transport) || found.type || (url ? 'http' : 'stdio')
-  let customHeaders = typeof payload === 'object' && payload?.headers ? { ...payload.headers } : {}
-  let customEnv = typeof payload === 'object' && payload?.env ? { ...payload.env } : { ...(found.env || {}) }
-  let customArgs = typeof payload === 'object' && Array.isArray(payload?.args) ? payload.args : (found.args || [])
-  let oauth = typeof payload === 'object' && payload?.oauth ? payload.oauth : 'none'
-  if (isOAuthMode(oauth)) token = ''
-
-  if (token && token.trim()) {
-    const authVal = token.trim().startsWith('Bearer ') ? token.trim() : `Bearer ${token.trim()}`
-    customHeaders['Authorization'] = authVal
+  const found = (pluginOwned && getPluginConnectors(target).find(c => c.name === connectorName)) || {}
+  const transport = connectorTransport(payload.transport || payload.type || found.type, payload.url ?? found.url, payload.command ?? found.command)
+  const headers = new Map()
+  for (const [key, value] of Object.entries(found.headers || {})) {
+    if (typeof value === 'string' && !value.includes('${')) headers.set(key.toLowerCase(), [key, value])
   }
-
-  const baseHeaders = { ...(found.headers || {}) }
-  for (const [k, v] of Object.entries(baseHeaders)) {
-    if (typeof v === 'string' && v.includes('${')) delete baseHeaders[k]
+  for (const [key, value] of Object.entries(payload.headers || {})) {
+    headers.set(key.toLowerCase(), [key, value])
   }
-
-  const baseEnv = { ...(found.env || {}) }
-  for (const [k, v] of Object.entries(baseEnv)) {
-    if (typeof v === 'string' && v.includes('${')) delete baseEnv[k]
+  const token = (typeof payload === 'string' ? payload : payload.token)?.trim()
+  const oauth = transport === 'stdio' ? 'none' : (payload.oauth || 'none')
+  if (token && !isOAuthMode(oauth) && !headers.has('authorization')) {
+    headers.set('authorization', ['Authorization', token.startsWith('Bearer ') ? token : `Bearer ${token}`])
   }
+  return substitutePluginRoot({
+    transport,
+    type: transport,
+    url: transport === 'http' ? (payload.url ?? found.url ?? (connectorName === 'notion' ? 'https://mcp.notion.com/mcp' : null))?.trim() : null,
+    command: payload.command ?? found.command ?? null,
+    args: Array.isArray(payload.args) ? payload.args : (found.args || []),
+    env: connectorEnvironment(found, payload),
+    headers: Object.fromEntries(headers.values()),
+    oauth,
+    oauthClientId: String(payload.oauthClientId || '').trim(),
+    oauthCallbackPort: payload.oauthCallbackPort,
+    oauthScope: payload.oauthScope || '',
+  }, target)
+}
 
-  const isStdio = (transport === 'stdio')
-  let registration = {
-    ...found,
-    type: isStdio ? 'stdio' : (transport === 'sse' ? 'sse' : 'http'),
-    url: isStdio ? null : (url || found.url || null),
-    command: (typeof payload === 'object' && payload?.command) || found.command || null,
-    args: customArgs,
-    env: { ...baseEnv, ...customEnv },
-    headers: { ...baseHeaders, ...customHeaders },
-    oauth: isStdio ? 'none' : oauth,
+function oauthConnectorRegistration(pluginName, connectorName, definition) {
+  const { url, headers, oauth, oauthClientId, oauthCallbackPort, oauthScope } = definition
+  const remote = oauthRuntimeConfig({
+    url, headers, credentialKey: oauthCredentialKey(pluginName, connectorName, url, oauth),
+    oauth: { mode: oauth, clientId: oauthClientId, callbackPort: Number(oauthCallbackPort) || null, scope: oauthScope },
+  })
+  return {
+    type: 'stdio', command: process.execPath, args: [OAUTH_BRIDGE_PATH],
+    env: { UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(remote), UPH_OAUTH_STORE_DIR: oauthStoreDir() },
   }
+}
+
+async function probeConnectorDefinition(pluginName, connectorName, definition, timeout) {
+  if (definition.transport === 'stdio') {
+    return definition.command
+      ? queryStdioToolsList(definition.command, definition.args, definition.env)
+      : { tools: [], error: '未配置有效的 stdio 启动命令 (command)' }
+  }
+  if (!/^https?:\/\//i.test(definition.url || '')) return { tools: [], error: '缺少有效的服务 URL' }
+  if (isOAuthMode(definition.oauth)) {
+    const registration = oauthConnectorRegistration(pluginName, connectorName, definition)
+    return queryStdioToolsList(registration.command, registration.args, {
+      ...registration.env, UPH_MCP_INTERACTIVE: '0', UPH_MCP_VERIFY: '0',
+    })
+  }
+  return queryHttpToolsList(definition.url, definition.headers, timeout)
+}
+
+export async function probeConnectorAuth(pluginName, connectorName, payload, { pluginOwned } = {}) {
+  const definition = connectorDefinition(pluginName, connectorName, payload, pluginOwned)
+  if (definition.oauth === 'custom' && definition.url) {
+    const key = oauthCredentialKey(pluginName, connectorName, definition.url, 'custom')
+    const client = readOAuthRecord(key)?.customClient
+    if (!client || client.client_id !== definition.oauthClientId ||
+      (payload.oauthClientSecret && client.client_secret !== payload.oauthClientSecret)) {
+      return { ok: false, error: '请先点击「测试连接」完成 OAuth 授权' }
+    }
+  }
+  const probe = await probeConnectorDefinition(pluginName, connectorName, definition, MCP_AUTH_TIMEOUT_MS)
+  return { ...probe, definition, ok: !probe.error }
+}
+
+export function probeUserMcpUpdate(oldName, newName, payload) {
+  // The editor may have just authorized the renamed draft. Otherwise an
+  // unchanged sign-in still belongs to the existing name until rename commits.
+  const newRecord = oldName !== newName && isOAuthMode(payload.oauth) && payload.url
+    ? readOAuthRecord(oauthCredentialKey('user-mcp', newName, payload.url.trim(), payload.oauth))
+    : null
+  return probeConnectorAuth('user-mcp', newRecord?.tokens ? newName : oldName, payload)
+}
+
+const MCP_ACTIVATIONS = new Map()
+
+export async function enableConnector(pluginName, connectorName, payload, options = {}) {
+  const key = `${pluginName}::${connectorName}`
+  const attempt = Symbol()
+  MCP_ACTIVATIONS.set(key, attempt)
+  const input = payload ?? savedConnectorDefinition(pluginName, connectorName) ?? {}
+  try {
+    const probe = await probeConnectorAuth(pluginName, connectorName, input, options)
+    if (!probe.ok) return { ok: false, error: probe.error }
+    if (MCP_ACTIVATIONS.get(key) !== attempt || options.canEnable?.() === false) {
+      return { ok: false, error: 'MCP 配置或开关已变更，请刷新后重试' }
+    }
+    return saveConnectorAuth(pluginName, connectorName, input, { ...options, probe })
+  } finally {
+    if (MCP_ACTIVATIONS.get(key) === attempt) MCP_ACTIVATIONS.delete(key)
+  }
+}
+
+export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOwned = pluginName !== 'user-mcp', rememberDefinition = true, probe } = {}) {
+  const definition = probe?.definition || connectorDefinition(pluginName, connectorName, payload, pluginOwned)
+  const { transport, url, oauth } = definition
+  const isStdio = transport === 'stdio'
+  let registration = definition
   if (pluginOwned) {
     const previousRemote = remoteConfigFromEntry(getConnectorEntry(pluginName, connectorName)?.config)
     rememberPluginOAuthUrls(pluginName, connectorName, !isStdio && isOAuthMode(oauth) ? url : null, previousRemote?.url)
   }
   if (!isStdio && isOAuthMode(oauth)) {
     saveCustomOAuthClient(pluginName, connectorName, payload)
-    const credentialKey = oauthCredentialKey(pluginName, connectorName, url, oauth)
-    const remote = oauthRuntimeConfig({
-      url, headers: customHeaders, credentialKey,
-      oauth: {
-        mode: oauth, clientId: payload.oauthClientId || '', callbackPort: Number(payload.oauthCallbackPort) || null,
-        scope: payload.oauthScope || '',
-      },
-    })
-    registration = {
-      type: 'stdio', command: process.execPath, args: [OAUTH_BRIDGE_PATH],
-      env: { UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(remote), UPH_OAUTH_STORE_DIR: oauthStoreDir() },
-    }
+    registration = oauthConnectorRegistration(pluginName, connectorName, definition)
   }
   const result = registerConnector(pluginName, connectorName, registration)
-  const toolsKey = `${pluginName}::${connectorName}`
-  if (result.ok && !isStdio) {
-    const verifiedConfig = { transport, url, headers: customHeaders, oauth, oauthClientId: payload.oauthClientId || '', oauthScope: payload.oauthScope || '', oauthCallbackPort: payload.oauthCallbackPort }
-    const savedState = readMcpToolsState()
-    savedState[toolsKey] = { ...(savedState[toolsKey] || {}), savedOAuthRemoteConfig: isOAuthMode(oauth) ? remoteConfigFromEntry(registration.env ? { env: registration.env } : {}) : undefined }
-    if (!isOAuthMode(oauth)) delete savedState[toolsKey].savedOAuthRemoteConfig
-    writeMcpToolsState(savedState)
-    if (savedState[toolsKey]?.verifiedRemoteConfig !== remoteConfigFingerprint(verifiedConfig)) {
-      setRemoteVerification(pluginName, connectorName, verifiedConfig, false)
-    }
-  }
   if (result.ok) {
-    const savedState = readMcpToolsState()
-    if (savedState[toolsKey]) {
-      delete savedState[toolsKey].cachedTools
-      writeMcpToolsState(savedState)
+    const key = `${pluginName}::${connectorName}`
+    const state = readMcpToolsState()
+    const saved = state[key] ||= {}
+    if (pluginOwned && !isOAuthMode(oauth)) {
+      if (rememberDefinition) saved.savedConnectorDefinition = definition
+      saved.pluginConnectorOwned = true
     }
-  }
-  if (result.ok) {
-    MEMORY_TOOLS_CACHE.delete(toolsKey)
+    else delete saved.savedConnectorDefinition
+    const remote = remoteConfigFromEntry(registration)
+    if (remote) saved.savedOAuthRemoteConfig = remote
+    else delete saved.savedOAuthRemoteConfig
+    if (!isStdio) {
+      const fingerprint = remoteConfigFingerprint(remote || definition)
+      if (probe?.ok) saved.verifiedRemoteConfig = fingerprint
+      else if (saved.verifiedRemoteConfig !== fingerprint) saved.verifiedRemoteConfig = null
+    }
+    if (probe?.ok) {
+      saved.cachedTools = probe.tools
+      saved.cachedToolsResolved = true
+    } else {
+      delete saved.cachedTools
+      delete saved.cachedToolsResolved
+    }
+    writeMcpToolsState(state)
+    MEMORY_TOOLS_CACHE.delete(key)
     // A probe still running against the old configuration must not be reused.
-    MCP_TOOLS_INFLIGHT.delete(toolsKey)
+    MCP_TOOLS_INFLIGHT.delete(key)
   }
   return result
 }
@@ -1458,7 +1440,7 @@ export function getDisabledTools(pluginName, connectorName) {
 export function setToolDisabled(pluginName, connectorName, toolName, disabled) {
   const state = readMcpToolsState()
   const key = `${pluginName}::${connectorName}`
-  if (!state[key]) state[key] = { disabledTools: [], cachedTools: [] }
+  if (!state[key]) state[key] = {}
   const list = new Set(Array.isArray(state[key].disabledTools) ? state[key].disabledTools : [])
   if (disabled) {
     list.add(toolName)
@@ -1468,149 +1450,96 @@ export function setToolDisabled(pluginName, connectorName, toolName, disabled) {
   state[key].disabledTools = Array.from(list)
   writeMcpToolsState(state)
 
-  // Immediately synchronize in-memory cache
-  if (MEMORY_TOOLS_CACHE.has(key)) {
-    const mem = MEMORY_TOOLS_CACHE.get(key)
-    MEMORY_TOOLS_CACHE.set(key, { ...mem, disabledTools: state[key].disabledTools })
-  } else {
-    MEMORY_TOOLS_CACHE.set(key, { tools: state[key].cachedTools || [], disabledTools: state[key].disabledTools })
-  }
-
   return state[key].disabledTools
 }
 
-/**
- * Package-manager shims are the only commands that need a shell (Windows
- * resolves npx.cmd/npm.cmd through cmd.exe). Running everything through a
- * shell split unquoted paths at their spaces — "G:\...\computer use\server.js"
- * arrived at node as "G:\...\computer" — so the probe always failed.
- */
-const SHELL_COMMANDS = /^(npx|npm|pnpm|pnpx|yarn|yarnpkg|bunx?|corepack)(\.cmd|\.bat)?$/i
-
-function quoteArgForShell(value) {
-  const s = String(value)
-  return /[\s"&|<>^]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s
-}
-
-/**
- * Query an MCP stdio server for its tool list.
- * Resolves { tools, error } — error stays null when the server answered with
- * an (possibly empty) tool list, so callers can tell "no tools" from "the
- * probe never reached the server".
- */
 const MCP_STARTUP_TIMEOUT_MS = 180000
 const MCP_TOOLS_TIMEOUT_MS = 60000
-// A user-initiated connection test is not the same wait as a background probe.
 const MCP_AUTH_TIMEOUT_MS = 8000
-// Keep only the tail: a chatty server during a 180s startup window would
-// otherwise grow this string without bound (and `+=` copies it each time).
 const STDERR_TAIL_BYTES = 8192
 
-export function queryStdioToolsList(cmd, args, extraEnv = {}) {
-  return new Promise((resolve) => {
-    const argv = Array.isArray(args) ? args : []
-    const useShell = SHELL_COMMANDS.test(String(cmd).trim())
-    let cp
-    try {
-      cp = useShell
-        ? spawn([cmd, ...argv].map(quoteArgForShell).join(' '), {
-          shell: true,
-          env: { ...process.env, ...extraEnv },
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-        : spawn(cmd, argv, {
-          shell: false,
-          env: { ...process.env, ...extraEnv },
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-    } catch (err) {
-      return resolve({ tools: [], error: `无法启动 ${cmd}: ${err.message}` })
-    }
+/** Use the same MCP transport as DSH, including Windows command shim resolution. */
+export async function queryStdioToolsList(cmd, args, extraEnv = {}) {
+  // Windows treats env names case-insensitively. Normalize before merging so
+  // an explicit Path/PATH overrides both the parent and the SDK default.
+  const env = process.platform === 'win32'
+    ? Object.fromEntries([...Object.entries(process.env), ...Object.entries(extraEnv)].map(([key, value]) => [key.toUpperCase(), value]))
+    : { ...process.env, ...extraEnv }
+  const transport = new StdioClientTransport({ command: cmd, args: Array.isArray(args) ? args : [], env, stderr: 'pipe' })
+  const client = new Client({ name: 'universal-plugin-hub', version: '1.0.0' })
+  // The SDK starts cleanup itself if initialization fails. Wait for the same
+  // close operation in finally before returning the probe result.
+  const close = transport.close.bind(transport)
+  let closing
+  transport.close = () => closing ??= close()
 
-    let output = ''
-    let stderr = ''
-    let answered = false
-    let settled = false
-    let timer
-
-    const finish = (tools, error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      try { cp.kill() } catch {}
-      resolve({ tools: tools || [], error: error || null })
-    }
-
-    const armTimeout = (ms, phase) => {
-      if (settled) return
-      clearTimeout(timer)
-      timer = setTimeout(() => {
-        const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
-        finish([], `MCP ${phase}超时（${ms / 1000} 秒）${detail ? `：${detail}` : ''}`)
-      }, ms)
-    }
-
-    cp.stderr.on('data', (d) => {
-      stderr += d.toString()
-      if (stderr.length > STDERR_TAIL_BYTES) stderr = stderr.slice(-STDERR_TAIL_BYTES)
-    })
-
-    cp.stdout.on('data', (d) => {
-      output += d.toString()
-      const lines = output.split('\n')
-      output = lines.pop() || ''
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const json = JSON.parse(line.trim())
-          if (json.id === 1 && Array.isArray(json.result?.tools)) {
-            answered = true
-            finish(json.result.tools, null)
-            return
-          }
-          if (json.id === 0 && json.result && !answered) {
-            answered = true
-            armTimeout(MCP_TOOLS_TIMEOUT_MS, '工具解析')
-            cp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
-            cp.stdin.write(toolsReq)
-          }
-          if ((json.id === 0 || json.id === 1) && json.error) {
-            finish([], json.error.message || 'MCP 工具解析失败')
-            return
-          }
-        } catch {}
-      }
-    })
-
-    cp.on('error', (err) => finish([], `无法启动 ${cmd}: ${err.message}`))
-    cp.stdin.on?.('error', (err) => finish([], `MCP 输入连接失败: ${err.message}`))
-
-    cp.on('close', (code) => {
-      if (!settled) {
-        const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
-        finish([], detail || `MCP 服务提前退出（exit ${code}）`)
-      }
-    })
-
-    const initReq = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 0,
-      method: 'initialize',
-      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'claude-market', version: '1.0' } }
-    }) + '\n'
-
-    const toolsReq = JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-      params: {}
-    }) + '\n'
-
-    armTimeout(MCP_STARTUP_TIMEOUT_MS, '启动')
-    try {
-      cp.stdin.write(initReq)
-    } catch (err) { finish([], err.message) }
+  let stderr = ''
+  transport.stderr?.setEncoding('utf8').on('data', (chunk) => {
+    stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES)
   })
+
+  let phase = '启动'
+  let timeout = MCP_STARTUP_TIMEOUT_MS
+  let signal = AbortSignal.timeout(timeout)
+  try {
+    await client.connect(transport, { timeout, signal })
+    phase = '工具解析'
+    timeout = MCP_TOOLS_TIMEOUT_MS
+    signal = AbortSignal.timeout(timeout)
+    return { tools: await listMcpTools(client, { timeout, signal }), error: null }
+  } catch (error) {
+    const message = error?.message || String(error)
+    const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
+    const reason = signal.aborted || error?.code === ErrorCode.RequestTimeout
+      ? `MCP ${phase}超时（${timeout / 1000} 秒）`
+      : phase === '启动' ? `无法启动 ${cmd}: ${message}` : message
+    return { tools: [], error: detail ? `${reason}：${detail}` : reason }
+  } finally {
+    await transport.close()
+  }
+}
+
+async function listMcpTools(client, options) {
+  const tools = []
+  if (!client.getServerCapabilities()?.tools) return tools
+  const cursors = new Set()
+  let cursor
+  do {
+    const result = await client.listTools(cursor === undefined ? undefined : { cursor }, options)
+    tools.push(...result.tools)
+    cursor = result.nextCursor
+    if (cursor === undefined) return tools
+    if (cursors.has(cursor)) throw new Error('MCP 服务返回了重复的工具分页游标')
+    cursors.add(cursor)
+  } while (true)
+}
+
+async function queryHttpToolsList(url, headers, timeout = MCP_TOOLS_TIMEOUT_MS) {
+  const signal = AbortSignal.timeout(timeout)
+  let transport
+  try {
+    transport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers },
+      fetch: (input, init) => fetch(input, {
+        ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+      }),
+    })
+    const client = new Client({ name: 'universal-plugin-hub', version: '1.0.0' })
+    await client.connect(transport, { timeout, signal })
+    const tools = await listMcpTools(client, { timeout, signal })
+    return { tools, error: null, status: 200 }
+  } catch (error) {
+    const status = Number.isInteger(error.code) && error.code >= 400 && error.code <= 599 ? error.code : undefined
+    const message = signal.aborted || error.code === ErrorCode.RequestTimeout
+      ? `连接或解析 MCP 工具超时（${timeout / 1000} 秒）`
+      : status === 401 || status === 403 ? `MCP 服务返回 HTTP ${status}，请检查 Headers 或 OAuth 授权`
+        : status ? `MCP 服务返回 HTTP ${status}`
+        : `连接或解析 MCP 工具失败：${error.message}`
+    return { tools: [], error: message, status }
+  } finally {
+    if (transport?.sessionId && !signal.aborted) await transport.terminateSession().catch(() => {})
+    await transport?.close().catch(() => {})
+  }
 }
 
 const MEMORY_TOOLS_CACHE = new Map()
@@ -1623,21 +1552,23 @@ export async function fetchConnectorTools(pluginName, connectorName, forceFresh 
   // probe's stale answer (e.g. right after the user fixed a bad URL).
   if (inflight && !(forceFresh && !inflight.forceFresh)) return inflight.promise
   const entry = { forceFresh, promise: null }
-  entry.promise = discoverConnectorTools(pluginName, connectorName, forceFresh)
+  entry.promise = discoverConnectorTools(pluginName, connectorName, forceFresh, () => MCP_TOOLS_INFLIGHT.get(key) === entry)
   MCP_TOOLS_INFLIGHT.set(key, entry)
   try {
     const result = await entry.promise
     // A failure is transient; remembering it with no expiry pinned the UI to
     // "解析失败" until the process restarted.
-    if (result.ok === false) MEMORY_TOOLS_CACHE.delete(key)
-    else MEMORY_TOOLS_CACHE.set(key, { tools: result.tools || [], ok: result.ok, message: result.message })
+    if (MCP_TOOLS_INFLIGHT.get(key) === entry) {
+      if (result.ok === false || result.stale) MEMORY_TOOLS_CACHE.delete(key)
+      else MEMORY_TOOLS_CACHE.set(key, { tools: result.tools || [], ok: result.ok, message: result.message })
+    }
     return result
   } finally {
     if (MCP_TOOLS_INFLIGHT.get(key) === entry) MCP_TOOLS_INFLIGHT.delete(key)
   }
 }
 
-async function discoverConnectorTools(pluginName, connectorName, forceFresh = false) {
+async function discoverConnectorTools(pluginName, connectorName, forceFresh, isCurrent) {
   const key = `${pluginName}::${connectorName}`
   const state = readMcpToolsState()
   const disabledTools = Array.isArray(state[key]?.disabledTools) ? state[key].disabledTools : []
@@ -1647,112 +1578,34 @@ async function discoverConnectorTools(pluginName, connectorName, forceFresh = fa
     return { ok: mem.ok !== false, tools: mem.tools || [], disabledTools, ...(mem.message ? { message: mem.message } : {}) }
   }
 
-  const target = installedDir(pluginName)
-  const connectors = existsSync(target) ? getPluginConnectors(target) : []
-  const found = connectors.find((c) => c.name === connectorName)
   const entry = getConnectorEntry(pluginName, connectorName)
-  const entryCfg = entry?.config || {}
-
+  const saved = pluginName === 'user-mcp' ? readState().userMcps?.find(item => item.name === connectorName) : savedConnectorDefinition(pluginName, connectorName)
   const cached = state[key]?.cachedTools || []
+  if (!forceFresh && (cached.length > 0 || state[key]?.cachedToolsResolved === true)) return { ok: true, tools: cached, disabledTools }
 
-  // If cached tools exist, cache in memory and return immediately (0ms instant response)
-  if (!forceFresh && cached.length > 0) {
-    MEMORY_TOOLS_CACHE.set(key, { tools: cached, disabledTools })
-    return { ok: true, tools: cached, disabledTools }
-  }
-
-  const transport = entryCfg.transport || (found?.type === 'stdio' ? 'stdio' : 'http')
-  const remote = remoteConfigFromEntry(entryCfg)
-  const url = remote?.url || entryCfg.url || found?.url
-  const headers = entryCfg.headers || found?.headers || {}
-
-  // Nothing to connect to (unknown server, or a config with neither URL nor
-  // command) must read as an error, not as "this server exposes no tools".
-  let probeError = null
-  if (transport !== 'stdio' && !url) {
-    probeError = `未找到 MCP 服务 ${connectorName} 的连接配置`
-  }
-
-  // 1. HTTP / SSE fetch
-  if (transport !== 'stdio' && url) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), MCP_TOOLS_TIMEOUT_MS)
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-      })
-
-      if (res.status === 200) {
-        const text = await res.text()
-        let tools = null
-        try {
-          const data = JSON.parse(text)
-          if (Array.isArray(data.result?.tools)) tools = data.result.tools
-          else if (data.error) probeError = data.error.message || 'MCP 工具解析失败'
-        } catch {
-          const lines = text.split('\n')
-          for (const line of lines) {
-            if (line.startsWith('data:')) {
-              try {
-                const data = JSON.parse(line.slice(5).trim())
-                if (Array.isArray(data.result?.tools)) {
-                  tools = data.result.tools
-                  break
-                }
-              } catch {}
-            }
-          }
-        }
-
-        if (tools) {
-          cacheConnectorTools(key, tools)
-          return { ok: true, tools, disabledTools }
-        }
-        probeError ||= 'MCP 响应中未包含有效的工具列表'
-      } else {
-        probeError = `MCP 服务返回 HTTP ${res.status}`
-      }
-    } catch (err) {
-      probeError = controller.signal.aborted ? `MCP 工具解析超时（${MCP_TOOLS_TIMEOUT_MS / 1000} 秒）` : `连接 MCP 服务失败: ${err.message}`
-    } finally { clearTimeout(timer) }
-  }
-
-  // 2. Stdio fetch
-  if (transport === 'stdio') {
-    const cmd = entryCfg.command || found?.command
-    const args = entryCfg.args || found?.args || []
-    if (cmd) {
-      try {
-        const probe = await queryStdioToolsList(cmd, args, entryCfg.env || found?.env || {})
-        if (probe.tools.length > 0 || !probe.error) {
-          cacheConnectorTools(key, probe.tools)
-          return { ok: true, tools: probe.tools, disabledTools }
-        }
-        probeError = probe.error
-      } catch (err) {
-        probeError = err.message
-      }
-    } else {
-      probeError = '该 MCP 服务没有配置启动命令'
+  const definition = connectorDefinition(pluginName, connectorName,
+    entry ? { ...entry.config, ...remoteConfigFromEntry(entry.config) } : saved)
+  const probe = await probeConnectorDefinition(pluginName, connectorName, definition)
+  const probeError = probe.error
+  // A response from the previous registration must not replace the current cache.
+  const sameRegistration = isCurrent() && JSON.stringify(getConnectorEntry(pluginName, connectorName)) === JSON.stringify(entry)
+  if (!probeError) {
+    if (sameRegistration) {
+      cacheConnectorTools(key, probe.tools)
+      if (entry && definition.transport === 'http') setRemoteVerification(pluginName, connectorName, definition, true)
     }
+    return { ok: true, tools: probe.tools, disabledTools }
+  }
+  if (entry && definition.transport === 'http' && sameRegistration) {
+    setRemoteVerification(pluginName, connectorName, definition, false)
   }
 
   // A probe that never reached the server is an error, not an empty tool list;
   // reporting ok:true with an empty list made the UI claim the server exposes
   // no tools. A cached list is different: it is still usable, and surfacing it
   // as an error replaced the whole row (and its toggles) with a failure notice.
-  if (probeError) {
-    if (cached.length > 0) return { ok: true, tools: cached, disabledTools, message: probeError }
-    return { ok: false, tools: [], disabledTools, message: probeError }
-  }
-
-  return { ok: true, tools: [], disabledTools }
+  if (cached.length > 0) return { ok: true, stale: true, tools: cached, disabledTools, message: probeError }
+  return { ok: false, tools: [], disabledTools, message: probeError }
 }
 
 function cacheConnectorTools(key, tools) {
@@ -1762,14 +1615,22 @@ function cacheConnectorTools(key, tools) {
   const owner = key.slice(0, key.indexOf('::'))
   if (owner !== 'user-mcp' && !readState().plugins.some((p) => p.name === owner)) return
   const state = readMcpToolsState()
-  state[key] = { ...state[key], cachedTools: tools }
+  state[key] = { ...state[key], cachedTools: tools, cachedToolsResolved: true }
   writeMcpToolsState(state)
   MEMORY_TOOLS_CACHE.set(key, { tools })
 }
 
-function warmInstalledConnectorTools(pluginName, connectors) {
+function warmInstalledConnectorTools(pluginName, connectors, record) {
+  const canEnable = () => readState().plugins.some(item =>
+    item.name === pluginName && item.sourceId === record.sourceId && item.installedAt === record.installedAt && item.enabled !== false)
   for (const connector of connectors) {
-    if (getConnectorEntry(pluginName, connector.name)) {
+    const entry = getConnectorEntry(pluginName, connector.name)
+    const saved = readMcpToolsState()[`${pluginName}::${connector.name}`]
+    if (!connectorRequiresAuth(connector) && !saved?.savedConnectorDefinition && !saved?.savedOAuthRemoteConfig) {
+      // Installation stays responsive. DSH watches the profile patch and loads
+      // the connector once its background probe succeeds.
+      void enableConnector(pluginName, connector.name, connector, { pluginOwned: true, rememberDefinition: false, canEnable }).catch(() => {})
+    } else if (entry) {
       void fetchConnectorTools(pluginName, connector.name, true).catch(() => {})
     }
   }
@@ -1934,10 +1795,28 @@ export async function syncAllInstalledSkillsToDsh() {
  * Install a plugin from the marketplace into the installed tree.
  * Returns a result summary for the UI.
  */
-export async function installPlugin({ sourceId, pluginName, refresh = false }) {
+const marketplaceInstalls = new Set()
+
+export async function installPlugin(options) {
+  const { pluginName } = options
+  if (marketplaceInstalls.has(pluginName)) throw new Error(`插件 ${pluginName} 正在安装`)
+  marketplaceInstalls.add(pluginName)
+  try {
+    return await installMarketplacePlugin(options)
+  } finally {
+    marketplaceInstalls.delete(pluginName)
+  }
+}
+
+async function installMarketplacePlugin({ sourceId, pluginName, refresh = false }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
+  const installed = state.plugins.find(plugin => plugin.name === pluginName)
+  if (installed && installed.sourceId !== sourceId) {
+    const owner = state.sources.find(item => item.id === installed.sourceId)
+    throw new Error(`插件 ${pluginName} 已从 ${owner?.name || installed.sourceId} 安装，请在管理页操作`)
+  }
 
   const row = await findMarketRow(sourceId, pluginName)
   if (!row) throw new Error(`plugin not found in marketplace: ${pluginName}`)
@@ -2120,15 +1999,6 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   for (const name of prevConnectors) {
     if (!pluginConnectors.some((c) => c.name === name)) unregisterConnector(pluginName, name)
   }
-  for (const c of pluginConnectors) {
-    if (!connectorRequiresAuth(c)) {
-      const isHttp = (connectorTransport(c.type, c.url, c.command) === 'http')
-      if (isHttp && (!c.url || !c.url.trim() || !/^https?:\/\//i.test(c.url.trim()))) {
-        continue
-      }
-      registerConnector(pluginName, c.name, c)
-    }
-  }
 
   // Auto-register LSP servers declared by the plugin. The host packages
   // (dsh-lsp / dsh-lsp-stdio / dsh-tool-lsp) were pre-provisioned by the
@@ -2166,14 +2036,13 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
     lspServerCount: lspServers.length,
     version: readInstalledVersion(target) ?? row.version ?? null,
   }
-  // Same-name replace: installed files live under a name-only directory, so a
-  // plugin with the same name from any source supersedes the previous record.
-  state.plugins = state.plugins.filter((p) => p.name !== pluginName)
-  state.plugins.push(record)
-  writeState(state)
+  // Materialization can overlap edits to other plugins and to standalone MCPs.
+  const latest = readState()
+  latest.plugins = [...latest.plugins.filter((p) => p.name !== pluginName), record]
+  writeState(latest)
   invalidateParserCaches()
 
-  warmInstalledConnectorTools(pluginName, pluginConnectors)
+  warmInstalledConnectorTools(pluginName, pluginConnectors, record)
 
   return {
     ok: true,
@@ -2238,7 +2107,7 @@ export async function uninstallPlugin(pluginName) {
   // shared namespace. Other cached entries are eligible only with provenance.
   const claimed = sharedNamespace ? standaloneIds() : new Set()
   const cachedNames = Object.entries(priorToolsState)
-    .filter(([key, saved]) => key.startsWith(prefix) && (!sharedNamespace || saved?.pluginOAuthOwned))
+    .filter(([key, saved]) => key.startsWith(prefix) && (!sharedNamespace || saved?.pluginOAuthOwned || saved?.pluginConnectorOwned))
     .map(([key]) => key.slice(prefix.length))
   const ownedNames = new Set()
   for (const name of new Set([...declared.keys(), ...cachedNames])) {
@@ -2249,8 +2118,9 @@ export async function uninstallPlugin(pluginName) {
     const remote = remoteConfigFromEntry(entry?.config)
     const ownsRegistration = remote && remote.credentialKey === oauthCredentialKey(pluginName, name, remote.url, remote.oauth)
     if (sharedNamespace && remote && !ownsRegistration) continue
-    if (sharedNamespace && !entry && !saved?.pluginOAuthOwned) continue
+    if (sharedNamespace && !entry && !saved?.pluginOAuthOwned && !saved?.pluginConnectorOwned) continue
     ownedNames.add(name)
+    MCP_ACTIVATIONS.delete(prefix + name)
     if (remote ? ownsRegistration : declared.has(name)) unregisterConnector(pluginName, name)
     const oauthUrls = new Set([
       ...(Array.isArray(saved?.oauthUrls) ? saved.oauthUrls : []),
@@ -2313,9 +2183,6 @@ export async function togglePlugin(pluginName, enabled) {
     if (existsSync(skillsDir)) {
       await syncPluginSkillsToDsh(pluginName)
     }
-    for (const c of pluginConnectors) {
-      registerConnector(pluginName, c.name, c)
-    }
     for (const r of registerPluginLsp(pluginName)) {
       if (!r.ok && r.error) lspErrors.push(r.error)
     }
@@ -2323,13 +2190,23 @@ export async function togglePlugin(pluginName, enabled) {
   } else {
     removePluginSkillsFromDsh(pluginName)
     for (const c of pluginConnectors) {
-      unregisterConnector(pluginName, c.name)
+      toggleConnector(pluginName, c.name, false)
     }
     unregisterPluginLsp(pluginName)
     unregisterPluginHooks(pluginName)
   }
-  rec.enabled = enabled
-  writeState(state)
+  const latest = readState()
+  const sameInstall = (item) => item.name === pluginName && item.sourceId === rec.sourceId && item.installedAt === rec.installedAt
+  if (!latest.plugins.some(sameInstall)) return { ok: false, error: '插件已变更，请刷新后重试' }
+  writeState({ ...latest, plugins: latest.plugins.map(item => sameInstall(item) ? { ...item, enabled } : item) })
+  if (enabled) {
+    const canEnable = () => readState().plugins.some(item => sameInstall(item) && item.enabled !== false)
+    await Promise.all(pluginConnectors.map(async (c) => {
+      if (!getConnectorEntry(pluginName, c.name) && (savedConnectorDefinition(pluginName, c.name) || !connectorRequiresAuth(c))) {
+        await enableConnector(pluginName, c.name, undefined, { pluginOwned: true, canEnable })
+      }
+    }))
+  }
   return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined }
 }
 
@@ -2537,18 +2414,20 @@ export function installedDetails() {
       const toolState = () => (toolsState ??= readMcpToolsState())[`${rec.name}::${c.name}`]
       const authenticated = connectorAuthenticated(c, savedEntry)
       const connected = connectorActive(savedEntry, () => authenticated, toolState)
-      const savedConfig = savedEntry?.config || {}
+      const savedConfig = savedEntry?.config || toolState()?.savedConnectorDefinition || {}
       const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? toolState()?.savedOAuthRemoteConfig : null)
-      const savedHeaders = remote ? remote.headers : ((savedConfig.headers && Object.keys(savedConfig.headers).length > 0) ? savedConfig.headers : c.headers)
-      const savedEnv = remote ? {} : ((savedConfig.env && Object.keys(savedConfig.env).length > 0) ? savedConfig.env : c.env)
-      const savedUrl = remote ? remote.url : (savedConfig.url || c.url)
-      const savedArgs = remote ? [] : ((savedConfig.args && savedConfig.args.length > 0) ? savedConfig.args : c.args)
+      const storedDefinition = toolState()?.savedConnectorDefinition
+      const savedHeaders = remote ? remote.headers : (savedConfig.headers ?? storedDefinition?.headers ?? c.headers)
+      const savedEnv = remote ? {} : (savedConfig.env ?? storedDefinition?.env ?? c.env)
+      const savedUrl = remote ? remote.url : (savedConfig.url ?? c.url)
+      const savedArgs = remote ? [] : (savedConfig.args ?? storedDefinition?.args ?? c.args)
       const savedTransport = remote ? 'http' : connectorTransport(savedConfig.transport || savedConfig.type, savedUrl, savedConfig.command || c.command)
       const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, savedUrl, remote.oauth) : null
 
       return {
         ...c,
         type: savedTransport,
+        command: remote ? null : (savedConfig.command ?? c.command),
         url: savedUrl,
         headers: savedHeaders,
         env: savedEnv,
@@ -2558,6 +2437,7 @@ export function installedDetails() {
         oauthHasClientSecret: savedClient?.hasClientSecret || false,
         oauthCallbackPort: remote?.oauthCallbackPort || '',
         oauthScope: remote?.oauthScope || '',
+        configured: !!(savedEntry || storedDefinition || remote),
         needsAuth,
         authenticated,
         enabled: !!savedEntry,

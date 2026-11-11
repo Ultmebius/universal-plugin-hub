@@ -35,6 +35,7 @@ function harness({ widths = [112, null, 260, 230, 60], scroll = 0, gap = 2, redu
     state, activeSourceId: '0', view: { type: 'browse' }, filter: 'all', mcpsOpen: false,
     setState: fn => { state = fn(state) }, updateTabsMask() {}, showToast() {},
     setActiveSourceId() { throw new Error('drag incorrectly activated a source') },
+    setMcpsOpen() { throw new Error('drag incorrectly closed the MCP page') },
     scrollActiveTabIntoView() { throw new Error('drag incorrectly scrolled to the active tab') },
     scrollContentToTop() {}, gridRef: { current: null },
     SESSION_STORE: {}, STORAGE_KEY_STATE: 'test', localStorage: { setItem() {} }, savedTabScrolls: new Map(),

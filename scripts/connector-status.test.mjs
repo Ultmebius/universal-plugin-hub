@@ -15,6 +15,8 @@ const {
   saveConnectorAuth,
   verifyConnectorAuth,
   installedDetails,
+  enableConnector,
+  fetchConnectorTools,
 } = await import('../src/install.js')
 
 function writePlugin(name, connector) {
@@ -24,6 +26,15 @@ function writePlugin(name, connector) {
 }
 
 const exa = { name: 'exa', type: 'http', url: 'https://mcp.exa.ai/mcp', headers: { 'x-exa-source': 'agent-plugin' } }
+
+function successfulMcpFetch(_url, { body }) {
+  const { id, method } = JSON.parse(body)
+  if (method === 'notifications/initialized') return Promise.resolve(new Response(null, { status: 202 }))
+  const result = method === 'initialize'
+    ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'test', version: '1' } }
+    : { tools: [] }
+  return Promise.resolve(Response.json({ jsonrpc: '2.0', id, result }))
+}
 
 test('remote connector status follows a successful probe of the current config', async (t) => {
   try {
@@ -36,7 +47,7 @@ test('remote connector status follows a successful probe of the current config',
     })
 
     await t.test('HTTP 406 after a previous success leaves the row pending verification', async () => {
-      globalThis.fetch = async () => new Response(JSON.stringify({ result: { tools: [] } }), { status: 200 })
+      globalThis.fetch = successfulMcpFetch
       assert.equal((await verifyConnectorAuth('remote-plugin', 'exa', exa)).ok, true)
       assert.equal(isConnectorActive('remote-plugin', 'exa'), true)
       globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'Not Acceptable' } }), { status: 406 })
@@ -47,7 +58,7 @@ test('remote connector status follows a successful probe of the current config',
     })
 
     await t.test('success is bound to the exact tested URL and headers', async () => {
-      globalThis.fetch = async () => new Response(JSON.stringify({ result: { tools: [] } }), { status: 200 })
+      globalThis.fetch = successfulMcpFetch
       assert.equal((await verifyConnectorAuth('remote-plugin', 'exa', exa)).ok, true)
       assert.equal(isConnectorActive('remote-plugin', 'exa'), true)
       const changed = { ...exa, url: 'https://mcp.exa.ai/other' }
@@ -60,9 +71,32 @@ test('remote connector status follows a successful probe of the current config',
     await t.test('token and SSE verification match the registered config', async () => {
       const sse = { ...exa, type: 'sse', transport: 'sse', token: 'secret-token' }
       saveConnectorAuth('remote-plugin', 'exa', sse)
-      globalThis.fetch = async () => new Response(JSON.stringify({ result: { tools: [] } }), { status: 200 })
+      globalThis.fetch = successfulMcpFetch
       assert.equal((await verifyConnectorAuth('remote-plugin', 'exa', sse)).ok, true)
       assert.equal(isConnectorActive('remote-plugin', 'exa'), true)
+    })
+
+    await t.test('testing a different unsaved endpoint preserves the live connection status', async () => {
+      saveConnectorAuth('remote-plugin', 'exa', exa)
+      globalThis.fetch = successfulMcpFetch
+      assert.equal((await verifyConnectorAuth('remote-plugin', 'exa', exa)).ok, true)
+      const draft = { ...exa, url: 'https://mcp.exa.ai/draft' }
+      assert.equal((await verifyConnectorAuth('remote-plugin', 'exa', draft)).ok, true)
+      assert.equal(isConnectorActive('remote-plugin', 'exa'), true)
+      globalThis.fetch = async () => new Response(null, { status: 401 })
+      assert.equal((await verifyConnectorAuth('remote-plugin', 'exa', draft)).ok, false)
+      assert.equal(isConnectorActive('remote-plugin', 'exa'), true)
+    })
+
+    await t.test('a verified empty tool list is served without running discovery again', async () => {
+      globalThis.fetch = successfulMcpFetch
+      assert.equal((await enableConnector('remote-plugin', 'exa', exa)).ok, true)
+      let probes = 0
+      globalThis.fetch = async () => { probes++; throw new Error('unexpected discovery') }
+      const result = await fetchConnectorTools('remote-plugin', 'exa')
+      assert.equal(result.ok, true)
+      assert.deepEqual(result.tools, [])
+      assert.equal(probes, 0)
     })
 
     await t.test('a valid stdio command keeps its existing active-state behavior', () => {

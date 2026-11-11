@@ -64,7 +64,7 @@ test('detail reading position survives remount and waits for asynchronous conten
 
 test('source sorting survives installation, tab navigation and remounts until filtering, sorting or a new Hub session', async () => {
   const browse = func('BrowseView')
-  const names = new Set(['currentSourceInstalledNames', 'sortInstalledSnapshots', 'sortInstalledNames', 'currentSourcePlugins', 'visible'])
+  const names = new Set(['currentSourceInstalledNames', 'crossSourceInstalledNames', 'sortInstalledSnapshots', 'sortInstalledNames', 'currentSourcePlugins', 'visible'])
   const commits = browse.body.body.filter(n => n.type === 'ExpressionStatement'
     && n.expression?.type === 'CallExpression' && code(n).includes('SESSION_STORE.browseSortSnapshots'))
   assert.equal(commits.length, 1, 'the snapshot commit effect moved; update this test to follow it')
@@ -135,7 +135,7 @@ test('Skill, plugin detail and management all retain the source view as their sc
   act(() => view.unmount())
 })
 
-test('dialog dismiss requires a complete backdrop click, never a text-selection drag', () => {
+test('dismissible backdrops require a complete click, while editors keep their drafts', () => {
   const helper = func('backdropDismissProps')
   assert.ok(helper, 'dialogs need a shared gesture-aware dismiss handler')
   const context = {}
@@ -154,7 +154,92 @@ test('dialog dismiss requires a complete backdrop click, never a text-selection 
   assert.equal(closed, 0)
   props.onPointerDown(event(backdrop)); props.onClick(event(backdrop))
   assert.equal(closed, 1)
-  const overlays = nodes.filter(n => n.type === 'ObjectExpression' && n.properties.some(p => p.key?.name === 'className' && p.value?.value === 'cpm-dialog'))
+  const overlays = nodes.filter(n => n.type === 'CallExpression' && n.callee.name === 'h' &&
+    n.arguments[1]?.properties?.some(p => p.key?.name === 'className' && p.value?.value === 'cpm-dialog'))
   assert.ok(overlays.length >= 5)
-  for (const overlay of overlays) assert.match(code(overlay), /\.\.\.backdropDismissProps\(/)
+  const editors = overlays.filter(overlay => /cpm-mcp-modal|cpm-source-dialog-box/.test(code(overlay.arguments[2])))
+  assert.equal(editors.length, 3)
+  for (const overlay of overlays) {
+    const props = code(overlay.arguments[1])
+    if (editors.includes(overlay)) {
+      assert.doesNotMatch(props, /backdropDismissProps|onClick|onPointer/)
+      assert.match(code(overlay.arguments[2]), /onClick: (?:onCancel|closeAuthDialog)/)
+    } else {
+      assert.match(props, /\.\.\.backdropDismissProps\(/)
+    }
+  }
+})
+
+test('Skills loads once in the background across tabs and keeps identical or newer rows', async () => {
+  const hook = func('useSkillsCatalog')
+  assert.ok(hook)
+  const saved = [{ id: 'a', enabled: true }]
+  const store = { rows: { 'skills-local': saved } }
+  const calls = [], resolve = []
+  const context = { ...React, SESSION_STORE: store,
+    api: url => { calls.push(url); return new Promise(r => resolve.push(r)) } }
+  vm.runInNewContext(code(hook) + '\nglobalThis.useCatalog = useSkillsCatalog', context)
+  const setRows = update => { store.rows = update(store.rows) }
+  function App({ source }) {
+    context.useCatalog(true, setRows)
+    return React.createElement('div', null, source)
+  }
+  let view
+  await act(async () => { view = create(React.createElement(App, { source: 'anthropic' })) })
+  await act(async () => view.update(React.createElement(App, { source: 'skills-local' })))
+  assert.deepEqual(calls, ['/skills'])
+  assert.equal(store.rows['skills-local'], saved)
+  await act(async () => resolve.shift()({ skills: [{ ...saved[0] }] }))
+  assert.equal(store.rows['skills-local'], saved, 'an equal response keeps the rendered list')
+  await act(async () => view.unmount())
+  await act(async () => { view = create(React.createElement(App, { source: 'skills-local' })) })
+  const newer = [{ id: 'a', enabled: false }]
+  store.rows = { 'skills-local': newer }
+  await act(async () => resolve.shift()({ skills: saved }))
+  assert.equal(store.rows['skills-local'], newer, 'a late background read cannot undo a toggle')
+  await act(async () => view.unmount())
+  const browse = code(func('BrowseView'))
+  assert.match(browse, /if \(!activeSourceId \|\| activeSourceId === "skills-local"\) return/)
+  assert.ok(browse.includes('!rows?.["skills-local"] ? (skillsLoadFailed ?'))
+})
+
+test('MCP tool chips share the icon curve and draw their hover edge with a single border', () => {
+  for (const selector of ['.cpm-card-icon', '.cpm-mcp-tool-pill']) {
+    const css = source.slice(source.indexOf(selector + ' {')).split('}')[0]
+    assert.match(css, /border-radius: var\(--cpm-card-icon-radius\)/)
+    assert.match(css, /corner-shape: var\(--cpm-icon-corner-shape\)/)
+  }
+  const hoverEdges = [...source.matchAll(/\.cpm-mcp-tool-pill-wrap:hover > \.cpm-mcp-tool-pill:not\(\.is-disabled\) \{([^}]+)\}/g)].filter(([, css]) => css.includes('border-color'))
+  assert.equal(hoverEdges.length, 2)
+  for (const [, css] of hoverEdges) {
+    assert.doesNotMatch(css, /transform:|box-shadow:\s*0/)
+  }
+  assert.match(source, /\.cpm-mcp-tool-pill:focus-visible \{[^}]*outline: 2px solid/)
+  assert.match(source, /translate: 0 0;\s*transition: translate 190ms cubic-bezier\(0\.18, 0\.78, 0\.3, 1\)/)
+  assert.match(source, /\.cpm-mcp-tool-pill-wrap::before\s*\{[^}]*inset: calc\(100% \+ 1px\)[^}]*radial-gradient/)
+})
+
+test('Skills warms only its first rows and reuses local image requests across rerenders', () => {
+  const warmed = [], ref = { current: new Map() }
+  const local = '/universal-plugin-hub/api/skills/icon?id='
+  const context = {
+    useRef: () => ref, useEffect: fn => fn(), getPluginIconCandidates: skill => skill.icons || [],
+    getPluginBadge: () => ({ src: '/bundled' }),
+    Image: class { set src(value) { warmed.push(value) } decode() { return Promise.resolve() } },
+  }
+  const warm = vm.runInNewContext(code(func('useWarmSkillIcons')) + '\nuseWarmSkillIcons', context)
+  const rows = [{ icons: ['https://example.test/external.png'] }, {}, {},
+    ...Array.from({ length: 15 }, (_, id) => ({ icons: [local + id] }))]
+  warm(rows, true)
+  warm([...rows], false)
+  assert.deepEqual(warmed, ['/bundled', ...Array.from({ length: 9 }, (_, id) => local + id)])
+})
+
+test('plugin previews and MCP tool details share the host radius and continuous corner shape', () => {
+  const shared = source.match(/\.cpm-smart-hover\s*\{([^}]+)\}/)?.[1]
+  assert.match(shared || '', /border-radius: var\(--dsw-radius-lg, 16px\)/)
+  assert.match(shared || '', /corner-shape: squircle/)
+  for (const name of ['PluginPreviewPopover', 'McpToolPopover']) {
+    assert.match(code(func(name)), /h\(SmartHoverPopover,/)
+  }
 })

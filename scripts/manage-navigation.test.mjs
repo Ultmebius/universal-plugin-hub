@@ -63,7 +63,7 @@ test('normal and grouped installed cards use the same entry for their body and M
     && node.arguments[1]?.properties.some(prop => prop.key.name === 'plugin' && prop.value.name === 'p'))
   assert.equal(cards.length, 2)
   for (const installed of [true, false]) {
-    const plugin = { name: 'example' }, record = { name: 'example', sourceId: 'a' }
+    const plugin = { name: 'example', sourceId: 'a' }, record = { name: 'example', sourceId: 'knowledge-work' }
     const store = {}, opened = []
     const context = { state: { plugins: installed ? [record] : [] }, SESSION_STORE: store,
       gridRef: { current: { scrollTop: 640 } }, activeSourceId: 'a', closePluginHover() {},
@@ -87,6 +87,16 @@ test('normal and grouped installed cards use the same entry for their body and M
       } else assert.equal(opened.at(-1)[1].type, 'detail')
     }
   }
+})
+
+test('the installed view lists a cross-listed plugin once, under its original marketplace', () => {
+  const context = { filter: 'installed', activeSourceId: 'anthropic', sortBy: 'default', query: '', useMemo: fn => fn(),
+    rows: { anthropic: [{ name: 'exa' }], 'knowledge-work': [{ name: 'exa' }] },
+    state: { sources: [{ id: 'anthropic' }, { id: 'knowledge-work' }], plugins: [{ name: 'exa', sourceId: 'knowledge-work' }] } }
+  const groups = vm.runInNewContext(code(declaration('installedSourceGroups').init), context)
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].source.id, 'knowledge-work')
+  assert.equal(groups[0].plugins.length, 1)
 })
 
 test('management opened from MCP returns to MCP with the original source view intact', () => {

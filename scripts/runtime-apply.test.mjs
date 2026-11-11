@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+
+const fixture = fileURLToPath(new URL('./fixtures/paged-stdio-server.mjs', import.meta.url))
 
 const { createProfileApplicator, scheduledResult, APPLIED_TOKEN } = await import('../src/runtime.js')
 const { getConnectorId } = await import('../src/install.js')
@@ -108,7 +111,7 @@ test('a new user MCP schedules the live profile application for its registration
 
   const created = await request(handler, 'POST', '/mcps', {
     name: 'hot-test', transport: 'stdio', command: process.execPath,
-    args: [], env: {}, headers: {}, oauth: 'none',
+    args: [fixture, 'empty'], env: {}, headers: {}, oauth: 'none',
   })
   assert.equal(created.status, 200)
   assert.equal(created.body.ok, true)

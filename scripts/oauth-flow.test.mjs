@@ -295,14 +295,14 @@ test('custom clients, cancellation and configuration transitions stay isolated',
   assert.ok(remoteConfigFromEntry(bridgeEntry.config))
   assert.equal(toggleConnector('test-plugin', 'remote', false).ok, true)
   assert.ok(readMcpToolsState()['test-plugin::remote'].savedOAuthRemoteConfig)
-  assert.equal(toggleConnector('test-plugin', 'remote', true).ok, true)
+  assert.equal((await toggleConnector('test-plugin', 'remote', true)).ok, true)
   assert.ok(remoteConfigFromEntry(getConnectorEntry('test-plugin', 'remote').config))
   saveConnectorAuth('test-plugin', 'remote', { ...payload, oauth: 'none' })
   assert.equal(remoteConfigFromEntry(getConnectorEntry('test-plugin', 'remote').config), null)
   assert.equal(isConnectorActive('test-plugin', 'remote'), false)
   toggleConnector('test-plugin', 'remote', false)
-  toggleConnector('test-plugin', 'remote', true)
-  assert.equal(remoteConfigFromEntry(getConnectorEntry('test-plugin', 'remote').config), null)
+  assert.equal((await toggleConnector('test-plugin', 'remote', true)).ok, false)
+  assert.equal(getConnectorEntry('test-plugin', 'remote'), null)
   for (const file of readdirSync(credentialRoot, { withFileTypes: true })) {
     if (file.isFile()) assert.equal(readFileSync(join(credentialRoot, file.name), 'utf8').includes('test-client-secret') && process.platform !== 'win32', false)
   }
@@ -489,7 +489,9 @@ test('plugin-owned OAuth registrations in the shared namespace are not imported 
   const { mountRoutes } = await import('../src/routes.js')
   const plugin = 'user-mcp'
   const connector = 'plugin-owned'
-  const url = 'https://fixture.invalid/plugin-owned'
+  const remote = await startFixture()
+  t.after(() => remote.close())
+  const { url } = remote
   const target = installedDir(plugin)
   mkdirSync(target, { recursive: true })
   writeFileSync(join(target, '.mcp.json'), JSON.stringify({ mcpServers: { [connector]: { url } } }))
@@ -503,10 +505,21 @@ test('plugin-owned OAuth registrations in the shared namespace are not imported 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise(resolve => server.close(resolve)))
   const base = `http://127.0.0.1:${server.address().port}/universal-plugin-hub/api`
+  const payload = { url, transport: 'http', oauth: 'auto_register' }
+  const rejected = await fetch(`${base}/plugins/${plugin}/connectors/${connector}/auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  assert.equal((await rejected.json()).ok, false, 'unverified OAuth must not enable the connector')
+  const verification = beginOAuthVerification(plugin, connector, payload, { pluginOwned: true, noBrowser: true, callbackTimeout: 10000 })
+  const authorization = await waitFor(() => getOAuthVerification(verification.id).authorizationUrl)
+  assert.equal((await approve(authorization)).callback.status, 200)
+  assert.equal((await completeOAuthVerification(verification)).ok, true)
   const saved = await fetch(`${base}/plugins/${plugin}/connectors/${connector}/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, transport: 'http', oauth: 'auto_register' }),
+    body: JSON.stringify(payload),
   })
   assert.equal((await saved.json()).ok, true)
   const list = await fetch(`${base}/mcps`)
@@ -518,6 +531,37 @@ test('plugin-owned OAuth registrations in the shared namespace are not imported 
   assert.equal(toggleConnector(plugin, connector, false).ok, true)
   assert.equal((await uninstallPlugin(plugin)).ok, true)
   assert.equal(existsSync(record), false)
+})
+
+test('saving a renamed standalone MCP uses the OAuth authorization just completed under its new name', async (t) => {
+  const { mountRoutes } = await import('../src/routes.js')
+  const remote = await startFixture()
+  t.after(() => remote.close())
+  let handler
+  mountRoutes({ register(route) { handler = route.handler } })
+  const server = createServer(handler)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const base = `http://127.0.0.1:${server.address().port}/universal-plugin-hub/api`
+  const oldName = 'before-oauth-rename'
+  const newName = 'after-oauth-rename'
+  const state = readState()
+  writeState({ ...state, userMcps: [...(state.userMcps || []), { name: oldName, transport: 'http', url: remote.url, oauth: 'auto_register' }] })
+  const config = { url: remote.url, transport: 'http', oauth: 'auto_register' }
+  const session = beginOAuthVerification('user-mcp', newName, config, { noBrowser: true, callbackTimeout: 10000 })
+  const authorization = await waitFor(() => getOAuthVerification(session.id).authorizationUrl)
+  assert.equal((await approve(authorization)).callback.status, 200)
+  assert.equal((await completeOAuthVerification(session)).ok, true)
+
+  const response = await fetch(base + '/mcps/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...config, name: newName, previousName: oldName, enable: true }),
+  })
+  const saved = await response.json()
+  assert.equal(saved.ok, true, saved.error)
+  assert.ok(getConnectorEntry('user-mcp', newName))
+  assert.equal(getConnectorEntry('user-mcp', oldName), null)
 })
 
 test('uninstall of a plain HTTP connector succeeds with no usable OAuth store', async () => {

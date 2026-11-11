@@ -14,7 +14,7 @@ import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceC
 import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered, toolCallIconGroups,
-  toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
+  toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, importLocalSkills, importLocalMarketplace, saveUploadedZip } from './local.js'
@@ -365,7 +365,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         for (const item of block.insert) {
           if (!item || typeof item.id !== 'string' || !item.id.startsWith(getConnectorId('user-mcp', ''))) continue
           const cfg = item.config || {}
-          if (pluginTools?.[`user-mcp::${cfg.serverName}`]?.pluginOAuthOwned && remoteConfigFromEntry(cfg)) continue
+          const ownership = pluginTools?.[`user-mcp::${cfg.serverName}`]
+          if (ownership?.pluginConnectorOwned || (ownership?.pluginOAuthOwned && remoteConfigFromEntry(cfg))) continue
           if (cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
             state.userMcps.push(userMcpConfig(cfg.serverName, {
               transport: cfg.transport, url: cfg.url, command: cfg.command,
@@ -397,7 +398,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
               // opinion, so a cleared field stays cleared.
               oauthCallbackPort: x.oauthCallbackPort ?? remote.oauthCallbackPort ?? null,
               oauthScope: x.oauthScope ?? remote.oauthScope ?? '',
-            } : {}),
+            } : entry?.config?.headers ? { headers: entry.config.headers } : {}),
             enabled: enabledIds.has(getConnectorId('user-mcp', x.name)),
           }
         })
@@ -423,12 +424,14 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       requireSameOrigin(req)
       const body = await readJsonBody(req)
       const name = safeSegment(normalizeMcpName(body.name), 'MCP 名称')
-      const result = saveConnectorAuth('user-mcp', name, body)
+      const probe = await probeConnectorAuth('user-mcp', name, body)
+      if (!probe.ok) return sendJson(res, 200, { ok: false, error: probe.error })
+      const result = saveConnectorAuth('user-mcp', name, body, { probe })
       if (result && result.ok) {
         const state = readState()
         if (!Array.isArray(state.userMcps)) state.userMcps = []
         state.userMcps = state.userMcps.filter((x) => x && x.name !== name)
-        state.userMcps.push(userMcpConfig(name, body))
+        state.userMcps.push(userMcpConfig(name, { ...body, ...probe.definition }))
         writeState(state)
       }
       // A rejected create registered nothing, so there is nothing to apply.
@@ -445,32 +448,47 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         ? safeSegment(normalizeMcpName(body.previousName), 'MCP 名称')
         : null
       const name = safeSegment(normalizeMcpName(body.name), 'MCP 名称')
-      const state = readState()
+      let state = readState()
       if (!Array.isArray(state.userMcps)) state.userMcps = []
-      const idx = state.userMcps.findIndex((x) => x && x.name === (previousName || name))
+      let idx = state.userMcps.findIndex((x) => x && x.name === (previousName || name))
       if (idx < 0) throw new Error(`MCP 不存在：${previousName || name}`)
+      const oldName = previousName || name
+      if (oldName !== name && state.userMcps.some(item => item?.name === name)) {
+        throw new Error(`已存在同名 MCP：${name}`)
+      }
+      const saved = state.userMcps[idx]
+      const wasEnabled = !!getConnectorEntry('user-mcp', oldName)
+      const enable = wasEnabled || body.enable === true
+      const cfg = { ...userMcpConfig(name, body, saved), oauthClientSecret: body.oauthClientSecret }
+      let probe
+      if (enable) {
+        probe = await probeUserMcpUpdate(oldName, name, cfg)
+        if (!probe.ok) return sendJson(res, 200, { ok: false, error: probe.error })
+        state = readState()
+        idx = state.userMcps?.findIndex(x => x?.name === oldName) ?? -1
+        if (idx < 0 || JSON.stringify(state.userMcps[idx]) !== JSON.stringify(saved)
+          || !!getConnectorEntry('user-mcp', oldName) !== wasEnabled) {
+          return sendJson(res, 200, { ok: false, error: 'MCP 配置或开关已变更，请刷新后重试' })
+        }
+        Object.assign(cfg, probe.definition)
+      }
       if (previousName && previousName !== name) {
-        // Capture enablement before the rename: a disabled server registers
-        // nothing, so asking HMR to start its id would target an entry that
-        // does not exist.
-        const renamingEnabled = !!getConnectorEntry('user-mcp', previousName)
-        const renamed = renameUserMcp(previousName, name, body)
+        const renamed = renameUserMcp(previousName, name, cfg, { enable, probe })
         // A rename that failed registered nothing, so there is nothing to apply.
         if (!renamed || !renamed.ok) return sendJson(res, 200, renamed)
         return sendJson(res, 200, scheduledResult(
-          renamed, applyProfile, renamingEnabled ? [getConnectorId('user-mcp', name)] : []))
+          renamed, applyProfile, enable ? [getConnectorId('user-mcp', name)] : []))
       }
-      const wasEnabled = !!getConnectorEntry('user-mcp', name)
       let result = { ok: true }
-      if (wasEnabled) {
-        result = saveConnectorAuth('user-mcp', name, body)
+      if (enable) {
+        result = saveConnectorAuth('user-mcp', name, cfg, { probe })
         if (!result || !result.ok) return sendJson(res, 200, result)
       }
       // Pass the stored record so an edit keeps the URL history a later delete
       // needs to find every credential this server ever issued.
-      state.userMcps[idx] = userMcpConfig(name, body, state.userMcps[idx])
+      state.userMcps[idx] = userMcpConfig(name, cfg, state.userMcps[idx])
       writeState(state)
-      return sendJson(res, 200, scheduledResult(result, applyProfile, wasEnabled ? [getConnectorId('user-mcp', name)] : []))
+      return sendJson(res, 200, enable ? scheduledResult(result, applyProfile, [getConnectorId('user-mcp', name)]) : result)
     }
 
     // One segment only: `/mcps/<name>/tools` belongs to the tool routes below.
@@ -498,11 +516,15 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const cfg = (state.userMcps || []).find((x) => x && x.name === name)
       if (!cfg) throw new Error(`MCP 不存在：${name}`)
       if (body.enabled !== false) {
-        const result = saveConnectorAuth('user-mcp', name, cfg)
+        const result = await enableConnector('user-mcp', name, cfg, {
+          canEnable: () => readState().userMcps?.some(item => item?.name === name && JSON.stringify(item) === JSON.stringify(cfg)),
+        })
         // A rejected enable registered nothing: do not schedule a reconcile.
         if (!result || !result.ok) return sendJson(res, 200, result)
         return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId('user-mcp', name)]))
       }
+      const liveHeaders = getConnectorEntry('user-mcp', name)?.config?.headers
+      if (liveHeaders) writeState({ ...state, userMcps: state.userMcps.map(item => item === cfg ? { ...cfg, headers: liveHeaders } : item) })
       unregisterConnector('user-mcp', name)
       return sendJson(res, 200, scheduledResult({ ok: true }, applyProfile))
     }
@@ -562,7 +584,11 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
-      const result = toggleConnector(pluginName, connectorName, body.enabled !== false)
+      const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
+      if (!canEnable() && body.enabled !== false) return sendJson(res, 200, { ok: false, error: '请先启用所属插件' })
+      const result = body.enabled !== false
+        ? await enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, canEnable })
+        : toggleConnector(pluginName, connectorName, false)
       // A rejected toggle registered nothing: do not schedule a reconcile.
       if (!result || !result.ok) return sendJson(res, 200, result)
       return sendJson(res, 200, scheduledResult(result, applyProfile, body.enabled !== false ? [getConnectorId(pluginName, connectorName)] : []))
@@ -590,7 +616,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (!readState().plugins.some(plugin => plugin.name === pluginName)) {
         return sendJson(res, 404, { ok: false, error: '插件未安装或已卸载' })
       }
-      const result = saveConnectorAuth(pluginName, connectorName, body, { pluginOwned: true })
+      const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
+      if (!canEnable()) return sendJson(res, 200, { ok: false, error: '请先启用所属插件' })
+      const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable })
       return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId(pluginName, connectorName)]))
     }
 

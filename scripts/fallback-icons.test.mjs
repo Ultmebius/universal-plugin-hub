@@ -8,7 +8,7 @@ import { getOrFetchIcon } from '../src/icons.js'
 
 const source = fs.readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
 const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script' })
-const wanted = new Set(['FLUENT_3D_ICONS', 'FALLBACK_RULES', 'BADGE_CACHE', 'getPluginBadge', 'PluginIconFallback', 'PluginIcon'])
+const wanted = new Set(['FLUENT_3D_ICONS', 'FALLBACK_RULES', 'BADGE_CACHE', 'getPluginBadge', 'PluginIconFallback', 'PluginIcon', 'createMarketplaceIconResolver'])
 const pieces = new Map()
 function walk(node) {
   if (!node || typeof node !== 'object') return
@@ -21,7 +21,7 @@ function walk(node) {
 }
 walk(ast)
 const context = vm.createContext({ h: (type, props, ...children) => ({ type, props, children }),
-  useMemo: fn => fn(), getPluginIconCandidates: p => p.icons?.light || [], PluginIconImage() {},
+  useMemo: fn => fn(), getPluginIconCandidates: p => p.icons?.light || [], PluginIconImage() {}, URL,
 })
 vm.runInContext([...wanted].map(name => pieces.get(name)).join('\n') + '\nglobalThis.badge = getPluginBadge; globalThis.render = PluginIconFallback; globalThis.icon = PluginIcon; globalThis.images = FLUENT_3D_ICONS; globalThis.cache = BADGE_CACHE;', context)
 
@@ -73,10 +73,38 @@ test('pending original logos use their exact inline preview before a generic bra
   const url = '/universal-plugin-hub/api/plugin-icon?sourceId=s&name=medium&path=icon.png'
   const preview = 'data:image/png;base64,EXACT_ORIGINAL'
   const generic = 'data:image/png;base64,GENERIC_BRAND'
-  const icon = context.icon({ plugin: { name: 'medium', icons: { light: [url, generic], previews: { [url]: preview } } } })
+  const plugin = { name: 'medium', icons: { light: [url, generic], previews: { [url]: preview } } }
+  const icon = context.icon({ plugin })
   assert.equal(icon.props.candidates[0], url, 'the original request still validates and refreshes normally')
   assert.equal(icon.props.fallback.props.src, preview)
   assert.equal(icon.props.fallback.props.decoding, 'sync')
+  const card = context.icon({ plugin, preferPreview: true })
+  assert.equal(card.props.candidates[0], preview, 'the list displays the local preview as its final artwork')
+  assert.equal(card.props.candidates[1], url, 'the original remains an error fallback')
+  const remote = '/universal-plugin-hub/api/icon?u=https%3A%2F%2Fexample.com%2Ficon.png'
+  const remoteCard = context.icon({ plugin: { icons: { light: [remote], previews: { [remote]: preview } } }, preferPreview: true })
+  assert.equal(remoteCard.props.candidates[0], remote, 'remote artwork can still revalidate')
+})
+
+test('missing marketplace artwork reuses the installed icon only for the same repository and plugin directory', () => {
+  const createResolver = vm.runInContext('createMarketplaceIconResolver', context)
+  const logo = 'data:image/png;base64,LOGO'
+  const installed = { name: 'example', sourceId: 'publisher', source: './plugins/example', icons: { light: [logo], dark: [logo] } }
+  const resolve = createResolver(new Map([[installed.name, installed]]), [{ id: 'publisher', url: 'https://github.com/Publisher/Repo.git' }])
+  const alias = { name: 'example', sourceId: 'other', source: { source: 'git-subdir', url: 'https://github.com/publisher/repo/', path: 'plugins/example/', sha: 'older' } }
+  assert.equal(resolve(alias).icons.light[0], logo)
+  assert.equal(resolve(alias), resolve(alias), 'repeated renders reuse the same result')
+  assert.equal(resolve(alias).source, alias.source)
+  assert.equal(alias.icons, undefined)
+  for (const source of [undefined, { ...alias.source, path: 'plugins/other' }, { ...alias.source, url: 'https://github.com/other/repo' }]) {
+    const unrelated = { ...alias, source }
+    assert.equal(resolve(unrelated), unrelated)
+  }
+  const explicit = { ...alias, icons: { light: ['market-icon'], portrait: { dark: ['market-portrait'] } } }
+  assert.equal(resolve(explicit), explicit)
+  const partial = { ...alias, icons: { light: ['market-icon'] } }
+  assert.equal(resolve(partial).icons.light[0], 'market-icon')
+  assert.equal(resolve(partial).icons.dark[0], logo)
 })
 
 test('bundled originals match their source hashes and need no network', async () => {

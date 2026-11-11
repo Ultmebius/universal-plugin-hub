@@ -131,6 +131,8 @@ test('DSH Hub import formats', async (t) => {
       assert.equal(result.ok, true)
       assert.equal(existsSync(join(dshSkillsDir(), 'two', 'SKILL.md')), true)
       assert.equal(readFileSync(join(dshSkillsDir(), 'one', 'references', 'guide.md'), 'utf8'), 'Useful reference')
+      await assert.rejects(installPlugin({ sourceId: 'anthropic', pluginName: 'standalone' }), /已从 .* 安装/)
+      assert.equal(readState().plugins.find(plugin => plugin.name === 'standalone').sourceId, 'local')
     })
     await t.test('reinstall replaces an orphan plugin copy and a dangling native skill link', async () => {
       const name = 'reinstall-example'

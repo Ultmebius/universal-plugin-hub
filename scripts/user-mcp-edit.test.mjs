@@ -6,17 +6,71 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runInNewContext } from 'node:vm'
 import { parse } from 'acorn'
+import { fileURLToPath } from 'node:url'
+
+const fixture = fileURLToPath(new URL('./fixtures/paged-stdio-server.mjs', import.meta.url))
 
 const client = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
+
+test('plugin connector verification and save carry the configured stdio command', () => {
+  const start = client.indexOf('const buildAuthPayload = ')
+  const end = client.indexOf('const persistAuthDialog = ', start)
+  const payload = runInNewContext(client.slice(start, end) + 'buildAuthPayload()', {
+    authDialog: { transport: 'stdio', command: 'my-custom-command', args: '["serve"]', envList: [], headersList: [] },
+  })
+  assert.equal(payload.command, 'my-custom-command')
+  assert.deepEqual(Array.from(payload.args), ['serve'])
+})
+
+test('testing a plain connection does not enable it, while a completed OAuth login saves the authorized configuration', async () => {
+  const dialog = client.slice(client.indexOf('function AddMcpDialog('))
+  const start = dialog.indexOf('onFinished: async (res) => {')
+  const end = dialog.indexOf('onError:', start)
+  const saves = []
+  const verifiedPayloadRef = { current: { transport: 'http', oauth: 'none' } }
+  const callbacks = runInNewContext('({' + dialog.slice(start, end) + '})', {
+    showToast() {},
+    verifiedPayloadRef,
+    save: payload => saves.push(payload),
+  })
+  await callbacks.onFinished({ ok: true })
+  assert.deepEqual(saves, [])
+  verifiedPayloadRef.current = { transport: 'http', oauth: 'custom' }
+  await callbacks.onFinished({ ok: false })
+  assert.deepEqual(saves, [])
+  await callbacks.onFinished({ ok: true })
+  assert.deepEqual(saves, [verifiedPayloadRef.current])
+
+  const pluginStart = dialog.indexOf('onFinished: async (res) => {', end)
+  const pluginEnd = dialog.indexOf('onCancel:', pluginStart)
+  const pluginSaves = []
+  const pluginCallbacks = runInNewContext('({' + dialog.slice(pluginStart, pluginEnd) + '})', {
+    setAuthDialog() {}, refreshState() {}, loadConnectorTools() {},
+    verifiedPayloadRef,
+    persistAuthDialog: payload => pluginSaves.push(payload),
+  })
+  verifiedPayloadRef.current = { transport: 'http', oauth: 'none' }
+  await pluginCallbacks.onFinished({ ok: true })
+  assert.deepEqual(pluginSaves, [])
+  verifiedPayloadRef.current = { transport: 'http', oauth: 'custom' }
+  await pluginCallbacks.onFinished({ ok: true })
+  assert.deepEqual(pluginSaves, [verifiedPayloadRef.current])
+})
 
 const root = mkdtempSync(join(tmpdir(), 'hub-user-mcp-'))
 const previousHome = process.env.DSH_HOME
 process.env.DSH_HOME = join(root, 'dsh')
 
 const { mountRoutes } = await import('../src/routes.js')
-const { readCordisPatch } = await import('../src/install.js')
+const { readState, writeState } = await import('../src/store.js')
+const { readCordisPatch, userMcpConfig } = await import('../src/install.js')
 const { oauthCredentialPath } = await import('../src/oauth-store.js')
 const { oauthCredentialKey } = await import('../src/oauth-config.js')
+
+function seedDisabledMcp(body) {
+  const state = readState()
+  writeState({ ...state, userMcps: [...(state.userMcps || []), userMcpConfig(body.name, body)] })
+}
 
 let handler
 mountRoutes({ register(route) { handler = route.handler } })
@@ -40,8 +94,8 @@ async function call(method, path, body) {
 const stdio = {
   name: 'computer-use',
   transport: 'stdio',
-  command: 'node',
-  args: ['G:/CODE/server.js'],
+  command: process.execPath,
+  args: [fixture, 'empty'],
   env: { A: '1' },
   headers: {},
   oauth: 'none',
@@ -70,7 +124,7 @@ test('user-added MCP servers: create, rename, delete', async (t) => {
 
     await t.test('delete removes the definition, the registration and the OAuth record', async () => {
       const url = 'https://mcp.example.com/mcp'
-      await call('POST', '/mcps', { name: 'remote', transport: 'http', url, headers: {}, oauth: 'auto_register', args: [], env: {} })
+      seedDisabledMcp({ name: 'remote', transport: 'http', url, headers: {}, oauth: 'auto_register', args: [], env: {} })
       // Stand in for a finished sign-in: the file a delete must not leave behind.
       const key = oauthCredentialKey('user-mcp', 'remote', url, 'auto_register')
       const credentialFile = oauthCredentialPath(key)
@@ -234,15 +288,15 @@ test('a rename persists the rest of the edited form, not just the new name', asy
   })
 
   await request(handler, 'POST', '/mcps', {
-    name: 'alpha', transport: 'stdio', command: 'node', args: ['old.js'], env: {}, headers: {}, oauth: 'none',
+    name: 'alpha', transport: 'stdio', command: process.execPath, args: [fixture, 'empty'], env: {}, headers: {}, oauth: 'none',
   })
   await request(handler, 'POST', '/mcps/update', {
     name: 'beta', previousName: 'alpha',
-    transport: 'stdio', command: 'python', args: ['new.py'], env: {}, headers: {}, oauth: 'none',
+    transport: 'stdio', command: process.execPath, args: [fixture, 'paged'], env: {}, headers: {}, oauth: 'none',
   })
   const beta = (await request(handler, 'GET', '/mcps')).body.mcps.find((m) => m.name === 'beta')
-  assert.equal(beta.command, 'python', 'rename dropped the edited command')
-  assert.deepEqual(beta.args, ['new.py'], 'rename dropped the edited args')
+  assert.equal(beta.command, process.execPath)
+  assert.deepEqual(beta.args, [fixture, 'paged'], 'rename dropped the edited args')
 })
 
 test('a resolved create schedules nothing when it registered nothing', async (t) => {
@@ -288,7 +342,8 @@ test('a rename within one slug keeps the server registered', async (t) => {
   const previousHome = process.env.DSH_HOME
   process.env.DSH_HOME = join(root, 'dsh')
   const { mountRoutes } = await import('../src/routes.js')
-  const { readCordisPatch } = await import('../src/install.js')
+  const { readState, writeState } = await import('../src/store.js')
+const { readCordisPatch, userMcpConfig } = await import('../src/install.js')
   let handler
   mountRoutes({ register: ({ handler: h }) => { handler = h; return () => {} } })
   t.after(() => {
@@ -297,7 +352,7 @@ test('a rename within one slug keeps the server registered', async (t) => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  const body = { transport: 'stdio', command: process.execPath, args: [], env: {}, headers: {}, oauth: 'none' }
+  const body = { transport: 'stdio', command: process.execPath, args: [fixture, 'empty'], env: {}, headers: {}, oauth: 'none' }
   await request(handler, 'POST', '/mcps', { ...body, name: 'a.dot' })
   await request(handler, 'POST', '/mcps/update', { ...body, name: 'a-dot', previousName: 'a.dot' })
   const ids = readCordisPatch().flatMap((b) => b?.insert || []).map((i) => i.id)
@@ -326,7 +381,7 @@ test('deleting removes credentials issued for a previously used URL', async (t) 
   })
 
   const body = { transport: 'http', headers: {}, oauth: 'auto_register', args: [], env: {} }
-  await request(handler, 'POST', '/mcps', { ...body, name: 'r1', url: urlA })
+  seedDisabledMcp({ ...body, name: 'r1', url: urlA })
   const oldKey = oauthCredentialKey('user-mcp', 'r1', urlA, 'auto_register')
   writeOAuthRecord(oldKey, { tokens: { access_token: 'x' } })
   assert.equal(existsSync(oauthCredentialPath(oldKey)), true)
@@ -352,7 +407,7 @@ test('clearing an optional field persists as cleared, not as the stored value', 
   })
 
   const base = { name: 'c1', transport: 'http', url: 'https://x.example.com/mcp', headers: {}, oauth: 'auto_register', args: [], env: {} }
-  await request(handler, 'POST', '/mcps', { ...base, oauthCallbackPort: '33418', oauthScope: 'read write' })
+  seedDisabledMcp({ ...base, oauthCallbackPort: '33418', oauthScope: 'read write' })
   assert.equal((await request(handler, 'GET', '/mcps')).body.mcps[0].oauthCallbackPort, '33418')
 
   await request(handler, 'POST', '/mcps/update', { ...base, oauthCallbackPort: '', oauthScope: '' })
@@ -382,7 +437,7 @@ test('renaming a disabled server does not ask HMR to start a registration it nev
     rmSync(root, { recursive: true, force: true })
   })
 
-  const body = { transport: 'stdio', command: process.execPath, args: [], env: {}, headers: {}, oauth: 'none' }
+  const body = { transport: 'stdio', command: process.execPath, args: [fixture, 'empty'], env: {}, headers: {}, oauth: 'none' }
   await request(handler, 'POST', '/mcps', { ...body, name: 'd1' })
   await request(handler, 'POST', '/mcps/toggle', { name: 'd1', enabled: false })
   await request(handler, 'POST', '/mcps/update', { ...body, name: 'd2', previousName: 'd1' })
@@ -405,7 +460,7 @@ test('the delete route cannot be tricked into removing a different server', asyn
     rmSync(root, { recursive: true, force: true })
   })
 
-  const mk = (n) => ({ name: n, transport: 'stdio', command: process.execPath, args: [], env: {}, headers: {}, oauth: 'none' })
+  const mk = (n) => ({ name: n, transport: 'stdio', command: process.execPath, args: [fixture, 'empty'], env: {}, headers: {}, oauth: 'none' })
   await request(handler, 'POST', '/mcps', mk('mcp'))
   await request(handler, 'POST', '/mcps', mk('prod-db'))
 

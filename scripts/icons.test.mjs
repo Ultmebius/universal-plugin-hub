@@ -427,7 +427,7 @@ test('plugin icon parsing, delivery and caching', async (t) => {
     })
     await t.test('large PNG previews preserve aspect ratio and alpha, stay small, and invalidate with the original', () => {
       const dir = join(root, 'png-preview'), file = join(dir, 'assets/icon.png')
-      const width = 512, height = 256, data = Buffer.alloc(width * height * 4)
+      const width = 1024, height = 512, data = Buffer.alloc(width * height * 4)
       let seed = 123456
       for (let i = 0; i < data.length; i += 4) {
         seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0

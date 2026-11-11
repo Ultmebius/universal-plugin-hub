@@ -173,6 +173,7 @@ const PREVIEW_LIMIT = 64 * 1024
 // Decoding runs synchronously inside catalog parsing, once per row, so the
 // bound has to cover the decode itself and not just the file size.
 const PREVIEW_MAX_PIXELS = 262144
+const LOCAL_PREVIEW_MAX_PIXELS = 1024 * 1024
 const PREVIEWS_DIR = 'previews'
 const PREVIEW_CACHE_KEEP = 200
 const previewMemory = new Map()
@@ -189,14 +190,14 @@ function inlineFile(file) {
   } catch { return null }
 }
 
-function inlinePreview(buffer) {
+function inlinePreview(buffer, maxPixels = PREVIEW_MAX_PIXELS) {
   const contentType = imageContentType(buffer)
   if (!contentType) return null
   if (contentType === 'image/png' && buffer.length > INLINE_LIMIT) {
     if (buffer.length < 24) return null
     const w = buffer.readUInt32BE(16), h = buffer.readUInt32BE(20)
     // Reject before decoding: the decode is the expensive part.
-    if (!w || !h || w * h > PREVIEW_MAX_PIXELS) return null
+    if (!w || !h || w * h > maxPixels) return null
     // Version the derived cache by content and algorithm, so replacing artwork
     // cannot leave an old thumbnail behind. Originals are never overwritten.
     const key = createHash('sha256').update(buffer).digest('hex')
@@ -256,13 +257,13 @@ function prunePreviewCache(directory) {
   } catch {}
 }
 
-function previewFile(file) {
+function previewFile(file, maxPixels = PREVIEW_MAX_PIXELS) {
   try {
     const info = statSync(file)
     if (!info.isFile() || info.size > MAX_BYTES) return null
-    const key = `${file}:${info.mtimeMs}:${info.size}`
+    const key = `${file}:${info.mtimeMs}:${info.size}:${maxPixels}`
     if (previewMemory.has(key)) return previewMemory.get(key)
-    const preview = inlinePreview(readFileSync(file))
+    const preview = inlinePreview(readFileSync(file), maxPixels)
     if (previewMemory.size >= 256) previewMemory.delete(previewMemory.keys().next().value)
     previewMemory.set(key, preview)
     return preview
@@ -339,7 +340,7 @@ export function buildPluginIcons(meta, { sourceId, name, dir, source } = {}) {
     if (!inline && urls[0]) {
       const first = urls[0]
       const remote = first.startsWith('/universal-plugin-hub/api/icon?') ? new URL(first, 'http://localhost').searchParams.get('u') : null
-      const preview = files.has(first) ? previewFile(files.get(first)) : remote && cachedIconPreview(remote)
+      const preview = files.has(first) ? previewFile(files.get(first), LOCAL_PREVIEW_MAX_PIXELS) : remote && cachedIconPreview(remote)
       if (preview) previews[first] = preview
     }
     return inline ? [inline, ...urls.filter((url) => url !== inline)] : urls

@@ -20,7 +20,7 @@ function findBrowseView(node) {
 // Run the component's render-time sorting, before any effects can run. Every
 // name below must be found: an extraction that silently matches nothing would
 // let the whole file pass while proving nothing.
-const REQUIRED = ['sortInstalledNames', 'currentSourceInstalledNames', 'currentSourcePlugins', 'visible']
+const REQUIRED = ['sortInstalledNames', 'currentSourceInstalledNames', 'crossSourceInstalledNames', 'currentSourcePlugins', 'visible']
 const browseBody = findBrowseView(ast).body.body
 const declared = new Set(browseBody
   .filter(node => node.type === 'VariableDeclaration')
@@ -38,7 +38,7 @@ const sorting = browseBody
     || COMMIT.includes(node))
   .map(node => client.slice(node.start, node.end)).join('\n')
 const rows = {
-  anthropic: [{ name: 'activecampaign' }, { name: 'playwright' }, { name: '42crunch' }],
+  anthropic: [{ name: 'activecampaign' }, { name: 'playwright' }, { name: '42crunch' }, { name: 'exa' }],
   other: [{ name: 'alpha' }, { name: 'zebra' }],
 }
 const plugins = [{ sourceId: 'anthropic', name: 'playwright' }, { sourceId: 'other', name: 'zebra' }]
@@ -53,8 +53,8 @@ function render({ activeSourceId = 'anthropic', installed = plugins, sortBy = 'd
 }
 
 test('a new Hub session puts installed plugins first on its first render', () => {
-  assert.deepEqual(render(), ['playwright', '42crunch', 'activecampaign'])
-  assert.deepEqual(render({ session: {} }), ['playwright', '42crunch', 'activecampaign'])
+  assert.deepEqual(render(), ['playwright', '42crunch', 'activecampaign', 'exa'])
+  assert.deepEqual(render({ session: {} }), ['playwright', '42crunch', 'activecampaign', 'exa'])
 })
 
 test('switching sources uses the target installed set immediately', () => {
@@ -65,31 +65,39 @@ test('switching sources uses the target installed set immediately', () => {
 })
 
 test('a newly opened list orders its current installed set immediately', () => {
-  assert.deepEqual(render({ installed: [] }), ['42crunch', 'activecampaign', 'playwright'])
-  assert.deepEqual(render({ installed: [...plugins, { sourceId: 'anthropic', name: 'activecampaign' }] }), ['activecampaign', 'playwright', '42crunch'])
+  assert.deepEqual(render({ installed: [] }), ['42crunch', 'activecampaign', 'exa', 'playwright'])
+  assert.deepEqual(render({ installed: [...plugins, { sourceId: 'anthropic', name: 'activecampaign' }] }), ['activecampaign', 'playwright', '42crunch', 'exa'])
 })
 
 test('uninstalling a plugin returns it to its place in the current order', () => {
   const session = {}
   // While installed, the plugin is pinned and the rest keep alphabetical order.
-  assert.deepEqual(render({ session }), ['playwright', '42crunch', 'activecampaign'])
+  assert.deepEqual(render({ session }), ['playwright', '42crunch', 'activecampaign', 'exa'])
   // Uninstalled, it is no longer pinned, so it must fall back to the order it
   // would sort into now — not the slot it held while it was still installed.
-  assert.deepEqual(render({ session, installed: [] }), ['42crunch', 'activecampaign', 'playwright'])
+  assert.deepEqual(render({ session, installed: [] }), ['42crunch', 'activecampaign', 'exa', 'playwright'])
 })
 
 test('a freshly installed plugin does not disturb the remembered order', () => {
   const session = {}
-  assert.deepEqual(render({ session }), ['playwright', '42crunch', 'activecampaign'])
+  assert.deepEqual(render({ session }), ['playwright', '42crunch', 'activecampaign', 'exa'])
   // Installing must keep its existing promise: the new plugin does not jump
   // ahead of the already pinned one, and nothing else moves.
   assert.deepEqual(
     render({ session, installed: [...plugins, { sourceId: 'anthropic', name: 'activecampaign' }] }),
-    ['playwright', '42crunch', 'activecampaign'],
+    ['playwright', '42crunch', 'activecampaign', 'exa'],
   )
 })
 
 test('explicit alphabetical sorting still overrides installed-first ordering', () => {
-  assert.deepEqual(render({ sortBy: 'name-asc' }), ['42crunch', 'activecampaign', 'playwright'])
-  assert.deepEqual(render({ sortBy: 'name-desc' }), ['playwright', 'activecampaign', '42crunch'])
+  assert.deepEqual(render({ sortBy: 'name-asc' }), ['42crunch', 'activecampaign', 'exa', 'playwright'])
+  assert.deepEqual(render({ sortBy: 'name-desc' }), ['playwright', 'exa', 'activecampaign', '42crunch'])
+})
+
+test('a cross-listed install joins the installed block even in an already visited market', () => {
+  const session = {}
+  render({ session })
+  const installed = [...plugins, { sourceId: 'other', name: 'exa' }]
+  assert.deepEqual(render({ session, installed }), ['exa', 'playwright', '42crunch', 'activecampaign'])
+  assert.deepEqual(render({ session, installed, sortBy: 'name-asc' }), ['42crunch', 'activecampaign', 'exa', 'playwright'])
 })
