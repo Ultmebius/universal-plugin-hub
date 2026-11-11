@@ -3035,12 +3035,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: inline-flex;
 	isolation: isolate;
 }
-.cpm-mcp-tool-pill-wrap::before {
+.cpm-mcp-tool-pill::before {
 	content: "";
 	position: absolute;
-	inset: calc(100% + 1px) 3px -9px;
+	inset: -4px;
 	z-index: -1;
-	background: radial-gradient(ellipse at 50% 0, rgba(99, 102, 241, 0.32), transparent 72%);
+	border-radius: calc(var(--cpm-card-icon-radius) + 4px);
+	corner-shape: var(--cpm-icon-corner-shape);
+	box-shadow: 0 0 9px rgba(99, 102, 241, 0.26);
 	opacity: 0;
 	transition: opacity 180ms ease-out;
 	pointer-events: none;
@@ -3048,7 +3050,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover {
 	z-index: 50;
 }
-.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover:has(> .cpm-mcp-tool-pill:not(.is-disabled))::before {
+.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover > .cpm-mcp-tool-pill:not(.is-disabled)::before {
 	opacity: 1;
 }
 .cpm-mcp-tool-pill {
@@ -3064,8 +3066,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px solid rgba(0, 0, 0, 0.12);
 	color: var(--cpm-text);
 	cursor: pointer;
-	translate: 0 0;
-	transition: translate 190ms cubic-bezier(0.18, 0.78, 0.3, 1), background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	/* Paint the text and outline together at each offset. A composited
+	   translation changes their rasterization as it settles at fractional DPI. */
+	position: relative;
+	top: 0;
+	transition: top 190ms cubic-bezier(0.18, 0.78, 0.3, 1), background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 	user-select: none;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -3086,10 +3091,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border-color: #818cf8;
 }
 @media (prefers-reduced-motion: no-preference) {
-	.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover > .cpm-mcp-tool-pill:not(.is-disabled) { translate: 0 -1px; }
+	.cpm-root:not(:has(.cpm-smart-hover[data-pointer-inside="true"])) .cpm-mcp-tool-pill-wrap:hover > .cpm-mcp-tool-pill:not(.is-disabled) { top: -1px; }
 }
 @media (prefers-reduced-motion: reduce) {
-	.cpm-mcp-tool-pill, .cpm-mcp-tool-pill-wrap::before { transition: none; }
+	.cpm-mcp-tool-pill, .cpm-mcp-tool-pill::before { transition: none; }
 }
 .cpm-mcp-tool-pill:focus-visible {
 	outline: 2px solid #6366f1;
@@ -9512,14 +9517,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const tName = typeof t === "string" ? t : t.name;
 					const isDisabled = disabled.includes(tName);
 						return h("div", { key: tName, className: "cpm-mcp-tool-pill-wrap",
-							onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget.firstElementChild, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
-							onMouseLeave: (e) => onHoverEnd(e.currentTarget.firstElementChild),
+							onMouseEnter: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
+							onMouseLeave: (e) => onHoverEnd(e.currentTarget),
 						},
 						h("button", {
 							type: "button",
 							className: "cpm-mcp-tool-pill" + (isDisabled ? " is-disabled" : ""),
-							onFocus: (e) => onHoverTool(t, e.currentTarget.getBoundingClientRect(), e.currentTarget, null, true),
-							onBlur: (e) => onHoverEnd(e.currentTarget),
+							onFocus: (e) => {
+								const anchor = e.currentTarget.parentElement;
+								onHoverTool(t, anchor.getBoundingClientRect(), anchor, null, true);
+							},
+							onBlur: (e) => onHoverEnd(e.currentTarget.parentElement),
 							onClick: (e) => { e.stopPropagation(); onToggleTool(tName); },
 						},
 							h("span", { className: "cpm-mcp-tool-dot" }),

@@ -215,8 +215,27 @@ test('MCP tool chips share the icon curve and draw their hover edge with a singl
     assert.doesNotMatch(css, /transform:|box-shadow:\s*0/)
   }
   assert.match(source, /\.cpm-mcp-tool-pill:focus-visible \{[^}]*outline: 2px solid/)
-  assert.match(source, /translate: 0 0;\s*transition: translate 190ms cubic-bezier\(0\.18, 0\.78, 0\.3, 1\)/)
-  assert.match(source, /\.cpm-mcp-tool-pill-wrap::before\s*\{[^}]*inset: calc\(100% \+ 1px\)[^}]*radial-gradient/)
+  assert.match(source, /top: 0;\s*transition: top 190ms cubic-bezier\(0\.18, 0\.78, 0\.3, 1\)/)
+  assert.match(source, /\.cpm-mcp-tool-pill::before\s*\{[^}]*inset: -4px;[^}]*box-shadow: 0 0 9px/)
+  assert.doesNotMatch(source.match(/\.cpm-mcp-tool-pill \{([^}]+)\}/)[1], /\b(?:translate|transform|will-change):/)
+})
+
+test('MCP mouse and keyboard previews use the same stationary anchor during lift', () => {
+  const context = { h: (type, props, ...children) => ({ type, props, children }) }
+  const render = vm.runInNewContext(code(func('McpToolsPanel')) + '\nMcpToolsPanel', context)
+  const rect = { top: 20, bottom: 46 }
+  const anchor = { getBoundingClientRect: () => rect }
+  const button = { parentElement: anchor, getBoundingClientRect() { throw new Error('animated bounds used') } }
+  const entered = [], left = []
+  const tree = render({ tools: ['tool'], onHoverTool: (...args) => entered.push(args), onHoverEnd: node => left.push(node) })
+  const grid = tree.children.find(child => child?.props?.className === 'cpm-mcp-tools-grid')
+  const wrapper = grid.children[0][0]
+  wrapper.props.onMouseEnter({ currentTarget: anchor, clientX: 12, clientY: 45, buttons: 0 })
+  wrapper.children[0].props.onFocus({ currentTarget: button })
+  wrapper.props.onMouseLeave({ currentTarget: anchor })
+  wrapper.children[0].props.onBlur({ currentTarget: button })
+  assert.deepEqual(entered.map(([, bounds, node]) => [bounds, node]), [[rect, anchor], [rect, anchor]])
+  assert.deepEqual(left, [anchor, anchor])
 })
 
 test('Skills warms only its first rows and reuses local image requests across rerenders', () => {
