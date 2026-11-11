@@ -243,7 +243,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	const useSafeLayoutEffect = typeof useLayoutEffect === "function" ? useLayoutEffect : useEffect;
 
 	// ────────────────────────────── Styles ──────────────────────────────
-	const CSS = `
+	const ICON_SHAPE_CSS = `
+:root {
+	--cpm-icon-corner-shape: squircle;
+	--cpm-connector-icon-radius: calc(100% / 3);
+}
+`;
+
+	const CSS = `${ICON_SHAPE_CSS}
 /* ────────────────────────────── Light Theme (Default) ────────────────────────────── */
 .cpm-root {
 	/* A damped spring (damping 0.62, ~8.4% overshoot) sampled into linear().
@@ -2651,7 +2658,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	height: var(--del-size);
 	padding: 0;
 	border-radius: var(--del-radius);
-	corner-shape: squircle;
+	corner-shape: var(--cpm-icon-corner-shape);
 	/* The resting state already carries the squircle surface, so the control
 	   reads as a button before the pointer arrives; hover only deepens it. */
 	border: 1px solid rgba(0, 0, 0, 0.07);
@@ -2912,14 +2919,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	width: 24px;
 	height: 24px;
 	flex: 0 0 24px;
-	border-radius: 8px;
+	border-radius: var(--cpm-connector-icon-radius);
 	overflow: hidden;
 }
 .cpm-connector-owner-icon > .cpm-card-icon {
 	width: 24px;
 	height: 24px;
 	flex: 0 0 24px;
-	border-radius: 8px;
+	border-radius: var(--cpm-connector-icon-radius);
 	box-shadow: none;
 }
 /* The fallback badge carries a hard-coded 34px <img>, which overflows a 24px
@@ -3725,9 +3732,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		if (!el) {
 			el = document.createElement("style");
 			el.id = "cpm-style";
+			el.textContent = CSS;
 			document.head.appendChild(el);
+		} else if (el.textContent !== CSS) {
+			el.textContent = CSS;
 		}
-		el.textContent = CSS;
 	}
 
 	function isDarkMode(ctx, rootEl) {
@@ -5095,7 +5104,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, []);
 
 		useEffect(() => {
-			ensureCss();
 			const update = () => setIsDark(getEffectiveTheme());
 			update();
 			const raf = requestAnimationFrame(update);
@@ -8089,7 +8097,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const ownerLower = (owner || "").toLowerCase();
 			const repoLower = (repo || "").toLowerCase();
 
-			if (repoLower === "claude-plugins-official" || ownerLower === "anthropics") return "Anthropic";
+			if (repoLower === "claude-plugins-official") return "Anthropic";
 			if (repoLower === "claude-plugins-community") return "Community";
 
 			const genericWords = new Set([
@@ -8146,7 +8154,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const finalSuggested = computeSmartSuggestedName(raw, body.suggestedName);
 				setRepoLabel(finalRepoLabel);
 				setSuggested(finalSuggested);
-				setCustomName(finalSuggested);
+				setCustomName("");
+				setMode("suggest");
 				setNormalizedUrl(body.normalizedUrl || raw);
 				setPluginCount(body.pluginCount || 0);
 				setPhase("name");
@@ -8469,12 +8478,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										ref: customInputRef,
 										className: "cpm-input cpm-source-custom-input",
 										value: customName,
+										autoComplete: "off",
 										placeholder: "输入自定义标签名",
 										onChange: (e) => { setCustomName(e.target.value); setMode("custom"); },
 										onFocus: () => setMode("custom"),
 										onClick: (e) => e.stopPropagation(),
 										onKeyDown: (e) => {
-											if (e.key === "Enter" && !busy && customName.trim()) confirm();
+											if (e.key === "Enter" && !e.nativeEvent.isComposing && !busy && customName.trim()) confirm();
 										}
 									}),
 									h(ClearBtn, { value: customName, onClear: () => setCustomName("") }),
@@ -10834,7 +10844,263 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Main sidebar & panel entry ──────────────────────────────
+	// DSH's keyed slot adds a display:contents anchor around the fallback row.
+	const TOOL_CALL_ROW = ':is([data-chat-call-id], [data-chat-call-id] > [data-slot="tool.call.toolview"]) > [data-variant="others"]';
+
+	function toolCallIconCss(names, url) {
+		const selectors = [];
+		for (const name of names) {
+			if (!/^mcp__[A-Za-z0-9_-]{1,59}$/.test(name)) continue;
+			// DSH ToolCallTree → generic ToolRow → collapsed DisclosureRow.
+			// The idle span fades on hover, so the native chevron still wins.
+			const row = `${TOOL_CALL_ROW}[data-tool="${name}"]:not([data-state="error"], [data-state="stopped"]) > div:not([data-open]) > [data-disclosure-header] > [data-disclosure-row]`;
+			const leading = `${row} > span:first-child`;
+			selectors.push(`${leading} > svg:only-child`, `${leading} > span:first-child > svg:only-child`);
+		}
+		if (!selectors.length) return "";
+		return `@media (forced-colors: none) {
+			${selectors.join(",\n")} {
+				background: url(${JSON.stringify(url)}) center / contain no-repeat;
+				border-radius: var(--cpm-connector-icon-radius);
+				@supports (corner-shape: squircle) {
+					border-radius: 50%;
+					corner-shape: var(--cpm-icon-corner-shape);
+				}
+			}
+			${selectors.map(selector => `${selector} > *`).join(",\n")} { opacity: 0; }
+		}`;
+	}
+
+	function formatToolCallLabel(name, summary, pluginName, rawName) {
+		if (summary !== name && !summary.startsWith(name + " · ")) return summary;
+		const label = `${pluginName} MCP ${rawName.replace(/_+/g, " ").trim()}`;
+		return label + summary.slice(name.length);
+	}
+
+	function createToolCallLabels() {
+		const rowSelector = `${TOOL_CALL_ROW}[data-tool]`;
+		const headerSelector = ':scope > div > [data-disclosure-header] > [data-disclosure-row]';
+		const shimmerAttribute = "data-shimmer-text";
+		const summaryAttribute = "data-uph-tool-summary";
+		const brandKey = "uph-mcp-brand";
+		const registry = globalThis.CSS?.highlights;
+		const brandHighlight = registry && typeof Highlight === "function" ? new Highlight() : null;
+		if (brandHighlight) registry.set(brandKey, brandHighlight);
+		const changes = new Map();
+		let labelsByName = new Map();
+		const read = (node, attribute) => attribute ? node.getAttribute(attribute) : node.data;
+		const write = (node, attribute, value) => {
+			if (!attribute) node.data = value;
+			else if (value === null) node.removeAttribute(attribute);
+			else node.setAttribute(attribute, value);
+		};
+
+		function restoreChange(node) {
+			const change = changes.get(node);
+			if (!change) return;
+			const { attribute, original, label, brandRange } = change;
+			if (brandRange) brandHighlight.delete(brandRange);
+			if (node.isConnected && read(node, attribute) === label) write(node, attribute, original);
+			changes.delete(node);
+		}
+
+		function restore() {
+			observer?.disconnect();
+			for (const node of changes.keys()) restoreChange(node);
+		}
+
+		function updateRow(row) {
+			const name = row.getAttribute("data-tool");
+			const identity = labelsByName.get(name);
+			if (!identity && !row.querySelector(`[${summaryAttribute}]`)) return;
+			const header = row.querySelector(headerSelector);
+			if (!header) return;
+			for (const summary of header.querySelectorAll("[data-shimmer-decoration] + *")) {
+				const shimmer = summary.querySelector(`[${shimmerAttribute}]`);
+				const node = shimmer || document.createTreeWalker(summary, 4).nextNode();
+				if (!node || !identity) {
+					if (node) restoreChange(node);
+					restoreChange(summary);
+					continue;
+				}
+				const attribute = shimmer ? shimmerAttribute : null;
+				const original = read(node, attribute);
+				const label = formatToolCallLabel(name, original, identity.pluginName, identity.rawName);
+				if (label === original) {
+					if (changes.get(node)?.label !== original) {
+						restoreChange(node);
+						restoreChange(summary);
+					}
+					continue;
+				}
+				restoreChange(node);
+				write(node, attribute, label);
+				let brandRange;
+				if (brandHighlight && !attribute) {
+					brandRange = document.createRange();
+					brandRange.setStart(node, 0);
+					brandRange.setEnd(node, identity.pluginName.length + " MCP".length);
+					brandHighlight.add(brandRange);
+				}
+				changes.set(node, { attribute, original, label, brandRange });
+				if (!changes.has(summary)) {
+					changes.set(summary, { attribute: summaryAttribute, original: read(summary, summaryAttribute), label: "" });
+					write(summary, summaryAttribute, "");
+				}
+			}
+		}
+
+		const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(records => {
+			const rows = new Set();
+			for (const { target, addedNodes } of records) {
+				const element = target.nodeType === 1 ? target : target.parentElement;
+				const row = element?.closest(rowSelector);
+				if (row) rows.add(row);
+				for (const node of addedNodes) {
+					if (node.nodeType !== 1) continue;
+					if (node.matches(rowSelector)) rows.add(node);
+					for (const child of node.querySelectorAll(rowSelector)) rows.add(child);
+				}
+			}
+			for (const row of rows) if (row.isConnected) updateRow(row);
+			if (records.some(record => record.removedNodes.length)) {
+				for (const node of changes.keys()) if (!node.isConnected) restoreChange(node);
+			}
+		});
+
+		return {
+			update(groups) {
+				restore();
+				labelsByName = new Map(groups.flatMap(({ plugin, tools }) =>
+					tools.map(({ name, rawName }) => [name, { pluginName: plugin.displayName || plugin.name, rawName }])
+				));
+				if (!labelsByName.size || !observer || !document.body) return;
+				for (const row of document.querySelectorAll(rowSelector)) updateRow(row);
+				observer.observe(document.body, {
+					childList: true, subtree: true, characterData: true,
+					attributes: true, attributeFilter: [shimmerAttribute, "data-tool"],
+				});
+			},
+			dispose() {
+				restore();
+				if (brandHighlight && registry.get(brandKey) === brandHighlight) registry.delete(brandKey);
+			},
+		};
+	}
+
+	function installToolCallIcons(ctx) {
+		const style = document.createElement("style");
+		style.dataset.plugin = "universal-plugin-hub";
+		style.dataset.uphToolCallIcons = "";
+		const chatCss = `${ICON_SHAPE_CSS}
+[data-disclosure-row] [data-shimmer-decoration]:has(+ [data-uph-tool-summary]),
+[data-disclosure-row] :has(+ [data-shimmer-decoration] + [data-uph-tool-summary]) {
+	display: none;
+}
+@media (forced-colors: none) {
+	::highlight(uph-mcp-brand) { color: #4D6BFE; }
+}`;
+		style.textContent = chatCss;
+		document.head.append(style);
+		const labels = createToolCallLabels();
+		const loaded = new Set();
+		let disposed = false;
+		let refreshing = false;
+		let current = "";
+		let generation = 0;
+		const mcpRowSelector = `${TOOL_CALL_ROW}[data-tool^="mcp__"]`;
+		// While idle, only watch for tool rows entering the DOM. This also
+		// catches the first MCP call immediately between refresh intervals.
+		const presence = typeof MutationObserver === "undefined" ? null : new MutationObserver(records => {
+			if (document.hidden) return;
+			for (const { target, addedNodes } of records) {
+				if (target.matches?.(mcpRowSelector) || Array.from(addedNodes).some(node =>
+					node.nodeType === 1 && (node.matches(mcpRowSelector) || node.querySelector(mcpRowSelector)))) {
+					void refresh();
+					return;
+				}
+			}
+		});
+
+		async function resolveIcon(plugin, dark) {
+			const candidates = getPluginIconCandidates(plugin, dark);
+			for (const url of candidates.flatMap(candidate => [plugin.icons?.previews?.[candidate], candidate]).filter(Boolean)) {
+				if (loaded.has(url)) return url;
+				if (disposed) break;
+				const image = new Image();
+				image.src = url;
+				try {
+					await image.decode();
+					loaded.add(url);
+					return url;
+				} catch {}
+			}
+			return null;
+		}
+
+		async function refresh() {
+			if (disposed || refreshing || document.hidden) return;
+			if (!document.querySelector(mcpRowSelector)) {
+				if (current) {
+					generation++;
+					labels.update([]);
+					style.textContent = chatCss;
+					current = "";
+				}
+				if (document.body) presence?.observe(document.body, {
+					childList: true, subtree: true, attributes: true, attributeFilter: ["data-tool"],
+				});
+				return;
+			}
+			presence?.disconnect();
+			refreshing = true;
+			try {
+				const { groups } = await api("/tool-call-icons", { cache: "no-store" });
+				if (disposed) return;
+				const dark = isDarkMode(ctx, document.documentElement);
+				const signature = JSON.stringify([dark, groups]);
+				if (signature === current) return;
+				const revision = ++generation;
+				labels.update(groups);
+				style.textContent = chatCss;
+				current = signature;
+				// Publish each decoded icon independently. A pending image also
+				// leaves the metadata refresh free to pick up plugin changes.
+				for (const { plugin, tools } of groups) {
+					void resolveIcon(plugin, dark).then(url => {
+						if (!url || disposed || revision !== generation) return;
+						const rule = toolCallIconCss(tools.map(tool => tool.name), url);
+						if (rule && style.sheet) style.sheet.insertRule(rule, style.sheet.cssRules.length);
+					}).catch(() => {});
+				}
+			} catch {
+				if (!disposed) {
+					generation++;
+					style.textContent = chatCss;
+					labels.update([]);
+				}
+				current = "";
+			} finally {
+				refreshing = false;
+			}
+		}
+
+		const timer = setInterval(refresh, 10000);
+		document.addEventListener("visibilitychange", refresh);
+		void refresh();
+		return () => {
+			disposed = true;
+			clearInterval(timer);
+			presence?.disconnect();
+			document.removeEventListener("visibilitychange", refresh);
+			labels.dispose();
+			style.remove();
+		};
+	}
+
 	function Section({ ctx }) {
+		const useStyleEffect = React.useInsertionEffect || useSafeLayoutEffect;
+		useStyleEffect(ensureCss, []);
 		return h(ErrorBoundary, null, h(MarketApp, { ctx }));
 	}
 
@@ -10862,7 +11128,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	const inject = ["slots", "theme"];
 
 	function apply(ctx) {
-		ensureCss();
+		ctx.effect?.(() => installToolCallIcons(ctx), "universal-plugin-hub: tool call icons");
 		ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
 			name: "sidebar.panellist",
 			id: "universal-plugin-hub",

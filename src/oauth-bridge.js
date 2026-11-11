@@ -15,7 +15,7 @@ import {
   PromptListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { decodeOAuthConfig } from './oauth-config.js'
-import { readOAuthRecord, writeOAuthRecord } from './oauth-store.js'
+import { openOAuthRecordWriter, readOAuthRecord } from './oauth-store.js'
 
 const interactive = process.env.UPH_MCP_INTERACTIVE === '1'
 const verifying = process.env.UPH_MCP_VERIFY === '1'
@@ -102,8 +102,13 @@ function waitForCallback() {
 }
 
 function provider() {
-  let record = readOAuthRecord(config.credentialKey)
-  const persist = () => writeOAuthRecord(config.credentialKey, record)
+  const writer = openOAuthRecordWriter(config.credentialKey)
+  if (!writer) throw new Error('OAuth 授权已移除，请重新登录。')
+  process.once('exit', () => { try { writer.close() } catch {} })
+  const record = readOAuthRecord(config.credentialKey)
+  const persist = () => {
+    if (!writer.write(record)) throw new Error('OAuth 授权已移除，请重新登录。')
+  }
   const callback = callbackUrl || record.clientInformation?.redirect_uris?.[0] || `http://localhost:${config.oauth.callbackPort || 0}/callback`
   const custom = config.oauth.mode === 'custom' ? record.customClient : undefined
   return {

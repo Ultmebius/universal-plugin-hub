@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer as createNetServer } from 'node:net'
@@ -14,14 +14,34 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { encodeOAuthConfig, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from '../src/oauth-config.js'
 import { readOAuthRecord, saveOAuthClientCredentials, oauthCredentialPath } from '../src/oauth-store.js'
+
+test('an OAuth bridge cannot recreate a deleted record or overwrite a new authorization', async () => {
+  const { allowOAuthRecordWrites, deleteOAuthRecord, openOAuthRecordWriter } = await import('../src/oauth-store.js')
+  const key = oauthCredentialKey('old-bridge', 'search', 'https://fixture.invalid/mcp')
+  const stale = openOAuthRecordWriter(key)
+  try {
+    assert.equal(stale.write({ tokens: { access_token: 'old' } }), true)
+    deleteOAuthRecord(key, { required: true })
+    assert.equal(stale.write({ tokens: { access_token: 'late refresh' } }), false)
+    assert.equal(existsSync(oauthCredentialPath(key)), false)
+    assert.equal(openOAuthRecordWriter(key), null)
+    allowOAuthRecordWrites(key)
+    const fresh = openOAuthRecordWriter(key)
+    try {
+      assert.equal(fresh.write({ tokens: { access_token: 'new' } }), true)
+      assert.equal(stale.write({ tokens: { access_token: 'late refresh' } }), false)
+      assert.equal(readOAuthRecord(key).tokens.access_token, 'new')
+    } finally { fresh.close() }
+  } finally { stale?.close() }
+})
 import { beginOAuthVerification, completeOAuthVerification, getOAuthVerification, cancelOAuthVerification } from '../src/oauth.js'
 
 const root = mkdtempSync(join(tmpdir(), 'hub-oauth-flow-'))
 const credentialRoot = join(root, 'credentials')
 process.env.UPH_OAUTH_STORE_DIR = credentialRoot
 process.env.DSH_HOME = join(root, 'dsh')
-const { installedDir, writeState } = await import('../src/store.js')
-const { saveConnectorAuth, isConnectorActive, toggleConnector, getConnectorEntry, readMcpToolsState, queryStdioToolsList, verifyConnectorAuth, installedDetails } = await import('../src/install.js')
+const { installedDir, readState, writeState } = await import('../src/store.js')
+const { saveConnectorAuth, isConnectorActive, toggleConnector, getConnectorEntry, readMcpToolsState, queryStdioToolsList, verifyConnectorAuth, installedDetails, uninstallPlugin, writeMcpToolsState } = await import('../src/install.js')
 
 async function body(req) {
   const chunks = []
@@ -283,7 +303,9 @@ test('custom clients, cancellation and configuration transitions stay isolated',
   toggleConnector('test-plugin', 'remote', false)
   toggleConnector('test-plugin', 'remote', true)
   assert.equal(remoteConfigFromEntry(getConnectorEntry('test-plugin', 'remote').config), null)
-  for (const file of readdirSync(credentialRoot)) assert.equal(readFileSync(join(credentialRoot, file), 'utf8').includes('test-client-secret') && process.platform !== 'win32', false)
+  for (const file of readdirSync(credentialRoot, { withFileTypes: true })) {
+    if (file.isFile()) assert.equal(readFileSync(join(credentialRoot, file.name), 'utf8').includes('test-client-secret') && process.platform !== 'win32', false)
+  }
 })
 
 test('connector tool list and OAuth status routes always answer', async () => {
@@ -364,6 +386,164 @@ test('manifest transports normalize and saved OAuth settings survive the detail 
   assert.equal(routed.local.oauth, 'none')
 })
 
+test('plugin uninstall removes its OAuth history and preserves credentials for other owners', async () => {
+  const plugin = 'owned-oauth'
+  const connector = 'remote'
+  const manifestUrl = 'https://example.invalid/manifest'
+  const savedUrl = 'https://example.invalid/saved'
+  const oldUrl = 'https://example.invalid/old'
+  const target = installedDir(plugin)
+  mkdirSync(target, { recursive: true })
+  writeFileSync(join(target, '.mcp.json'), JSON.stringify({ mcpServers: { [connector]: { type: 'http', url: manifestUrl } } }))
+  const hub = readState()
+  hub.plugins.push({ name: plugin, sourceId: 'local' })
+  writeState(hub)
+  const record = (owner, url, mode) => oauthCredentialPath(oauthCredentialKey(owner, connector, url, mode))
+  const preserved = [
+    record('different-plugin', savedUrl, 'auto_register'),
+    record('user-mcp', savedUrl, 'auto_register'),
+    record(plugin + '-other', manifestUrl, 'custom'),
+  ]
+  const removed = [
+    record(plugin, oldUrl, 'auto_register'),
+    record(plugin, savedUrl, 'auto_register'),
+    record(plugin, manifestUrl, 'custom'),
+  ]
+  mkdirSync(credentialRoot, { recursive: true })
+  for (const file of [...removed, ...preserved]) writeFileSync(file, '{}')
+  for (const url of [oldUrl, savedUrl]) {
+    assert.equal(saveConnectorAuth(plugin, connector, { url, transport: 'http', oauth: 'auto_register' }).ok, true)
+  }
+  assert.equal(toggleConnector(plugin, connector, false).ok, true)
+  assert.ok(removed.every(existsSync), 'disabling preserves authorization')
+
+  // A legacy cached credentialKey must never override the verified owner tuple.
+  const state = readMcpToolsState()
+  state[`${plugin}::${connector}`].savedOAuthRemoteConfig.credentialKey = oauthCredentialKey('different-plugin', connector, savedUrl)
+  writeMcpToolsState(state)
+  assert.equal((await uninstallPlugin(plugin)).ok, true)
+  assert.ok(removed.every(file => !existsSync(file)), 'owned current, historical and manifest records are removed')
+  assert.ok(preserved.every(existsSync), 'same URL under another owner is preserved')
+  assert.equal(readMcpToolsState()[`${plugin}::${connector}`], undefined)
+})
+
+test('plugin uninstall stops an in-flight OAuth sign-in before deleting its record', { timeout: 30000 }, async (t) => {
+  const fixture = await startFixture()
+  t.after(() => fixture.close())
+  const plugin = 'pending-oauth'
+  const connector = 'remote'
+  const hub = readState()
+  hub.plugins.push({ name: plugin, sourceId: 'local' })
+  writeState(hub)
+  const noBrowser = process.env.UPH_MCP_NO_BROWSER
+  process.env.UPH_MCP_NO_BROWSER = '1'
+  let pending
+  try {
+    pending = await verifyConnectorAuth(plugin, connector, { url: fixture.url, transport: 'http', oauth: 'auto_register' })
+  } finally {
+    if (noBrowser === undefined) delete process.env.UPH_MCP_NO_BROWSER
+    else process.env.UPH_MCP_NO_BROWSER = noBrowser
+  }
+  t.after(() => cancelOAuthVerification(pending.sessionId))
+  assert.equal(pending.pending, true)
+  await waitFor(() => getOAuthVerification(pending.sessionId).status === 'waiting')
+  const file = oauthCredentialPath(oauthCredentialKey(plugin, connector, fixture.url))
+  assert.equal(existsSync(file), true)
+  await uninstallPlugin(plugin)
+  assert.equal(getOAuthVerification(pending.sessionId).status, 'error')
+  assert.equal(existsSync(file), false)
+  assert.equal(readMcpToolsState()[`${plugin}::${connector}`], undefined)
+})
+
+test('a plugin named user-mcp removes its OAuth connector and preserves standalone OAuth', async () => {
+  const plugin = 'user-mcp'
+  const url = 'https://fixture.invalid/shared-namespace'
+  const target = installedDir(plugin)
+  mkdirSync(target, { recursive: true })
+  writeFileSync(join(target, '.mcp.json'), JSON.stringify({
+    mcpServers: { owned: { url }, shared: { url } },
+  }))
+  const hub = readState()
+  hub.plugins.push({ name: plugin, sourceId: 'local' })
+  hub.userMcps = [{ name: 'shared', url }]
+  writeState(hub)
+  for (const name of ['owned', 'shared']) {
+    assert.equal(saveConnectorAuth(plugin, name, { url, transport: 'http', oauth: 'auto_register' }).ok, true)
+  }
+  const owned = oauthCredentialPath(oauthCredentialKey(plugin, 'owned', url))
+  const standalone = oauthCredentialPath(oauthCredentialKey(plugin, 'shared', url))
+  mkdirSync(credentialRoot, { recursive: true })
+  writeFileSync(owned, '{}')
+  writeFileSync(standalone, '{}')
+
+  assert.equal((await uninstallPlugin(plugin)).ok, true)
+  assert.equal(getConnectorEntry(plugin, 'owned'), null)
+  assert.equal(existsSync(owned), false)
+  assert.equal(readMcpToolsState()['user-mcp::owned'], undefined)
+  assert.ok(getConnectorEntry(plugin, 'shared'))
+  assert.equal(existsSync(standalone), true)
+  assert.deepEqual(readState().userMcps, [{ name: 'shared', url }])
+})
+
+test('plugin-owned OAuth registrations in the shared namespace are not imported as standalone MCPs', async (t) => {
+  const { mountRoutes } = await import('../src/routes.js')
+  const plugin = 'user-mcp'
+  const connector = 'plugin-owned'
+  const url = 'https://fixture.invalid/plugin-owned'
+  const target = installedDir(plugin)
+  mkdirSync(target, { recursive: true })
+  writeFileSync(join(target, '.mcp.json'), JSON.stringify({ mcpServers: { [connector]: { url } } }))
+  const hub = readState()
+  hub.plugins.push({ name: plugin, sourceId: 'local' })
+  writeState(hub)
+
+  let handler
+  mountRoutes({ register: ({ handler: registered }) => { handler = registered; return () => {} } })
+  const server = createServer(handler)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const base = `http://127.0.0.1:${server.address().port}/universal-plugin-hub/api`
+  const saved = await fetch(`${base}/plugins/${plugin}/connectors/${connector}/auth`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, transport: 'http', oauth: 'auto_register' }),
+  })
+  assert.equal((await saved.json()).ok, true)
+  const list = await fetch(`${base}/mcps`)
+  assert.equal((await list.json()).mcps.some(mcp => mcp.name === connector), false)
+
+  const record = oauthCredentialPath(oauthCredentialKey(plugin, connector, url))
+  mkdirSync(credentialRoot, { recursive: true })
+  writeFileSync(record, '{}')
+  assert.equal(toggleConnector(plugin, connector, false).ok, true)
+  assert.equal((await uninstallPlugin(plugin)).ok, true)
+  assert.equal(existsSync(record), false)
+})
+
+test('uninstall of a plain HTTP connector succeeds with no usable OAuth store', async () => {
+  const plugin = 'plain-http-uninstall'
+  const url = 'https://fixture.invalid/plain'
+  const target = installedDir(plugin)
+  mkdirSync(target, { recursive: true })
+  writeFileSync(join(target, '.mcp.json'), JSON.stringify({ mcpServers: { remote: { url } } }))
+  const hub = readState()
+  hub.plugins.push({ name: plugin, sourceId: 'local' })
+  writeState(hub)
+  assert.equal(saveConnectorAuth(plugin, 'remote', { url, transport: 'http' }).ok, true)
+
+  const blockedStore = join(root, 'oauth-store-is-a-file')
+  writeFileSync(blockedStore, '')
+  process.env.UPH_OAUTH_STORE_DIR = blockedStore
+  try {
+    assert.equal((await uninstallPlugin(plugin)).ok, true)
+    assert.equal(existsSync(target), false)
+    assert.equal(getConnectorEntry(plugin, 'remote'), null)
+    assert.equal(readState().plugins.some(record => record.name === plugin), false)
+  } finally {
+    process.env.UPH_OAUTH_STORE_DIR = credentialRoot
+  }
+})
+
 test.after(() => rmSync(root, { recursive: true, force: true }))
 
 test('credential reads are cached by file content and rewritten on save', async () => {
@@ -380,7 +560,7 @@ test('credential reads are cached by file content and rewritten on save', async 
   assert.notEqual(second, first)
 })
 
-test('the auth route rejects names outside the plugin-segment whitelist', async (t) => {
+test('plugin authorization routes reject invalid names and uninstalled plugins', async (t) => {
   // The route only accepts `[a-z0-9][a-z0-9._-]*` segments, so a name with a
   // space can never reach a handler. The editor therefore has to keep its
   // encodeURIComponent (it does) and nothing else — the pipeline is asserted
@@ -401,4 +581,17 @@ test('the auth route rejects names outside the plugin-segment whitelist', async 
   const res = await fetch(`${base}/plugins/demo/connectors/${encodeURIComponent('my connector')}/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
   assert.equal(res.status, 500)
   assert.match(JSON.stringify(await res.json()), /invalid connector name/)
+
+  // A stale authorization dialog must not recreate an uninstalled plugin's
+  // registration or credentials.
+  for (const action of ['auth', 'verify']) {
+    const stale = await fetch(`${base}/plugins/pending-oauth/connectors/remote/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.invalid/mcp', transport: 'http', oauth: 'auto_register' }),
+    })
+    assert.equal(stale.status, 404)
+    await stale.text()
+  }
+  assert.equal(getConnectorEntry('pending-oauth', 'remote'), null)
 })

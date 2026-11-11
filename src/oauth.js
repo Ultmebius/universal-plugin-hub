@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { encodeOAuthConfig, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
-import { readOAuthRecord, oauthStoreDir, saveOAuthClientCredentials } from './oauth-store.js'
+import { allowOAuthRecordWrites, readOAuthRecord, oauthStoreDir, saveOAuthClientCredentials } from './oauth-store.js'
 
 const sessions = new Map()
 const bridgePath = fileURLToPath(new URL('./oauth-bridge.js', import.meta.url))
@@ -107,6 +107,7 @@ function startProcess(session) {
 
 export function beginOAuthVerification(pluginName, connectorName, payload, options = {}) {
   const credentialKey = oauthCredentialKey(pluginName, connectorName, payload.url, payload.oauth)
+  allowOAuthRecordWrites(credentialKey)
   const config = oauthRuntimeConfig({
     url: payload.url, headers: payload.headers,
     oauth: connectorOauthSettings(pluginName, connectorName, payload), credentialKey,
@@ -117,7 +118,8 @@ export function beginOAuthVerification(pluginName, connectorName, payload, optio
   let resolve
   const completion = new Promise((r) => { resolve = r })
   const session = {
-    id, pluginName, connectorName, credentialKey, config, status: 'starting', startedAt: Date.now(), resolve, completion,
+    id, pluginName, connectorName, credentialKey, config, pluginOwned: options.pluginOwned,
+    status: 'starting', startedAt: Date.now(), resolve, completion,
     noBrowser: options.noBrowser || process.env.UPH_MCP_NO_BROWSER === '1', callbackTimeout: options.callbackTimeout, onFinished: options.onFinished,
     timeout: setTimeout(() => cancelOAuthVerification(id, '授权等待超时，请重新测试'), options.callbackTimeout || CALLBACK_TIMEOUT),
   }
@@ -149,6 +151,30 @@ export function cancelOAuthVerification(id, message = '已取消授权', owner =
 
 export function cancelAllOAuthVerifications() {
   for (const session of sessions.values()) if (!session.done) cancelOAuthVerification(session.id)
+}
+
+/** Stop pending verification for a plugin before removing its credentials. */
+export function cancelPluginOAuthVerifications(pluginName, ownsConnector = () => true) {
+  const pending = []
+  for (const session of sessions.values()) {
+    if (session.pluginName !== pluginName) continue
+    if (pluginName === 'user-mcp' && (!session.pluginOwned || !ownsConnector(session.connectorName))) continue
+    session.cancelled = true
+    const child = session.child
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      pending.push(new Promise(resolve => child.once('close', resolve)))
+      // Do not leave the callback or a token exchange running during cleanup.
+      child.kill('SIGKILL')
+    }
+    finish(session, { ok: false, message: '插件已卸载，授权已取消' })
+  }
+  return pending.length ? Promise.all(pending) : null
+}
+
+export function standaloneOAuthConnectorNames() {
+  return [...sessions.values()]
+    .filter(session => session.pluginName === 'user-mcp' && !session.pluginOwned)
+    .map(session => session.connectorName)
 }
 
 export function oauthSessionStatusUrl(pluginName, connectorName, sessionId, userMcp = false) {

@@ -7,13 +7,13 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
-  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir,
+  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, removeManagedDir, sourceCacheDir,
 } from './store.js'
 import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from './market.js'
 import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceCache } from './parser.js'
 import { getOrFetchIcon, readLocalIcon } from './icons.js'
 import {
-  installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered,
+  installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered, toolCallIconGroups,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
 } from './install.js'
@@ -82,6 +82,10 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     }
 
     // ── state ────────────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/tool-call-icons') {
+      return sendJson(res, 200, { groups: toolCallIconGroups() })
+    }
+
     if (method === 'GET' && path === '/state') {
       const state = readState()
       const details = installedDetails()
@@ -332,6 +336,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (source.builtin) throw new Error('内置源不可删除')
       const used = state.plugins.some((p) => p.sourceId === sourceId)
       if (used) throw new Error('该源下仍有已安装插件，请先卸载')
+      // The remote checkout pool is shared by marketplaces. Only remove this
+      // source's own clone or uploaded marketplace copy.
+      if (sourceId !== 'remote') removeManagedDir(sourceCacheDir(sourceId))
       state.sources = state.sources.filter((s) => s.id !== sourceId)
       writeState(state)
       invalidateMarketplaceCache(sourceId)
@@ -352,11 +359,13 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       }
       // Migrate legacy patch-only entries (saved before userMcps state existed)
       let changed = false
+      const pluginTools = state.plugins.some(plugin => plugin.name === 'user-mcp') ? readMcpToolsState() : null
       for (const block of patch) {
         if (!block || !Array.isArray(block.insert)) continue
         for (const item of block.insert) {
           if (!item || typeof item.id !== 'string' || !item.id.startsWith(getConnectorId('user-mcp', ''))) continue
           const cfg = item.config || {}
+          if (pluginTools?.[`user-mcp::${cfg.serverName}`]?.pluginOAuthOwned && remoteConfigFromEntry(cfg)) continue
           if (cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
             state.userMcps.push(userMcpConfig(cfg.serverName, {
               transport: cfg.transport, url: cfg.url, command: cfg.command,
@@ -565,7 +574,10 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
-      const result = await verifyConnectorAuth(pluginName, connectorName, body)
+      if (!readState().plugins.some(plugin => plugin.name === pluginName)) {
+        return sendJson(res, 404, { ok: false, error: '插件未安装或已卸载' })
+      }
+      const result = await verifyConnectorAuth(pluginName, connectorName, body, { pluginOwned: true })
       return sendJson(res, 200, result)
     }
 
@@ -575,7 +587,10 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
-      const result = saveConnectorAuth(pluginName, connectorName, body)
+      if (!readState().plugins.some(plugin => plugin.name === pluginName)) {
+        return sendJson(res, 404, { ok: false, error: '插件未安装或已卸载' })
+      }
+      const result = saveConnectorAuth(pluginName, connectorName, body, { pluginOwned: true })
       return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId(pluginName, connectorName)]))
     }
 
@@ -708,7 +723,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     if (method === 'DELETE' && path.startsWith('/plugins/')) {
       requireSameOrigin(req)
       const pluginName = safeSegment(path.slice('/plugins/'.length), 'plugin name')
-      const result = uninstallPlugin(pluginName)
+      const result = await uninstallPlugin(pluginName)
       invalidateMarketplaceCache()
       return sendJson(res, 200, scheduledResult(result, applyProfile))
     }

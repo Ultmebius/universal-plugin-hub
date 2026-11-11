@@ -7,21 +7,22 @@
  * next DSH restart (or registry re-scan) exposes the plugin's skills to
  * agents.
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
 import { spawn, execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
+import { setImmediate as yieldToHost, setTimeout as delay } from 'node:timers/promises'
 import * as yaml from 'js-yaml'
-import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, sourceCacheDir } from './store.js'
+import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir } from './store.js'
 import { materializePlugin, pullSource, pluginPath } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { isUploadedSkillTarget } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
-import { beginOAuthVerification, completeOAuthVerification, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
+import { beginOAuthVerification, completeOAuthVerification, cancelPluginOAuthVerifications, standaloneOAuthConnectorNames, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
 import { encodeOAuthConfig, isOAuthMode, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
 import { oauthStoreDir, readOAuthRecord, writeOAuthRecord, deleteOAuthRecord } from './oauth-store.js'
 
@@ -139,7 +140,10 @@ export function isConnectorAuthenticated(pluginName, connectorName) {
   const target = installedDir(pluginName)
   const connectors = existsSync(target) ? getPluginConnectors(target) : []
   const found = connectors.find((c) => c.name === connectorName)
-  const entry = getConnectorEntry(pluginName, connectorName)
+  return connectorAuthenticated(found, getConnectorEntry(pluginName, connectorName))
+}
+
+function connectorAuthenticated(found, entry) {
   const cfg = entry?.config || found || {}
 
   const isHttp = (isRemoteTransportName(entry?.config?.transport) || isRemoteTransportName(found?.type) || (!found?.command && (found?.url || cfg.url)) || (!found?.command && !found?.args?.length))
@@ -213,15 +217,15 @@ function setRemoteVerification(pluginName, connectorName, payload, verified) {
 
 export function isConnectorActive(pluginName, connectorName) {
   const entry = getConnectorEntry(pluginName, connectorName)
+  return connectorActive(entry, () => isConnectorAuthenticated(pluginName, connectorName),
+    () => readMcpToolsState()[`${pluginName}::${connectorName}`])
+}
+
+function connectorActive(entry, authenticated, toolState) {
   if (!entry) return false
   const remote = remoteConfigFromEntry(entry.config)
-  if (remote) {
-    const key = `${pluginName}::${connectorName}`
-    return readMcpToolsState()[key]?.verifiedRemoteConfig === remoteConfigFingerprint(remote)
-  }
-  if (!isRemoteConnector(entry.config)) return isConnectorAuthenticated(pluginName, connectorName)
-  const key = `${pluginName}::${connectorName}`
-  return readMcpToolsState()[key]?.verifiedRemoteConfig === remoteConfigFingerprint(entry.config)
+  if (!remote && !isRemoteConnector(entry.config)) return authenticated()
+  return toolState()?.verifiedRemoteConfig === remoteConfigFingerprint(remote || entry.config)
 }
 
 export const getPluginConnectors = listConnectors
@@ -714,8 +718,7 @@ function versionLine(v) {
 }
 
 /** Read the running DSH release version from its installation, or '' when unknown. */
-export function findDshVersion() {
-  const main = findDshMainNodeModules()
+export function findDshVersion(main = findDshMainNodeModules()) {
   if (main) {
     for (const anchor of ['dsh-app-boot', 'dsh-session', 'dsh']) {
       try {
@@ -747,7 +750,7 @@ export function findDshVersion() {
  * hooks bridge latest=0.0.1-rc.5 while 0.1.1-rc.2 exists) nor a hard pin (which
  * would break once the user's DSH moves to a new line).
  */
-export async function matchingPublishedVersion(packageName) {
+export async function matchingPublishedVersion(packageName, dshVersion) {
   try {
     const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(packageName)}`, { headers: { accept: 'application/json' } })
     let versions = []
@@ -760,7 +763,7 @@ export async function matchingPublishedVersion(packageName) {
       if (Array.isArray(parsed)) versions = parsed.filter((v) => typeof v === 'string')
     }
     if (versions.length === 0) return ''
-    const line = versionLine(findDshVersion())
+    const line = versionLine(dshVersion ?? findDshVersion())
     const pool = line ? versions.filter((v) => versionLine(v) === line) : []
     const candidates = pool.length > 0 ? pool : versions
     let best = ''
@@ -802,7 +805,8 @@ export async function installProfilePackages(packageNames) {
   const names = Array.from(new Set((packageNames || []).filter((n) => typeof n === 'string' && n.trim())))
   if (names.length === 0) return { ok: true, installed: [] }
 
-  let main = findDshMainNodeModules()
+  const runtimeModules = findDshMainNodeModules()
+  let main = runtimeModules
   if (!main) {
     const sharedNm = join(dshHome(), 'profiles', 'node_modules')
     const activeNm = join(dshHome(), 'profiles', resolveActiveProfileName(), 'node_modules')
@@ -816,12 +820,13 @@ export async function installProfilePackages(packageNames) {
   // A host package from a different major.minor line than the running DSH
   // release is stale: skipping it because the directory exists left the hooks
   // and LSP bridges pinned to whatever line was current at first provision.
-  const dshLine = versionLine(findDshVersion())
-  const need = []
+  const dshVersion = findDshVersion(runtimeModules)
+  const dshLine = versionLine(dshVersion)
+  const need = new Map()
   for (const name of names) {
     const installedManifest = join(main, name, 'package.json')
     if (!existsSync(installedManifest)) {
-      need.push(name)
+      need.set(name, '')
       continue
     }
     if (!dshLine) continue
@@ -830,10 +835,11 @@ export async function installProfilePackages(packageNames) {
       if (typeof present !== 'string' || versionLine(present) === dshLine) continue
       // Re-provision only when a build for the running line actually exists;
       // otherwise the same mismatched version would be reinstalled every start.
-      if (versionLine(await matchingPublishedVersion(name)) === dshLine) need.push(name)
+      const version = await matchingPublishedVersion(name, dshVersion)
+      if (versionLine(version) === dshLine) need.set(name, version)
     } catch {}
   }
-  if (need.length === 0) return { ok: true, installed: [] }
+  if (need.size === 0) return { ok: true, installed: [] }
 
   // Install each package by downloading its tarball and extracting it into the
   // installation's node_modules. Do NOT run `npm install` against the DSH
@@ -841,11 +847,11 @@ export async function installProfilePackages(packageNames) {
   // packages that are not in the manifest, which has deleted DSH runtime
   // packages in the wild. A raw tarball extract has zero side effects.
   const installed = []
-  for (const name of need) {
+  for (const [name, version] of need) {
     try {
       // Resolve a version compatible with the running DSH release (same major.minor
       // line as the installed DSH), not the `latest` dist-tag which can lag behind.
-      const ver = await matchingPublishedVersion(name)
+      const ver = version || await matchingPublishedVersion(name, dshVersion)
       if (!ver) return { ok: false, error: `无法确定 ${name} 的匹配版本`, installed }
       let url = null
       try {
@@ -1158,7 +1164,7 @@ export function toggleConnector(pluginName, connectorName, enabled) {
   }
 }
 
-export async function verifyConnectorAuth(pluginName, connectorName, payload) {
+export async function verifyConnectorAuth(pluginName, connectorName, payload, { pluginOwned = pluginName !== 'user-mcp' } = {}) {
   const target = installedDir(pluginName)
   const connectors = getPluginConnectors(target)
   const found = connectors.find((c) => c.name === connectorName)
@@ -1170,17 +1176,19 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   const command = (typeof payload === 'object' && payload?.command) || found?.command || null
 
   if (transport !== 'stdio' && url && isOAuthMode(payload?.oauth)) {
-    setRemoteVerification(pluginName, connectorName, payload, false)
     try {
+      if (pluginOwned) rememberPluginOAuthUrls(pluginName, connectorName, url)
+      setRemoteVerification(pluginName, connectorName, payload, false)
       saveCustomOAuthClient(pluginName, connectorName, payload)
       const session = beginOAuthVerification(pluginName, connectorName, { ...payload, url }, {
+        pluginOwned,
         onFinished: (result) => setRemoteVerification(pluginName, connectorName, payload, result.ok === true),
       })
       const result = await Promise.race([
         completeOAuthVerification(session),
         new Promise((resolve) => setTimeout(() => resolve({ pending: true, sessionId: session.id, status: session.status, message: session.message || '正在准备 OAuth 授权…' }), 250)),
       ])
-      setRemoteVerification(pluginName, connectorName, payload, result.ok === true)
+      if (!session.cancelled) setRemoteVerification(pluginName, connectorName, payload, result.ok === true)
       return { ...result, server: connectorName, transport: 'http', endpoint: url, statusCode: result.statusCode ?? result.status }
     } catch (error) {
       return { ok: false, message: error.message, server: connectorName, transport: 'http', endpoint: url }
@@ -1316,7 +1324,7 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload) {
   return result
 }
 
-export function saveConnectorAuth(pluginName, connectorName, payload) {
+export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOwned = pluginName !== 'user-mcp' } = {}) {
   const target = installedDir(pluginName)
   const connectors = getPluginConnectors(target)
   const found = connectors.find((c) => c.name === connectorName) || { name: connectorName }
@@ -1355,6 +1363,10 @@ export function saveConnectorAuth(pluginName, connectorName, payload) {
     env: { ...baseEnv, ...customEnv },
     headers: { ...baseHeaders, ...customHeaders },
     oauth: isStdio ? 'none' : oauth,
+  }
+  if (pluginOwned) {
+    const previousRemote = remoteConfigFromEntry(getConnectorEntry(pluginName, connectorName)?.config)
+    rememberPluginOAuthUrls(pluginName, connectorName, !isStdio && isOAuthMode(oauth) ? url : null, previousRemote?.url)
   }
   if (!isStdio && isOAuthMode(oauth)) {
     saveCustomOAuthClient(pluginName, connectorName, payload)
@@ -1411,12 +1423,30 @@ export function readMcpToolsState() {
   }
 }
 
-export function writeMcpToolsState(state) {
+export function writeMcpToolsState(state, { required = false } = {}) {
   try {
     const file = MCP_TOOLS_STATE_PATH()
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, JSON.stringify(state, null, 2), 'utf8')
-  } catch {}
+  } catch (error) {
+    if (required) throw error
+  }
+}
+
+function rememberPluginOAuthUrls(pluginName, connectorName, ...urls) {
+  const key = `${pluginName}::${connectorName}`
+  const state = readMcpToolsState()
+  const entry = state[key] || {}
+  const history = new Set(Array.isArray(entry.oauthUrls) ? entry.oauthUrls : [])
+  const size = history.size
+  for (const url of [...urls, entry.savedOAuthRemoteConfig?.url]) {
+    if (typeof url === 'string' && url.trim()) history.add(url)
+  }
+  if (history.size !== size) {
+    state[key] = { ...entry, oauthUrls: [...history], ...(pluginName === 'user-mcp' ? { pluginOAuthOwned: true } : {}) }
+    // Record ownership before a verification child can write the credential.
+    writeMcpToolsState(state, { required: true })
+  }
 }
 
 export function getDisabledTools(pluginName, connectorName) {
@@ -1785,7 +1815,7 @@ function ensureSkillFrontmatter(content, skillName, description) {
  * This ensures DSH Desktop's @deepseek-ai/dsh-skill-filesystem discovers them
  * natively and hot-reloads them into the composer's "/" slash command menu.
  */
-export function syncPluginSkillsToDsh(pluginName) {
+export async function syncPluginSkillsToDsh(pluginName, shouldSync = () => true, { repairOnly = false } = {}) {
   const target = installedDir(pluginName)
   const pluginSkillsDir = join(target, 'skills')
   if (!existsSync(pluginSkillsDir)) return []
@@ -1795,21 +1825,64 @@ export function syncPluginSkillsToDsh(pluginName) {
 
   const synced = []
   for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      const srcSkillDir = join(pluginSkillsDir, entry.name)
-      const srcSkillFile = join(srcSkillDir, 'SKILL.md')
-      if (existsSync(srcSkillFile)) {
-        const destSkillDir = join(dshSkills, entry.name)
-        // A direct upload owns its junction/copy. A later plugin installation
-        // must not replace it or delete the user's original through the link.
-        if (isUploadedSkillTarget(destSkillDir)) continue
-        safeRmDir(destSkillDir)
-        copyDir(srcSkillDir, destSkillDir)
-        synced.push(entry.name)
-      }
+    if (!entry.isDirectory()) continue
+    const srcSkillDir = join(pluginSkillsDir, entry.name)
+    if (!existsSync(join(srcSkillDir, 'SKILL.md'))) continue
+    const destSkillDir = join(dshSkills, entry.name)
+    // Direct uploads own their native paths, including during a retry.
+    const keepExisting = path => !shouldSync() || isUploadedSkillTarget(path)
+    if (await replaceManagedDir(srcSkillDir, destSkillDir, keepExisting, repairOnly)) {
+      synced.push(entry.name)
     }
+    if (repairOnly) await yieldToHost()
   }
   return synced
+}
+
+function hasMatchingSkillCopy(source, destination) {
+  try {
+    // A link must still be repaired, even if its target currently matches.
+    if (!lstatSync(destination, { throwIfNoEntry: false })?.isDirectory()) return false
+    const entries = readdirSync(source, { withFileTypes: true })
+    const existing = new Map(readdirSync(destination, { withFileTypes: true }).map(entry => [entry.name, entry]))
+    if (entries.length !== existing.size) return false
+    return entries.every(entry => {
+      const other = existing.get(entry.name)
+      const from = join(source, entry.name)
+      const to = join(destination, entry.name)
+      if (entry.isDirectory()) return other?.isDirectory() && hasMatchingSkillCopy(from, to)
+      if (!entry.isFile() || !other?.isFile()) return false
+      if (process.platform !== 'win32' && (statSync(from).mode & 0o777) !== (statSync(to).mode & 0o777)) return false
+      return readFileSync(from).equals(readFileSync(to))
+    })
+  } catch {
+    return false
+  }
+}
+
+async function retryManagedDirOperation(operation, destination) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return operation()
+    } catch (err) {
+      // Windows can keep a deleted directory name reserved until the last
+      // handle closes. Keep retries scoped to directory cleanup and creation.
+      if (process.platform !== 'win32' || attempt >= 5 || (destination && err.path !== destination) ||
+        ![undefined, 'lstat', 'unlink', 'mkdir'].includes(err.syscall) ||
+        !['EPERM', 'EACCES', 'EBUSY'].includes(err.code)) throw err
+      await delay(50 * 2 ** attempt)
+    }
+  }
+}
+
+function replaceManagedDir(from, to, keepExisting, repairOnly = false) {
+  return retryManagedDirOperation(() => {
+    if (keepExisting?.(to)) return false
+    if (repairOnly && hasMatchingSkillCopy(from, to)) return true
+    removeManagedDir(to)
+    copyDir(from, to)
+    return true
+  }, to)
 }
 
 /**
@@ -1827,29 +1900,31 @@ export function removePluginSkillsFromDsh(pluginName) {
       if (entry.isDirectory()) {
         const destSkillDir = join(dshSkills, entry.name)
         if (isUploadedSkillTarget(destSkillDir)) continue
-        safeRmDir(destSkillDir)
+        removeManagedDir(destSkillDir)
       }
     }
   }
 
-  // 2. Also remove any skills prefixed with plugin name or compiled subagent hub
-  const subagentHubName = `${pluginName}-agents`
-  if (!isUploadedSkillTarget(join(dshSkills, subagentHubName))) safeRmDir(join(dshSkills, subagentHubName))
+  // Older installs may have exposed the compiled subagent hub separately.
+  const subagentHubDir = join(dshSkills, `${pluginName}-agents`)
+  if (!isUploadedSkillTarget(subagentHubDir)) removeManagedDir(subagentHubDir)
 }
 
 /**
  * Sync all installed and enabled plugins into $DSH_HOME/skills.
  * Called at boot or after configuration change.
  */
-export function syncAllInstalledSkillsToDsh() {
+export async function syncAllInstalledSkillsToDsh() {
   const state = readState()
   const dshSkills = dshSkillsDir()
   mkdirSync(dshSkills, { recursive: true })
 
   const results = {}
   for (const plugin of state.plugins || []) {
+    const stillEnabled = () => readState().plugins.some(current =>
+      current.name === plugin.name && current.installedAt === plugin.installedAt && current.enabled !== false)
     if (plugin.enabled !== false) {
-      results[plugin.name] = syncPluginSkillsToDsh(plugin.name)
+      results[plugin.name] = await syncPluginSkillsToDsh(plugin.name, stillEnabled, { repairOnly: true })
     }
   }
   return results
@@ -1873,12 +1948,10 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
   // Reinstalling must not inherit the previous copy's registrations: skills it
   // no longer ships and MCP servers it dropped would otherwise stay visible.
   const prevConnectors = existsSync(target) ? getPluginConnectors(target).map((c) => c.name) : []
-  if (existsSync(target)) removePluginSkillsFromDsh(pluginName)
+  if (existsSync(target)) await retryManagedDirOperation(() => removePluginSkillsFromDsh(pluginName))
 
   // Idempotent reinstall: clear the previous copy first.
-  safeRmDir(target)
-  mkdirSync(dirname(target), { recursive: true })
-  copyDir(dir, target)
+  await replaceManagedDir(dir, target)
 
   // Persist marketplace-declared LSP servers into the installed copy's
   // manifest, so installedDetails / detail views can read them back even when
@@ -2039,7 +2112,7 @@ export async function installPlugin({ sourceId, pluginName, refresh = false }) {
 
   // Sync skills and subagent delegates to DSH native skills directory.
   if (existsSync(skillsDir)) {
-    syncPluginSkillsToDsh(pluginName)
+    await syncPluginSkillsToDsh(pluginName)
   }
 
   // Auto-register and connect any MCP connectors defined in the plugin that do NOT require auth and have valid URLs/commands.
@@ -2140,20 +2213,66 @@ function readInstalledVersion(target) {
 }
 
 /** Uninstall: remove copy, unregister scan dir, clean legacy presets and connectors. */
-export function uninstallPlugin(pluginName) {
+export async function uninstallPlugin(pluginName) {
+  const sharedNamespace = pluginName === 'user-mcp'
+  const standaloneIds = () => new Set([
+    ...(readState().userMcps || []).map(mcp => mcp.name),
+    ...standaloneOAuthConnectorNames(),
+  ].map(name => getConnectorId(pluginName, name)))
+  const stopVerifications = () => {
+    const claimed = sharedNamespace ? standaloneIds() : new Set()
+    return cancelPluginOAuthVerifications(pluginName, name => !claimed.has(getConnectorId(pluginName, name)))
+  }
+  let stopping = stopVerifications()
+  while (stopping) {
+    await stopping
+    stopping = stopVerifications()
+  }
   const state = readState()
   const target = installedDir(pluginName)
-  if (existsSync(target)) {
-    const pluginConnectors = getPluginConnectors(target)
-    for (const c of pluginConnectors) {
-      unregisterConnector(pluginName, c.name)
+  removePluginSkillsFromDsh(pluginName)
+  const prefix = `${pluginName}::`
+  const priorToolsState = readMcpToolsState()
+  const declared = new Map((existsSync(target) ? getPluginConnectors(target) : []).map(c => [c.name, c.url]))
+  // Standalone definitions and in-flight sign-ins take precedence in the
+  // shared namespace. Other cached entries are eligible only with provenance.
+  const claimed = sharedNamespace ? standaloneIds() : new Set()
+  const cachedNames = Object.entries(priorToolsState)
+    .filter(([key, saved]) => key.startsWith(prefix) && (!sharedNamespace || saved?.pluginOAuthOwned))
+    .map(([key]) => key.slice(prefix.length))
+  const ownedNames = new Set()
+  for (const name of new Set([...declared.keys(), ...cachedNames])) {
+    if (claimed.has(getConnectorId(pluginName, name))) continue
+    const saved = priorToolsState[prefix + name]
+    const entry = getConnectorEntry(pluginName, name)
+    if (sharedNamespace && entry && entry.config?.serverName !== name) continue
+    const remote = remoteConfigFromEntry(entry?.config)
+    const ownsRegistration = remote && remote.credentialKey === oauthCredentialKey(pluginName, name, remote.url, remote.oauth)
+    if (sharedNamespace && remote && !ownsRegistration) continue
+    if (sharedNamespace && !entry && !saved?.pluginOAuthOwned) continue
+    ownedNames.add(name)
+    if (remote ? ownsRegistration : declared.has(name)) unregisterConnector(pluginName, name)
+    const oauthUrls = new Set([
+      ...(Array.isArray(saved?.oauthUrls) ? saved.oauthUrls : []),
+      saved?.savedOAuthRemoteConfig?.url,
+      ownsRegistration ? remote.url : null,
+    ])
+    for (const url of new Set([declared.get(name), ...oauthUrls])) {
+      if (typeof url !== 'string' || !url.trim()) continue
+      for (const mode of ['auto_register', 'custom']) {
+        deleteOAuthRecord(oauthCredentialKey(pluginName, name, url, mode), {
+          required: true,
+          ifPresent: !oauthUrls.has(url),
+        })
+      }
     }
+  }
+  if (existsSync(target)) {
     unregisterPluginLsp(pluginName)
     unregisterPluginHooks(pluginName)
   }
-  removePluginSkillsFromDsh(pluginName)
-  try { safeRmDir(target) } catch {}
-  
+  removeManagedDir(target)
+
   // Clean any legacy preset directories left by prior versions
   cleanupLegacyPresets(pluginName)
 
@@ -2161,7 +2280,7 @@ export function uninstallPlugin(pluginName) {
   const mcpToolsState = readMcpToolsState()
   let mcpToolsStateChanged = false
   for (const k of Object.keys(mcpToolsState)) {
-    if (k.startsWith(`${pluginName}::`)) {
+    if (k.startsWith(prefix) && ownedNames.has(k.slice(prefix.length))) {
       delete mcpToolsState[k]
       mcpToolsStateChanged = true
       MEMORY_TOOLS_CACHE.delete(k)
@@ -2169,7 +2288,7 @@ export function uninstallPlugin(pluginName) {
     }
   }
   if (mcpToolsStateChanged) {
-    writeMcpToolsState(mcpToolsState)
+    writeMcpToolsState(mcpToolsState, { required: true })
   }
 
   state.plugins = state.plugins.filter((p) => p.name !== pluginName)
@@ -2192,7 +2311,7 @@ export async function togglePlugin(pluginName, enabled) {
 
   if (enabled) {
     if (existsSync(skillsDir)) {
-      syncPluginSkillsToDsh(pluginName)
+      await syncPluginSkillsToDsh(pluginName)
     }
     for (const c of pluginConnectors) {
       registerConnector(pluginName, c.name, c)
@@ -2269,12 +2388,96 @@ function findMarketRowSync(sourceId, pluginName) {
   }
 }
 
+function installedPluginIconIdentity(rec, target, manifest, marketRow) {
+  const author = typeof manifest?.author === 'string' ? manifest.author : manifest?.author?.name
+  const declared = buildPluginIcons(manifest, { sourceId: rec.sourceId, name: rec.name, dir: target, source: marketRow?.source })
+  return {
+    name: rec.name,
+    sourceId: rec.sourceId,
+    author: rec.author || author || marketRow?.author || rec.author,
+    homepage: rec.homepage || marketRow?.homepage,
+    source: rec.source || marketRow?.source,
+    icons: declared.light.length || declared.dark.length ? declared : (marketRow?.icons || declared),
+  }
+}
+
+/** Match the DSH MCP client's public name, including lossy or long raw names. */
+function mcpPublicToolName(server, rawName) {
+  const name = `mcp__${server}__${rawName}`
+  const normalized = name.replace(/[^A-Za-z0-9_-]/g, '_')
+  if (name === normalized && name.length <= 64) return name
+  const hash = createHash('sha256').update(`${server}\0${rawName}`).digest('hex').slice(0, 12)
+  return `${normalized.slice(0, 51)}_${hash}`
+}
+
+/** Public branding only. Connector configuration and tool arguments stay out of this response. */
+export function toolCallIconGroups() {
+  const registrations = readCordisPatch().flatMap(block => block?.insert || [])
+    .filter(entry => entry?.name === '@deepseek-ai/dsh-mcp-client' && /^[A-Za-z0-9_-]{1,32}$/.test(entry.config?.serverName || ''))
+  const byServer = new Map()
+  for (const entry of registrations) {
+    const server = entry.config.serverName
+    byServer.set(server, byServer.has(server) ? null : entry.id)
+  }
+  if (!byServer.size) return []
+  const toolsState = readMcpToolsState()
+  const owners = new Set()
+  for (const [key, state] of Object.entries(toolsState)) {
+    if (!state?.cachedTools?.length) continue
+    const separator = key.lastIndexOf('::')
+    if (separator < 0) continue
+    const owner = key.slice(0, separator)
+    const server = key.slice(separator + 2)
+    if (byServer.get(server) === getConnectorId(owner, server)) owners.add(owner)
+  }
+  const claimedTools = new Map()
+  const groups = []
+  for (const rec of readState().plugins) {
+    const target = installedDir(rec.name)
+    if (rec.enabled === false || rec.name === 'user-mcp' || !owners.has(rec.name) || !existsSync(target)) continue
+    const manifest = readPluginManifest(target)
+    const tools = new Map()
+    for (const { name } of getPluginConnectors(target, manifest)) {
+      if (byServer.get(name) !== getConnectorId(rec.name, name)) continue
+      for (const tool of toolsState[`${rec.name}::${name}`]?.cachedTools || []) {
+        if (typeof tool?.name !== 'string' || !tool.name) continue
+        const publicName = mcpPublicToolName(name, tool.name)
+        // Double underscores can also occur inside a DSH server name.
+        if (hasOverlappingToolPrefix(publicName, name, byServer)) continue
+        tools.set(publicName, tool.name)
+      }
+    }
+    if (!tools.size) continue
+    for (const name of tools.keys()) claimedTools.set(name, (claimedTools.get(name) || 0) + 1)
+    groups.push({
+      plugin: {
+        ...installedPluginIconIdentity(rec, target, manifest, findMarketRowSync(rec.sourceId, rec.name)),
+        displayName: rec.displayName || rec.name,
+      },
+      tools: Array.from(tools, ([name, rawName]) => ({ name, rawName })),
+    })
+  }
+  return groups.map(group => ({ ...group, tools: group.tools.filter(tool => claimedTools.get(tool.name) === 1) }))
+    .filter(group => group.tools.length)
+}
+
+function hasOverlappingToolPrefix(publicName, name, servers) {
+  for (let end = publicName.indexOf('__', 5); end !== -1; end = publicName.indexOf('__', end + 1)) {
+    const server = publicName.slice(5, end)
+    if (server !== name && servers.has(server)) return true
+  }
+  return false
+}
+
 /** Re-exported for routes: list installed plugins with details. */
 export function installedDetails() {
   const state = readState()
+  let connectorEntries
+  let toolsState
   return state.plugins.map((rec) => {
     const target = installedDir(rec.name)
-    if (existsSync(target)) {
+    const installed = existsSync(target)
+    if (installed) {
       const skillsDir = join(target, 'skills')
       if (!existsSync(skillsDir)) {
         try { mkdirSync(skillsDir, { recursive: true }) } catch {}
@@ -2300,13 +2503,24 @@ export function installedDetails() {
         }
       } catch {}
     }
-    const connectors = existsSync(target) ? getPluginConnectors(target).map((c) => {
+    const targetManifest = installed ? readPluginManifest(target) : null
+    const connectors = installed ? getPluginConnectors(target, targetManifest).map((c) => {
+      if (!connectorEntries) {
+        connectorEntries = new Map()
+        for (const block of readCordisPatch()) {
+          if (!Array.isArray(block?.insert)) continue
+          for (const entry of block.insert) {
+            if (entry && !connectorEntries.has(entry.id)) connectorEntries.set(entry.id, entry)
+          }
+        }
+      }
       const needsAuth = connectorRequiresAuth(c)
-      const authenticated = isConnectorAuthenticated(rec.name, c.name)
-      const connected = isConnectorActive(rec.name, c.name)
-      const savedEntry = getConnectorEntry(rec.name, c.name)
+      const savedEntry = connectorEntries.get(getConnectorId(rec.name, c.name))
+      const toolState = () => (toolsState ??= readMcpToolsState())[`${rec.name}::${c.name}`]
+      const authenticated = connectorAuthenticated(c, savedEntry)
+      const connected = connectorActive(savedEntry, () => authenticated, toolState)
       const savedConfig = savedEntry?.config || {}
-      const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? readMcpToolsState()[`${rec.name}::${c.name}`]?.savedOAuthRemoteConfig : null)
+      const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? toolState()?.savedOAuthRemoteConfig : null)
       const savedHeaders = remote ? remote.headers : ((savedConfig.headers && Object.keys(savedConfig.headers).length > 0) ? savedConfig.headers : c.headers)
       const savedEnv = remote ? {} : ((savedConfig.env && Object.keys(savedConfig.env).length > 0) ? savedConfig.env : c.env)
       const savedUrl = remote ? remote.url : (savedConfig.url || c.url)
@@ -2332,7 +2546,7 @@ export function installedDetails() {
         connected,
       }
     }) : []
-    let lspServers = existsSync(target) ? listLspServers(target) : []
+    let lspServers = listLspServers(targetManifest)
     // Auto-activate: if an LSP server's binary is now on PATH but the entry
     // hasn't been written to cordis.patch.yml yet (e.g. the user installed the
     // binary after the plugin — registration was previously skipped because the
@@ -2342,7 +2556,7 @@ export function installedDetails() {
     // ~1s, so the newly registered server becomes truly active immediately —
     // no DSH restart needed (verified against @deepseek-ai/dsh-app-boot's
     // `watchUserPatches`, which registers cordis.patch.yml with Cordis HMR).
-    if (existsSync(target) && lspServers.length > 0) {
+    if (lspServers.length > 0) {
       const autoRegistered = lspServers.filter((s) => {
         if (isLspActive(rec.name, s.name)) return false
         // Honor an explicit removal: if we already auto-activated this server
@@ -2374,43 +2588,37 @@ export function installedDetails() {
       const missingCommand = !active && !!s.command && !resolveCommandPath(s.command)
       return { ...s, active, missingCommand }
     })
-    const targetManifest = existsSync(target) ? readPluginManifest(target) : null
     // Author: the state record is written at install time, so installs made
     // before the marketplace reader learned to merge a plugin's own manifest
     // carry `author: null` forever. Fall back to the installed copy's manifest,
     // then to the live marketplace row, so those records self-heal on read.
-    const manifestAuthor = targetManifest?.author
-      ? (typeof targetManifest.author === 'string' ? targetManifest.author : targetManifest.author.name)
-      : null
     const marketRow = findMarketRowSync(rec.sourceId, rec.name)
-    const author = rec.author || manifestAuthor || marketRow?.author
     // The browse list and the connector rows render the same plugin through the
     // same icon component, so they must be handed the same identity fields the
     // detail page merges in. Without these a plugin whose manifest declares no
     // icon falls back to "author name as a GitHub handle" and shows a stranger's
     // avatar while its own page shows the real logo.
-    const declaredIcons = buildPluginIcons(targetManifest, { sourceId: rec.sourceId, name: rec.name, dir: existsSync(target) ? target : undefined, source: marketRow?.source })
-    const hasDeclaredIcon = !!((declaredIcons.light.length) || (declaredIcons.dark.length))
-    const detail = existsSync(target) ? {
-      icons: hasDeclaredIcon ? declaredIcons : (marketRow?.icons || declaredIcons),
-      skills: listSkills(target),
-      agents: listAgents(target),
-      prompts: listPrompts(target),
+    const identity = installedPluginIconIdentity(rec, installed ? target : undefined, targetManifest, marketRow)
+    const detail = installed ? {
+      icons: identity.icons,
+      skills: listSkills(target, targetManifest),
+      agents: listAgents(target, targetManifest),
+      prompts: listPrompts(target, targetManifest),
       connectors,
-      hooks: listHooks(target),
+      hooks: listHooks(target, targetManifest),
       lspServers,
-      version: readInstalledVersion(target) ?? null,
+      version: targetManifest?.version ?? null,
     } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: null }
     return {
       ...rec,
       ...detail,
       description: rec.description || targetManifest?.description || marketRow?.description || '',
-      author: author || rec.author,
+      author: identity.author,
       // Identity fields the icon chain reads. The detail page already merges
       // these from the marketplace row before rendering, which is why the same
       // plugin showed one icon inline and another on its own page.
-      homepage: rec.homepage || marketRow?.homepage,
-      source: rec.source || marketRow?.source,
+      homepage: identity.homepage,
+      source: identity.source,
       skillCount: detail.skills.length,
       agentCount: detail.agents.length,
       promptCount: detail.prompts.length,

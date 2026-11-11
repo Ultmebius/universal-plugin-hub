@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, rmSync
 import { dirname } from 'node:path'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { runInNewContext } from 'node:vm'
 import { parse } from 'acorn'
 
 const client = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
@@ -178,7 +179,8 @@ test('only user-added servers expose rename and delete in the editor', () => {
 })
 
 test('the delete control reads as a button at rest and animates as two parts', () => {
-  const css = client.slice(client.indexOf('const CSS = `'), client.indexOf('\n`;'))
+  const start = client.indexOf('const ICON_SHAPE_CSS = `')
+  const css = runInNewContext(client.slice(start, client.indexOf('function ensureCss()', start)) + '\nCSS')
   // Anchor to the start of a line and require the newline before the brace, so
   // the reduced-motion overrides earlier in the file (same selectors, nested in
   // a media block) cannot be mistaken for the rules under test.
@@ -193,7 +195,8 @@ test('the delete control reads as a button at rest and animates as two parts', (
   // straight edge. It is progressive enhancement, so the radius must stay as
   // the fallback for browsers without it.
   const base = rule('.cpm-mcp-footer-del')
-  assert.match(base, /corner-shape:\s*squircle/)
+  assert.match(base, /corner-shape:\s*var\(--cpm-icon-corner-shape\)/)
+  assert.match(rule(':root'), /--cpm-icon-corner-shape:\s*squircle/)
   assert.match(base, /border-radius:\s*var\(--del-radius\)/)
 
   // The surface is present before hover, not only on it — that was the

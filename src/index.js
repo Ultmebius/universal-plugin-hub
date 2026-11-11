@@ -26,7 +26,7 @@ export function apply(ctx) {
   // Everything below that resolves a profile path has to run *after* this, so
   // it lives inside the injection rather than beside it.
   let provisioned = Promise.resolve()
-  ctx.inject(['profileContext'], (hostCtx) => {
+  ctx.inject(['profileContext'], async (hostCtx) => {
     const name = hostCtx.profileContext?.name
     if (typeof name === 'string' && name.trim()) process.env.DSH_PROFILE = name.trim()
 
@@ -34,7 +34,7 @@ export function apply(ctx) {
     try {
       restoreUploadedSkills()
 
-      syncAllInstalledSkillsToDsh()
+      await syncAllInstalledSkillsToDsh()
     } catch (err) {
       ctx.logger?.warn?.(`[universal-plugin-hub] skill sync error: ${err.message}`)
     }

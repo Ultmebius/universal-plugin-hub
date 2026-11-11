@@ -8,12 +8,21 @@
  */
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, lstatSync, rmSync, unlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 
 /** Robust directory deletion handling Windows readonly/locked files. */
-export function safeRmDir(dir) {
-  if (!dir || !existsSync(dir)) return
+export function safeRmDir(dir, { allowTrash = true } = {}) {
+  if (!dir) return
+  // A dangling junction is invisible to existsSync. Unlink junctions directly
+  // so the Windows directory fallbacks never operate on their targets.
+  let entry
+  try { entry = lstatSync(dir, { throwIfNoEntry: false }) } catch {}
+  if (entry?.isSymbolicLink()) {
+    unlinkSync(dir)
+    return
+  }
+  if (!entry && !existsSync(dir)) return
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
     return
@@ -28,6 +37,7 @@ export function safeRmDir(dir) {
         execFileSync('cmd.exe', ['/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
         if (!existsSync(dir)) return
       } catch {}
+      if (!allowTrash) return
       try {
         const trash = `${dir}.trash-${Date.now()}`
         renameSync(dir, trash)
@@ -37,6 +47,14 @@ export function safeRmDir(dir) {
         return
       } catch {}
     }
+  }
+}
+
+/** Remove managed files before forgetting the record needed to retry cleanup. */
+export function removeManagedDir(dir) {
+  safeRmDir(dir, { allowTrash: false })
+  if (lstatSync(dir, { throwIfNoEntry: false })) {
+    throw Object.assign(new Error(`无法清理目录：${dir}`), { code: 'EBUSY', path: dir })
   }
 }
 
@@ -206,7 +224,8 @@ export function suggestSourceName(url) {
   const ownerLower = (owner || '').toLowerCase()
   const repoLower = (repo || '').toLowerCase()
 
-  if (repoLower === 'claude-plugins-official' || ownerLower === 'anthropics') return 'Anthropic'
+  if (ownerLower === 'anthropics' && repoLower === 'knowledge-work-plugins') return 'Knowledge Work'
+  if (repoLower === 'claude-plugins-official') return 'Anthropic'
   if (repoLower === 'claude-plugins-community') return 'Community'
 
   const genericRepoNames = new Set([

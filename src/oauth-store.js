@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -52,20 +52,60 @@ export function readOAuthRecord(key) {
   }
 }
 
-export function writeOAuthRecord(key, record) {
-  const file = oauthCredentialPath(key)
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+function writeRecord(file, record, stagingDir) {
   const plainText = JSON.stringify(record)
   const stored = process.platform === 'win32'
     ? { version: 1, dpapi: true, data: protectDpapi(plainText) }
     : JSON.parse(plainText)
-  const tmp = join(dirname(file), `.${process.pid}.${randomBytes(8).toString('hex')}.tmp`)
-  writeFileSync(tmp, JSON.stringify(stored), { mode: 0o600 })
-  renameSync(tmp, file)
-  try { if (process.platform !== 'win32') writeFileSync(file, JSON.stringify(stored), { mode: 0o600 }) } catch {}
+  const tmp = join(stagingDir, `.${process.pid}.${randomBytes(8).toString('hex')}.tmp`)
+  try {
+    writeFileSync(tmp, JSON.stringify(stored), { mode: 0o600 })
+    renameSync(tmp, file)
+  } finally {
+    rmSync(tmp, { force: true })
+  }
   // Seed the read cache with what was just written: no pwsh round trip, and a
   // concurrent reader can never see the previous version.
   RECORD_CACHE.set(file, { raw: JSON.stringify(stored), record })
+}
+
+export function allowOAuthRecordWrites(key) {
+  rmSync(`${oauthCredentialPath(key)}.revoked`, { force: true })
+}
+
+export function writeOAuthRecord(key, record) {
+  const file = oauthCredentialPath(key)
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+  allowOAuthRecordWrites(key)
+  writeRecord(file, record, dirname(file))
+}
+
+/** A running bridge can publish only while its private staging directory exists. */
+export function openOAuthRecordWriter(key) {
+  const file = oauthCredentialPath(key)
+  const revoked = `${file}.revoked`
+  if (existsSync(revoked)) return null
+  const root = `${file}.writers`
+  mkdirSync(root, { recursive: true, mode: 0o700 })
+  const directory = mkdtempSync(join(root, 'bridge-'))
+  const close = () => rmSync(directory, { recursive: true, force: true })
+  if (existsSync(revoked)) {
+    close()
+    return null
+  }
+  return {
+    write(record) {
+      if (!existsSync(directory) || existsSync(revoked)) return false
+      try {
+        writeRecord(file, record, directory)
+        return true
+      } catch (error) {
+        if (error.code === 'ENOENT' && !existsSync(directory)) return false
+        throw error
+      }
+    },
+    close,
+  }
 }
 
 export function saveOAuthClientCredentials(key, client) {
@@ -90,8 +130,18 @@ export function saveOAuthClientCredentials(key, client) {
  * removed: leaving the file behind would resurrect a stale sign-in if a server
  * of the same name were added again with the same URL and OAuth mode.
  */
-export function deleteOAuthRecord(key) {
+export function deleteOAuthRecord(key, { required = false, ifPresent = false } = {}) {
   const file = oauthCredentialPath(key)
   RECORD_CACHE.delete(file)
-  try { rmSync(file, { force: true }) } catch {}
+  try {
+    if (ifPresent && !existsSync(file) && !existsSync(`${file}.writers`)) return
+    // Block new bridges first. Removing the old bridges' staging directories
+    // prevents even a refresh already in progress from publishing after cleanup.
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+    writeFileSync(`${file}.revoked`, '', { mode: 0o600 })
+    rmSync(`${file}.writers`, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    rmSync(file, { force: true })
+  } catch (error) {
+    if (required) throw error
+  }
 }

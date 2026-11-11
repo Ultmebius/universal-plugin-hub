@@ -425,10 +425,12 @@ export function pluginContentDir(sourceId, pluginName, source, preferInstalled =
 export function readPluginManifest(dir, includeParent = true) {
   const rootManifest = join(dir, 'plugin.json')
   let portable = false
-  try {
-    const root = JSON.parse(readFileSync(rootManifest, 'utf8'))
-    portable = /^https:\/\/agent-plugins\.org\//.test(root.$schema || '') || Boolean(root.extensions?.['com.openai'])
-  } catch {}
+  if (existsSync(rootManifest)) {
+    try {
+      const root = JSON.parse(readFileSync(rootManifest, 'utf8'))
+      portable = /^https:\/\/agent-plugins\.org\//.test(root.$schema || '') || Boolean(root.extensions?.['com.openai'])
+    } catch {}
+  }
   const candidates = [
     join(dir, '.claude-plugin', 'plugin.json'),
     ...(portable ? [rootManifest] : []),
@@ -494,7 +496,7 @@ export function readPluginManifest(dir, includeParent = true) {
 }
 
 /** List skill & command directories/files (skills/*, commands/*, root SKILL.md, .cursor/rules). */
-export function listSkills(dir) {
+export function listSkills(dir, manifest = readPluginManifest(dir)) {
   const out = []
   const seen = new Set()
 
@@ -511,7 +513,6 @@ export function listSkills(dir) {
   }
 
   // 1. Check skills/ subdirectory
-  const manifest = readPluginManifest(dir)
   const declaredSkills = typeof manifest?.skills === 'string' ? [manifest.skills] : (Array.isArray(manifest?.skills) ? manifest.skills.filter((s) => typeof s === 'string' && s.startsWith('./')) : [])
   const candidateSkillRoots = [...declaredSkills.map((p) => pluginPath(dir, p)), join(dir, 'skills'), join(dir, '..', 'skills')]
   for (const sRoot of candidateSkillRoots) {
@@ -624,7 +625,7 @@ export function listSkills(dir) {
 }
 
 /** List agent definition files (agents/*.yaml|yml|md|json, .well-known/agent-card.json, agent.json). */
-export function listAgents(dir) {
+export function listAgents(dir, manifest = readPluginManifest(dir)) {
   const out = []
   const seen = new Set()
 
@@ -722,7 +723,6 @@ export function listAgents(dir) {
   }
 
   // Check manifest "agents" array
-  const manifest = readPluginManifest(dir)
   if (manifest && Array.isArray(manifest.agents)) {
     for (const item of manifest.agents) {
       const rawName = typeof item === 'string' ? item : item?.name
@@ -748,7 +748,7 @@ export function listAgents(dir) {
 }
 
 /** Prompt-ish entries: prompts/*.md|txt|yaml or plugin.json "prompts". */
-export function listPrompts(dir) {
+export function listPrompts(dir, manifest = readPluginManifest(dir)) {
   const prompts = []
   const pRoots = [join(dir, 'prompts'), join(dir, '..', 'prompts')]
   for (const pRoot of pRoots) {
@@ -762,7 +762,6 @@ export function listPrompts(dir) {
       } catch {}
     }
   }
-  const manifest = readPluginManifest(dir)
   if (manifest && Array.isArray(manifest.prompts)) {
     prompts.push(...manifest.prompts.map((p) => (typeof p === 'string' ? p : p.name)).filter(Boolean))
   }
@@ -824,8 +823,7 @@ export function parseHookConfig(raw, isJson) {
  * path first, then `hooks/hooks.json|yaml|yml`, then `*-hooks.{json,yaml}` files.
  * Returns null when the plugin declares no hook config (e.g. only scripts).
  */
-export function resolveHookConfigPath(dir) {
-  const manifest = readPluginManifest(dir)
+export function resolveHookConfigPath(dir, manifest = readPluginManifest(dir)) {
   if (manifest && typeof manifest.hooks === 'string') {
     const p = isAbsolute(manifest.hooks) ? manifest.hooks : join(dir, manifest.hooks)
     if (existsSync(p) && statSync(p).isFile()) return p
@@ -848,12 +846,12 @@ export function resolveHookConfigPath(dir) {
 }
 
 /** Hook entries: follow the plugin manifest's `hooks` config, then hooks/ config files. */
-export function listHooks(dir) {
+export function listHooks(dir, manifest = readPluginManifest(dir)) {
   const hooks = []
   const seen = new Set()
   const add = (h) => { if (h && !seen.has(h)) { seen.add(h); hooks.push(h) } }
 
-  const cfg = resolveHookConfigPath(dir)
+  const cfg = resolveHookConfigPath(dir, manifest)
   if (cfg) {
     try {
       const raw = readFileSync(cfg, 'utf8')
@@ -863,7 +861,6 @@ export function listHooks(dir) {
 
   // Manifest `hooks` as inline object/array (no file path to follow).
   if (hooks.length === 0) {
-    const manifest = readPluginManifest(dir)
     if (manifest && manifest.hooks) {
       if (Array.isArray(manifest.hooks)) {
         for (const h of manifest.hooks) add(typeof h === 'string' ? h : (h && h.name))
@@ -899,7 +896,7 @@ export function isRemoteTransportName(type) {
 }
 
 /** Connector-ish entries: .mcp.json, mcp.json, server.json, or plugin.json "mcp" / "connectors". */
-export function listConnectors(dir) {
+export function listConnectors(dir, manifest = readPluginManifest(dir)) {
   const connectors = []
   const seen = new Set()
 
@@ -948,7 +945,6 @@ export function listConnectors(dir) {
     }
   }
 
-  const manifest = readPluginManifest(dir)
   if (manifest) {
     let dict = null
     if (manifest.mcpServers && typeof manifest.mcpServers === 'object') {

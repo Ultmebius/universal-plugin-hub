@@ -1,9 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync, rmSync, symlinkSync, utimesSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import vm from 'node:vm'
 
@@ -13,8 +15,8 @@ process.env.DSH_HOME = join(root, 'dsh')
 const { parseMarketplaceFromDisk, readMarketplace, listSkills, readPluginManifest, invalidateMarketplaceCache } = await import('../src/parser.js')
 const { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } = await import('../src/local.js')
 const { materializePlugin, pluginPath } = await import('../src/market.js')
-const { sourceCacheDir, installedDir, dshSkillsDir } = await import('../src/store.js')
-const { installPlugin } = await import('../src/install.js')
+const { sourceCacheDir, installedDir, dshSkillsDir, readState, writeState } = await import('../src/store.js')
+const { installPlugin, uninstallPlugin, registerConnector, getConnectorEntry, syncAllInstalledSkillsToDsh, togglePlugin } = await import('../src/install.js')
 
 function write(path, content) {
   mkdirSync(dirname(path), { recursive: true })
@@ -30,6 +32,77 @@ function codex(dir, name, extra = {}) {
 
 test('DSH Hub import formats', async (t) => {
   try {
+    await t.test('startup retry cannot recreate a disabled skill', { skip: process.platform !== 'win32' }, async t => {
+      const name = 'retry-skill'
+      skill(join(installedDir(name), 'skills', name), name)
+      const state = readState()
+      state.plugins.push({ name, enabled: true })
+      writeState(state)
+      const destination = join(dshSkillsDir(), name)
+      const mkdir = fs.mkdirSync
+      let retried = false
+      const replacement = t.mock.method(fs, 'mkdirSync', (path, options) => {
+        if (path === destination && !retried) {
+          retried = true
+          throw Object.assign(new Error('directory pending deletion'), { code: 'EPERM', syscall: 'mkdir', path })
+        }
+        return mkdir(path, options)
+      })
+      syncBuiltinESMExports()
+      try {
+        const startup = syncAllInstalledSkillsToDsh()
+        assert.equal(retried, true)
+        await togglePlugin(name, false)
+        await startup
+        assert.equal(existsSync(destination), false)
+      } finally {
+        replacement.mock.restore()
+        syncBuiltinESMExports()
+        await uninstallPlugin(name)
+      }
+    })
+    await t.test('startup keeps identical native skills and repairs changed or missing files', async () => {
+      const name = 'startup-skill'
+      const source = join(installedDir(name), 'skills', name)
+      const destination = join(dshSkillsDir(), name)
+      skill(source, name)
+      const state = readState()
+      state.plugins.push({ name, enabled: true })
+      writeState(state)
+      try {
+        await syncAllInstalledSkillsToDsh()
+        const guide = join(destination, 'references', 'guide.md')
+        utimesSync(guide, 1000, 1000)
+        await syncAllInstalledSkillsToDsh()
+        assert.equal(lstatSync(guide).mtimeMs, 1000000)
+
+        writeFileSync(guide, 'Changed content!') // Same size as the original.
+        utimesSync(guide, 1000, 1000)
+        await syncAllInstalledSkillsToDsh()
+        assert.equal(readFileSync(guide, 'utf8'), 'Useful reference')
+
+        rmSync(guide)
+        writeFileSync(join(destination, 'stale.md'), 'stale')
+        await syncAllInstalledSkillsToDsh()
+        assert.equal(readFileSync(guide, 'utf8'), 'Useful reference')
+        assert.equal(existsSync(join(destination, 'stale.md')), false)
+      } finally {
+        await uninstallPlugin(name)
+      }
+    })
+    await t.test('uninstalling a plugin named user-mcp removes only its own registration', async () => {
+      const name = 'user-mcp'
+      write(join(installedDir(name), '.mcp.json'), { mcpServers: { 'plugin-tool': { command: 'node' }, shared: { command: 'node' } } })
+      const state = readState()
+      state.plugins.push({ name, enabled: true })
+      state.userMcps = [{ name: 'shared', command: 'node' }]
+      writeState(state)
+      registerConnector(name, 'plugin-tool', { command: 'node' })
+      registerConnector(name, 'shared', { command: 'node' })
+      await uninstallPlugin(name)
+      assert.equal(getConnectorEntry(name, 'plugin-tool'), null)
+      assert.ok(getConnectorEntry(name, 'shared'))
+    })
     await t.test('Codex marketplace local objects are enriched and materialize correctly', async () => {
       const cache = sourceCacheDir('codex-test')
       codex(join(cache, 'plugins', 'Only.Manifest'), 'only-manifest')
@@ -58,6 +131,26 @@ test('DSH Hub import formats', async (t) => {
       assert.equal(result.ok, true)
       assert.equal(existsSync(join(dshSkillsDir(), 'two', 'SKILL.md')), true)
       assert.equal(readFileSync(join(dshSkillsDir(), 'one', 'references', 'guide.md'), 'utf8'), 'Useful reference')
+    })
+    await t.test('reinstall replaces an orphan plugin copy and a dangling native skill link', async () => {
+      const name = 'reinstall-example'
+      const dir = join(root, name)
+      const nativeDir = join(dshSkillsDir(), name)
+      codex(dir, name)
+      skill(join(dir, 'skills', name), name)
+      await importLocalPlugin({ path: dir })
+      await installPlugin({ sourceId: 'local', pluginName: name })
+      await uninstallPlugin(name)
+      assert.equal(lstatSync(nativeDir, { throwIfNoEntry: false }), undefined)
+      assert.equal(lstatSync(installedDir(name), { throwIfNoEntry: false }), undefined)
+
+      const obsoleteFile = join(installedDir(name), 'obsolete.txt')
+      write(obsoleteFile, 'leftover from a failed install')
+      symlinkSync(join(root, 'deleted-target'), nativeDir, process.platform === 'win32' ? 'junction' : 'dir')
+      await installPlugin({ sourceId: 'local', pluginName: name })
+      assert.equal(existsSync(obsoleteFile), false)
+      assert.equal(lstatSync(nativeDir).isDirectory(), true)
+      assert.match(readFileSync(join(nativeDir, 'SKILL.md'), 'utf8'), /name: reinstall-example/)
     })
     await t.test('skill folders, SKILL.md paths and file URIs retain names and dependencies', async () => {
       const dir = join(root, 'skill folder')
