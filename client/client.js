@@ -3055,7 +3055,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	opacity: 1;
 }
 .cpm-mcp-tool-pill {
-	--cpm-tool-hover-outline: #a9aec5;
+	--cpm-tool-hover-outline: var(--cpm-toggle-on);
 	--cpm-tool-hover-glow: rgb(75 84 140 / 0.16);
 	display: inline-flex;
 	align-items: center;
