@@ -32,12 +32,24 @@ function fixture() {
   return { session, advance, changes, a, popup, open, move, timers, events }
 }
 
-test('MCP details stay adjacent on the right and within the viewport', () => {
+test('MCP details align to the next tool on the same row', () => {
+  const viewport = { width: 1200, height: 800 }
+  const trigger = box(100, 102, 180, 30)
+  const neighbor = box(288.5, 100.25, 160, 34)
+  const aligned = placeHoverCard(trigger, 340, 260, viewport, neighbor)
+  assert.equal(aligned.left, neighbor.left)
+  assert.equal(aligned.top, neighbor.top)
+})
+
+test('MCP details stay beside the trigger at the end of a row and within the viewport', () => {
   const p = placeHoverCard(box(100, 100, 180, 30), 340, 260, { width: 1200, height: 800 })
   assert.equal(p.left, 290); assert.equal(p.top, 100)
-  const small = placeHoverCard(box(300, 260, 70, 30), 340, 260, { width: 390, height: 320 })
-  assert.ok(small.left >= 12 && small.left + 340 <= 378)
-  assert.ok(small.top >= 12 && small.top + 260 <= 308)
+  const wrapped = placeHoverCard(box(100, 100, 180, 30), 340, 260, { width: 1200, height: 800 }, box(20, 138, 100, 30))
+  assert.equal(wrapped.left, p.left)
+  assert.equal(wrapped.top, p.top)
+  const small = placeHoverCard(box(120, 260, 70, 30), 340, 260, { width: 390, height: 320 }, box(198, 258, 150, 34))
+  assert.equal(small.left, 38)
+  assert.equal(small.top, 48)
 })
 
 test('plugin previews open beside the card and only flip when that side overflows', () => {

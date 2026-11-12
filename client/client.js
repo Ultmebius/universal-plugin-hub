@@ -5706,14 +5706,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const values = [cross(point, origin, a), cross(point, a, b), cross(point, b, origin)];
 		return !(values.some((v) => v < -1) && values.some((v) => v > 1));
 	}
-	function placeHoverCard(rect, width, height, viewport) {
+	function placeHoverCard(rect, width, height, viewport, nextToolRect) {
 		const gap = 10, margin = 12;
 		width = Math.min(width, viewport.width - margin * 2);
 		height = Math.min(height, viewport.height - margin * 2);
 		const clamp = (value, max) => Math.max(margin, Math.min(value, max));
+		const neighbor = nextToolRect && nextToolRect.left >= rect.right &&
+			nextToolRect.top < rect.bottom && nextToolRect.bottom > rect.top ? nextToolRect : null;
 		return {
-			left: clamp(rect.right + gap, viewport.width - width - margin),
-			top: clamp(rect.top, viewport.height - height - margin),
+			left: clamp(neighbor?.left ?? rect.right + gap, viewport.width - width - margin),
+			top: clamp(neighbor?.top ?? rect.top, viewport.height - height - margin),
 		};
 	}
 	// Plugin cards sit in a two-column grid, so their preview hangs off the side
@@ -5859,9 +5861,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const popup = popRef.current;
 			if (!popup) return;
 			const measure = () => {
-				const trigger = anchor?.isConnected ? anchor.getBoundingClientRect() : rect;
+				const connected = anchor?.isConnected;
+				const trigger = connected ? anchor.getBoundingClientRect() : rect;
 				const measured = popup.getBoundingClientRect(), viewport = { width: window.innerWidth, height: window.innerHeight };
-				setPosition(placement === 'plugin' ? placePluginPreview(trigger, measured.width, measured.height, viewport) : placeHoverCard(trigger, measured.width, measured.height, viewport));
+				if (placement === 'plugin') {
+					setPosition(placePluginPreview(trigger, measured.width, measured.height, viewport));
+				} else {
+					const nextToolRect = connected ? anchor.nextElementSibling?.getBoundingClientRect() : null;
+					setPosition(placeHoverCard(trigger, measured.width, measured.height, viewport, nextToolRect));
+				}
 			};
 			measure();
 			const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
