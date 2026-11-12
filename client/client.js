@@ -3055,14 +3055,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	opacity: 1;
 }
 .cpm-mcp-tool-pill {
+	--cpm-tool-pill-radius: var(--dsw-radius-lg, 16px);
 	--cpm-tool-hover-outline: var(--cpm-toggle-on);
 	--cpm-tool-hover-glow: rgb(75 84 140 / 0.16);
 	display: inline-flex;
 	align-items: center;
 	gap: 6.5px;
 	padding: 5px 12px;
-	border-radius: var(--cpm-card-icon-radius);
-	corner-shape: var(--cpm-icon-corner-shape);
+	/* Leave room for two full radii so the browser won't scale the corners down. */
+	box-sizing: border-box;
+	min-width: calc(2 * var(--cpm-tool-pill-radius));
+	min-height: calc(2 * var(--cpm-tool-pill-radius));
+	border-radius: var(--cpm-tool-pill-radius);
+	corner-shape: squircle;
 	font-size: 12px;
 	font-family: var(--cpm-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
 	background: #ffffff;
@@ -3183,10 +3188,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border-radius: var(--dsw-radius-lg, 16px);
 	corner-shape: squircle;
 	user-select: text;
-}
-.cpm-mcp-tool-popover.cpm-smart-hover {
-	border-top-left-radius: var(--cpm-card-icon-radius);
-	corner-top-left-shape: var(--cpm-icon-corner-shape);
 }
 .cpm-root:has(.cpm-smart-hover[data-pointer-inside="true"]) :is(.cpm-card, .cpm-mcp-tool-dot) {
 	transition: none;

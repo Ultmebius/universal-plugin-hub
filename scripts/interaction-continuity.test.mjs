@@ -203,12 +203,7 @@ test('Skills loads once in the background across tabs and keeps identical or new
   assert.ok(browse.includes('!rows?.["skills-local"] ? (skillsLoadFailed ?'))
 })
 
-test('MCP tool chips share the icon curve and draw a single outer hover outline', () => {
-  for (const selector of ['.cpm-card-icon', '.cpm-mcp-tool-pill']) {
-    const css = source.slice(source.indexOf(selector + ' {')).split('}')[0]
-    assert.match(css, /border-radius: var\(--cpm-card-icon-radius\)/)
-    assert.match(css, /corner-shape: var\(--cpm-icon-corner-shape\)/)
-  }
+test('MCP tool chips draw a single outer hover outline', () => {
   const hoverEdges = [...source.matchAll(/\.cpm-mcp-tool-pill-wrap:hover > \.cpm-mcp-tool-pill:not\(\.is-disabled\) \{([^}]+)\}/g)].filter(([, css]) => css.includes('border-color'))
   assert.equal(hoverEdges.length, 1)
   assert.match(hoverEdges[0][1], /border-color: transparent;/)
@@ -256,13 +251,19 @@ test('Skills warms only its first rows and reuses local image requests across re
   assert.deepEqual(warmed, ['/bundled', ...Array.from({ length: 9 }, (_, id) => local + id)])
 })
 
-test('MCP details match the tool pill at the aligned corner and use the host styling elsewhere', () => {
-  const shared = source.match(/\.cpm-smart-hover\s*\{([^}]+)\}/)?.[1]
-  assert.match(shared || '', /border-radius: var\(--dsw-radius-lg, 16px\)/)
-  assert.match(shared || '', /corner-shape: squircle/)
-  const alignedCorner = source.match(/\.cpm-mcp-tool-popover\.cpm-smart-hover\s*\{([^}]+)\}/)?.[1]
-  assert.match(alignedCorner || '', /border-top-left-radius: var\(--cpm-card-icon-radius\)/)
-  assert.match(alignedCorner || '', /corner-top-left-shape: var\(--cpm-icon-corner-shape\)/)
+test('MCP tool chips fit the host preview radius without shrinking their corners', () => {
+  const shared = source.match(/\.cpm-smart-hover\s*\{([^}]+)\}/)[1]
+  const pill = source.match(/\.cpm-mcp-tool-pill\s*\{([^}]+)\}/)[1]
+  assert.match(shared, /border-radius: var\(--dsw-radius-lg, 16px\)/)
+  assert.match(shared, /corner-shape: squircle/)
+  assert.equal(/\.cpm-mcp-tool-popover\.cpm-smart-hover\s*\{/.test(source), false, 'the popup uses the host radius at every corner')
+  assert.match(pill, /--cpm-tool-pill-radius: var\(--dsw-radius-lg, 16px\)/)
+  assert.match(pill, /border-radius: var\(--cpm-tool-pill-radius\)/)
+  assert.match(pill, /corner-shape: squircle/)
+  assert.match(pill, /box-sizing: border-box/)
+  for (const dimension of ['min-width', 'min-height']) {
+    assert.ok(pill.includes(dimension + ': calc(2 * var(--cpm-tool-pill-radius));'))
+  }
   for (const name of ['PluginPreviewPopover', 'McpToolPopover']) {
     assert.match(code(func(name)), /h\(SmartHoverPopover,/)
   }
