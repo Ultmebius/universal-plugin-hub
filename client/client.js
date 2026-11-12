@@ -6143,7 +6143,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
 			setGlobalToolData((prev) => ({
 				...prev,
-				[key]: { ...(cached || prev[key]), loading: forceFresh || !Array.isArray(cached?.tools), error: null },
+				[key]: { ...(cached || prev[key]), loading: forceFresh || !Array.isArray(cached?.tools), error: null, warning: null },
 			}));
 			try {
 				const url = owner === "user-mcp"
@@ -6157,8 +6157,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					...prev,
 					[key]: {
 						loading: false,
-							error: res.ok && !res.stale ? null : (res.message || "获取能力列表失败"),
-							tools: res.ok ? tools : (prev[key]?.tools || tools),
+						error: res.ok ? null : (res.message || "获取能力列表失败"),
+						warning: res.ok && res.stale ? (res.message || "获取能力列表失败") : null,
+						tools: res.ok ? tools : (prev[key]?.tools || tools),
 						disabledTools,
 					},
 				}));
@@ -9487,15 +9488,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (!info || info.loading) return h("span", { className: "cpm-mcp-discovery", role: "status", "aria-live": "polite" },
 				h("span", { className: "cpm-spin-ring", "aria-hidden": "true" }),
 				h("span", null, "正在解析工具…"));
-			if (info.error) return h("span", { className: "cpm-mcp-discovery is-error", role: "status", "aria-live": "polite" },
-				h("span", { className: "cpm-mcp-discovery-message" }, `解析失败：${info.error}`),
+			const retryNotice = message => h("span", { className: "cpm-mcp-discovery is-error", role: "status", "aria-live": "polite" },
+				h("span", { className: "cpm-mcp-discovery-message" }, message),
 				h("button", { type: "button", className: "cpm-mcp-retry", onClick: event => { event.stopPropagation(); onRetry(); } }, "重新解析"));
+			if (info.error) return retryNotice(`解析失败：${info.error}`);
 			const tools = info.tools || [], disabled = info.disabledTools || [];
 			const active = tools.filter(tool => !disabled.includes(typeof tool === "string" ? tool : tool.name)).length;
-			return h("button", { type: "button", className: "cpm-mcp-expand", "aria-expanded": !!expanded,
+			const expand = h("button", { type: "button", className: "cpm-mcp-expand", "aria-expanded": !!expanded,
 				onClick: event => { event.stopPropagation(); onExpand(); } },
 				h("span", { className: "cpm-connector-collapse-btn" + (expanded ? " is-expanded" : ""), "aria-hidden": "true" }, h(IconArrow, { size: 10 })),
 				h("span", null, `${active} tools enabled${disabled.length ? ` (${disabled.length} disabled)` : ""}`));
+			return info.warning
+				? h("span", { className: "cpm-mcp-discovery" }, expand, retryNotice(`刷新失败，显示上次解析结果：${info.warning}`))
+				: expand;
 		}
 
 		// Shared tool grid for the MCP page and the plugin manage page: the
@@ -9687,7 +9692,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const cached = GLOBAL_MCP_TOOLS_CACHE[key];
 			setConnectorToolsData((prev) => ({
 				...prev,
-				[connectorName]: { ...(cached || prev[connectorName]), loading: forceFresh || !Array.isArray(cached?.tools), error: null },
+				[connectorName]: { ...(cached || prev[connectorName]), loading: forceFresh || !Array.isArray(cached?.tools), error: null, warning: null },
 			}));
 
 			try {
@@ -9703,7 +9708,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					...prev,
 					[connectorName]: {
 						loading: false,
-						error: res.ok && !res.stale ? null : (res.message || "获取能力列表失败"),
+						error: res.ok ? null : (res.message || "获取能力列表失败"),
+						warning: res.ok && res.stale ? (res.message || "获取能力列表失败") : null,
 						tools: res.ok ? tools : (prev[connectorName]?.tools || tools),
 						disabledTools,
 					},

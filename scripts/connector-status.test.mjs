@@ -97,6 +97,11 @@ test('remote connector status follows a successful probe of the current config',
       assert.equal(result.ok, true)
       assert.deepEqual(result.tools, [])
       assert.equal(probes, 0)
+      const refreshed = await fetchConnectorTools('remote-plugin', 'exa', true)
+      assert.equal(refreshed.ok, true)
+      assert.equal(refreshed.stale, true)
+      assert.deepEqual(refreshed.tools, [])
+      assert.ok(probes > 0)
     })
 
     await t.test('a valid stdio command keeps its existing active-state behavior', () => {

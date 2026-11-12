@@ -44,7 +44,9 @@ const local = { transport: 'stdio', command: process.execPath, args: [fixture, '
 
 async function remoteFixture(t, headerName = 'authorization') {
   let credential = 'Bearer fixture'
+  let requests = 0
   const http = createServer(async (req, res) => {
+    requests++
     if (req.url === '/html') {
       res.writeHead(200, { 'Content-Type': 'text/html' }).end('<html>sign in</html>')
       return
@@ -75,6 +77,7 @@ async function remoteFixture(t, headerName = 'authorization') {
   return {
     url: `http://127.0.0.1:${http.address().port}`,
     headers: { [headerName === 'authorization' ? 'Authorization' : headerName]: credential },
+    get requests() { return requests },
     rotate() { credential = 'Bearer rotated' },
   }
 }
@@ -99,6 +102,26 @@ test('save and enable rejects missing credentials, invalid protocols and failed 
       assert.equal(listed.body.mcps.some(server => server.name === payload.name && server.enabled), false)
     })
   }
+})
+
+test('standalone tool discovery never contacts a disabled server', async (t) => {
+  const remote = await remoteFixture(t)
+  const name = 'disabled-discovery'
+  const path = `/mcps/${name}/tools`
+  assert.equal((await call('POST', '/mcps', { name, transport: 'http', url: remote.url, headers: remote.headers })).body.ok, true)
+  assert.equal((await call('POST', '/mcps/toggle', { name, enabled: false })).body.ok, true)
+  const before = remote.requests
+  for (const suffix of ['?fresh=1', '']) {
+    const { body } = await call('GET', path + suffix)
+    assert.equal(remote.requests, before, 'discovery must use only saved tool metadata')
+    assert.equal(body.ok, true)
+    assert.deepEqual(body.tools.map(tool => tool.name), ['first', 'second'])
+  }
+  const empty = await call('GET', '/mcps/unknown-server/tools?fresh=1')
+  assert.equal(empty.body.ok, false)
+  assert.deepEqual(empty.body.tools, [])
+  assert.equal((await call('POST', '/mcps/toggle', { name, enabled: true })).body.ok, true)
+  assert.ok(remote.requests > before, 'explicit enable must still probe')
 })
 
 test('standalone Headers survive disable and enable; a failed edit or re-enable leaves the previous state intact', async (t) => {
@@ -186,6 +209,24 @@ test('plugin-owned Headers survive disable and re-enable and still appear in the
   writeState({ ...afterDelete, plugins: [...afterDelete.plugins, { name: owner, sourceId: 'fixture', enabled: true }] })
   assert.deepEqual(lookup().headers || {}, {})
   assert.equal(lookup().enabled, false)
+})
+
+test('plain HTTP remains verified when an OAuth form submits previous client fields', async (t) => {
+  const remote = await remoteFixture(t)
+  const owner = 'plain-after-oauth'
+  const name = 'remote'
+  const plugin = installedDir(owner)
+  mkdirSync(plugin, { recursive: true })
+  writeFileSync(join(plugin, '.mcp.json'), JSON.stringify({ mcpServers: { [name]: { type: 'http', url: remote.url } } }))
+  const state = readState()
+  writeState({ ...state, plugins: [...state.plugins, { name: owner, sourceId: 'fixture', enabled: true }] })
+  const response = await call('POST', `/plugins/${owner}/connectors/${name}/auth`, {
+    transport: 'http', url: remote.url, headers: remote.headers, oauth: 'none',
+    oauthClientId: 'previous-client', oauthScope: 'tools:read', oauthCallbackPort: 8765,
+  })
+  assert.equal(response.body.ok, true, response.body.error)
+  const { installedDetails } = await import('../src/install.js')
+  assert.equal(installedDetails().find(item => item.name === owner).connectors[0].connected, true)
 })
 
 test('install probes declared connectors before activating them', async (t) => {

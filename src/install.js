@@ -217,17 +217,18 @@ function isRemoteConnector(config = {}) {
 }
 
 function remoteConfigFingerprint(config = {}) {
+  const usesOAuth = isOAuthMode(config.oauth)
   const normalized = {
     transport: 'http',
     url: String(config.url || '').trim(),
     headers: Object.fromEntries(Object.entries(config.headers || {}).filter(([key]) => {
       const name = key.toLowerCase()
-      return name !== 'content-type' && (!isOAuthMode(config.oauth) || name !== 'authorization')
+      return name !== 'content-type' && (!usesOAuth || name !== 'authorization')
     }).sort(([a], [b]) => a.localeCompare(b))),
-    oauth: config.oauth || 'none',
-    oauthClientId: config.oauthClientId || '',
-    oauthScope: config.oauthScope || '',
-    oauthCallbackPort: Number(config.oauthCallbackPort) || null,
+    oauth: usesOAuth ? config.oauth : 'none',
+    oauthClientId: usesOAuth ? config.oauthClientId || '' : '',
+    oauthScope: usesOAuth ? config.oauthScope || '' : '',
+    oauthCallbackPort: usesOAuth ? Number(config.oauthCallbackPort) || null : null,
   }
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
 }
@@ -1579,12 +1580,14 @@ async function discoverConnectorTools(pluginName, connectorName, forceFresh, isC
   }
 
   const entry = getConnectorEntry(pluginName, connectorName)
-  const saved = pluginName === 'user-mcp' ? readState().userMcps?.find(item => item.name === connectorName) : savedConnectorDefinition(pluginName, connectorName)
   const cached = state[key]?.cachedTools || []
-  if (!forceFresh && (cached.length > 0 || state[key]?.cachedToolsResolved === true)) return { ok: true, tools: cached, disabledTools }
+  const hasCachedTools = cached.length > 0 || state[key]?.cachedToolsResolved === true
+  const inactiveStandalone = pluginName === 'user-mcp' && !entry
+  if (hasCachedTools && (!forceFresh || inactiveStandalone)) return { ok: true, tools: cached, disabledTools }
+  if (inactiveStandalone) return { ok: false, tools: [], disabledTools, message: 'MCP 服务未启用' }
 
   const definition = connectorDefinition(pluginName, connectorName,
-    entry ? { ...entry.config, ...remoteConfigFromEntry(entry.config) } : saved)
+    entry ? { ...entry.config, ...remoteConfigFromEntry(entry.config) } : savedConnectorDefinition(pluginName, connectorName))
   const probe = await probeConnectorDefinition(pluginName, connectorName, definition)
   const probeError = probe.error
   // A response from the previous registration must not replace the current cache.
@@ -1604,7 +1607,7 @@ async function discoverConnectorTools(pluginName, connectorName, forceFresh, isC
   // reporting ok:true with an empty list made the UI claim the server exposes
   // no tools. A cached list is different: it is still usable, and surfacing it
   // as an error replaced the whole row (and its toggles) with a failure notice.
-  if (cached.length > 0) return { ok: true, stale: true, tools: cached, disabledTools, message: probeError }
+  if (hasCachedTools) return { ok: true, stale: true, tools: cached, disabledTools, message: probeError }
   return { ok: false, tools: [], disabledTools, message: probeError }
 }
 
