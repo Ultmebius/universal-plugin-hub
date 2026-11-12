@@ -311,6 +311,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-toast-text: #18181b;
 	--cpm-toast-border: rgba(0, 0, 0, 0.12);
 	--cpm-toast-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+	--cpm-scroll-thumb: rgba(0, 0, 0, 0.18);
+	--cpm-scroll-thumb-hover: rgba(0, 0, 0, 0.3);
 
 	width: 100%;
 	height: 100%;
@@ -372,6 +374,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-toast-text: #f4f4f5;
 	--cpm-toast-border: rgba(255, 255, 255, 0.14);
 	--cpm-toast-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+	--cpm-scroll-thumb: rgba(255, 255, 255, 0.22);
+	--cpm-scroll-thumb-hover: rgba(255, 255, 255, 0.36);
 }
 
 .cpm-root,
@@ -1845,6 +1849,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border-radius: var(--dsw-radius-lg, 16px);
 	padding: 22px 24px 20px 24px;
 	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.08);
+	/* The preview grows with the detected list, and the confirm buttons must not
+	   be pushed out of the viewport by a long one: cap the box and scroll it,
+	   then keep the action row pinned to the bottom edge. */
+	max-height: calc(100dvh - 32px);
+	box-sizing: border-box;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+	scrollbar-color: var(--cpm-scroll-thumb) transparent;
+}
+.cpm-source-dialog-box > .cpm-dialog-actions {
+	position: sticky;
+	bottom: -20px;
+	margin-top: 18px;
+	padding: 12px 0 20px;
+	margin-bottom: -20px;
+	background: var(--cpm-modal-bg);
+}
+.cpm-dark .cpm-source-dialog-box > .cpm-dialog-actions {
+	background: #1c1c20;
 }
 .cpm-dark .cpm-source-dialog-box {
 	background: #1c1c20;
@@ -2034,6 +2058,193 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	color: var(--cpm-muted);
 	margin-bottom: 10px;
 	display: block;
+}
+
+/* ── upload preview: one frame for every kind ─────────────────────────── */
+.cpm-detect-header {
+	margin-bottom: 14px;
+}
+.cpm-detect-hint {
+	margin-top: 5px;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--cpm-muted);
+}
+/* The well is the scroll container, so a 40-plugin market keeps the dialog
+   inside the viewport and the confirm buttons always in reach. */
+.cpm-detect-well {
+	border: 1px solid var(--cpm-border);
+	border-radius: 12px;
+	background: var(--cpm-modal-bg);
+	overflow: hidden;
+	margin: 0 0 18px;
+}
+/* In dark mode the dialog surface is lifted off the page; the list sits on the
+   page colour instead so it reads as a well, not a card on a card. */
+.cpm-dark .cpm-detect-well {
+	background: #151517;
+}
+.cpm-detect-summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 12px;
+	border-bottom: 1px solid var(--cpm-border);
+	font-size: 12px;
+	color: var(--cpm-muted);
+}
+.cpm-detect-count {
+	font-weight: 650;
+	color: var(--cpm-text);
+	font-variant-numeric: tabular-nums;
+}
+.cpm-detect-sep {
+	width: 3px;
+	height: 3px;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: 0.4;
+}
+.cpm-detect-source {
+	opacity: 0.85;
+}
+.cpm-detect-list {
+	list-style: none;
+	margin: 0;
+	padding: 4px;
+	max-height: 208px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+	scrollbar-color: var(--cpm-scroll-thumb) transparent;
+}
+/* Same three-step fade the popover body already uses, so one scroll affordance
+   looks and behaves the same everywhere in the panel. */
+.cpm-detect-list.mask-bottom {
+	mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 24px), rgba(0,0,0,0.76) calc(100% - 14px), rgba(0,0,0,0.28) calc(100% - 6px), transparent 100%);
+	-webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 24px), rgba(0,0,0,0.76) calc(100% - 14px), rgba(0,0,0,0.28) calc(100% - 6px), transparent 100%);
+}
+.cpm-detect-list.mask-top {
+	mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.28) 6px, rgba(0,0,0,0.76) 14px, #000 24px, #000 100%);
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.28) 6px, rgba(0,0,0,0.76) 14px, #000 24px, #000 100%);
+}
+.cpm-detect-list.mask-both {
+	mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.28) 6px, rgba(0,0,0,0.76) 14px, #000 24px, #000 calc(100% - 24px), rgba(0,0,0,0.76) calc(100% - 14px), rgba(0,0,0,0.28) calc(100% - 6px), transparent 100%);
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.28) 6px, rgba(0,0,0,0.76) 14px, #000 24px, #000 calc(100% - 24px), rgba(0,0,0,0.76) calc(100% - 14px), rgba(0,0,0,0.28) calc(100% - 6px), transparent 100%);
+}
+.cpm-detect-list::-webkit-scrollbar {
+	width: 10px;
+}
+.cpm-detect-list::-webkit-scrollbar-track {
+	background: transparent;
+}
+.cpm-detect-list::-webkit-scrollbar-thumb {
+	border: 3px solid transparent;
+	border-radius: 999px;
+	background-clip: content-box;
+	background-color: var(--cpm-scroll-thumb);
+}
+.cpm-detect-list::-webkit-scrollbar-thumb:hover {
+	background-color: var(--cpm-scroll-thumb-hover);
+}
+.cpm-detect-list:focus-visible {
+	outline: 2px solid var(--cpm-accent);
+	outline-offset: -2px;
+}
+.cpm-detect-single {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 13px 14px;
+	margin: 0 0 18px;
+	border: 1px solid var(--cpm-border);
+	border-radius: 12px;
+	background: var(--cpm-modal-bg);
+}
+.cpm-dark .cpm-detect-single {
+	background: #151517;
+}
+.cpm-detect-single .cpm-card-icon {
+	width: 34px;
+	height: 34px;
+	flex: 0 0 34px;
+	border-radius: 9px;
+}
+.cpm-detect-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px;
+	border-radius: 9px;
+}
+.cpm-detect-row + .cpm-detect-row {
+	margin-top: 2px;
+}
+.cpm-detect-row .cpm-card-icon {
+	width: 30px;
+	height: 30px;
+	flex: 0 0 30px;
+	border-radius: 8px;
+}
+.cpm-detect-body {
+	flex: 1;
+	min-width: 0;
+}
+.cpm-detect-name {
+	font-size: 13px;
+	font-weight: 620;
+	color: var(--cpm-text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.cpm-detect-desc {
+	font-size: 11.5px;
+	line-height: 1.45;
+	color: var(--cpm-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.cpm-detect-empty {
+	padding: 22px 12px;
+	text-align: center;
+	font-size: 12px;
+	color: var(--cpm-muted);
+}
+.cpm-detect-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+	font-size: 11px;
+	color: var(--cpm-muted);
+}
+.cpm-detect-meta > span + span::before {
+	content: "· ";
+	opacity: 0.5;
+}
+.cpm-detect-flag {
+	flex-shrink: 0;
+	font-size: 10.5px;
+	font-weight: 600;
+	padding: 2px 7px;
+	border-radius: 999px;
+	background: rgba(217, 119, 6, 0.12);
+	border: 1px solid rgba(217, 119, 6, 0.35);
+	color: #b45309;
+}
+.cpm-dark .cpm-detect-flag {
+	color: #fbbf24;
+}
+.cpm-detect-flag-muted {
+	background: var(--cpm-pill-bg);
+	border-color: var(--cpm-pill-border);
+	color: var(--cpm-muted);
+	font-variant-numeric: tabular-nums;
+}
+.cpm-dark .cpm-detect-flag-muted {
+	color: var(--cpm-muted);
 }
 
 .cpm-radio-group {
@@ -3461,7 +3672,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-skill-detail .cpm-back:focus-visible { outline: 2px solid var(--cpm-toggle-on); outline-offset: 2px; }
 .cpm-skill-header { padding: 0 0 1.5rem; border-bottom: 1px solid var(--cpm-border); }
 .cpm-skill-header .cpm-title { margin: 0; }
-.cpm-skill-header .cpm-toggle { flex-shrink: 0; }
+.cpm-skill-header .cpm-toggle, .cpm-skill-header .cpm-skill-remove { flex-shrink: 0; }
 .cpm-skill-summary, .cpm-skill-location, .cpm-skill-content {
 	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -4593,12 +4804,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					h("div", { className: "cpm-title-row" },
 						h("div", { className: "cpm-title-group" }, h(PluginIcon, { plugin: skill, isDark, eager: true }),
 							h("h1", { className: "cpm-title" }, skill.displayName || skill.name)),
+						// Removal sits beside the switch it undoes, in reading order
+						// before it, rather than detached under the description.
+						uploaded && onRemove && h("button", {
+							className: "cpm-btn cpm-btn-danger cpm-skill-remove", disabled: removing || busy,
+							onClick: remove,
+						}, removing ? "卸载中…" : "卸载"),
 						h(SkillSwitch, { skill, busy, onToggle })),
 					skill.description && h("p", { className: "cpm-skill-summary" }, skill.description),
-					uploaded && onRemove && h("button", {
-						className: "cpm-btn cpm-btn-danger cpm-skill-remove", disabled: removing || busy,
-						onClick: remove,
-					}, removing ? "卸载中…" : "卸载"),
 					(skill.activePath || skill.path) && h("div", { className: "cpm-skill-location" },
 						h("span", { className: "cpm-skill-location-label" }, "本地文件"),
 						h(NativePathLabel, { path: skill.activePath || skill.path }))),
@@ -7936,7 +8149,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				onAdded: async (newSourceId, keepOpen) => {
 					if (!keepOpen) setAddDialog(false);
 					await refreshState();
-					if (newSourceId) setActiveSourceId(newSourceId);
+					// The tab list and the rows both come from the server state, and
+					// the row cache is what the grid renders. Forget the catalog check
+					// so the existing effect refetches it; only a source that is already
+					// the active tab (an overwrite update) needs the load here, since
+					// its effect does not re-run for the same id.
+					if (newSourceId) {
+						SESSION_STORE.checkedCatalogs?.delete(newSourceId);
+						if (newSourceId === activeSourceId) {
+							// Same tab: its browse effect will not re-run for an
+							// unchanged id, so fetch once here.
+							try {
+								const body = await api("/market?sourceId=" + encodeURIComponent(newSourceId));
+								if (Array.isArray(body?.plugins)) {
+									setRows((prev) => ({ ...(prev || {}), [newSourceId]: body.plugins }));
+								}
+							} catch {}
+						} else {
+							setActiveSourceId(newSourceId);
+						}
+					}
 				},
 				showToast,
 			}),
@@ -8088,6 +8320,109 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.(zip|tgz|tar\.gz)$/i.test(String(str || "").trim().replace(/^["']|["']$/g, ""));
 
+		// The name the user picked, shown verbatim so the preview says which file
+		// is being imported and not just which plugin it happened to contain.
+		const uploadLabel = (payload) => String(
+			payload?.filename || payload?.path || "",
+		).split(/[\\/]/).filter(Boolean).pop() || "";
+
+		// The preview header names what was actually recognised, so a marketplace
+		// never reads as a plain plugin.
+		const PREVIEW_TITLES = {
+			marketplace: { title: "发现插件市场", hint: "检测到 marketplace 清单，将作为独立标签页添加" },
+			skills: { title: "发现 Skills", hint: "将直接加入 Skills 标签页" },
+			plugin: { title: "发现插件", hint: "将加入本地插件标签" },
+		};
+
+		// A dedicated class: .cpm-preview-header is already the hover card's
+		// layout row, and reusing it collapsed the title into two lines.
+		const previewHeader = (preview, kind) => {
+			const meta = PREVIEW_TITLES[kind] || PREVIEW_TITLES.plugin;
+			return h("div", { className: "cpm-source-header cpm-detect-header", key: "header" },
+				h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, meta.title),
+				h("div", { className: "cpm-detect-hint" }, meta.hint),
+			);
+		};
+
+		// The well only exists for a collection that can actually overflow; a
+		// single plugin is shown as itself, with no frame around a frame. The
+		// list carries the fade, reusing the mask-top / mask-bottom / mask-both
+		// classes the rest of the plugin already uses.
+		const [wellMask, setWellMask] = useState("");
+		const listRef = useRef(null);
+		const syncWellMask = (el) => {
+			if (!el) return;
+			// The fade is 24px tall, so a shorter overflow cannot be faded without
+			// swallowing the last row: treat it as no scroll at all.
+			const max = el.scrollHeight - el.clientHeight;
+			if (max < 24) { setWellMask(""); return; }
+			const up = el.scrollTop > 3;
+			const down = el.scrollTop < max - 3;
+			setWellMask(up && down ? " mask-both" : down ? " mask-bottom" : up ? " mask-top" : "");
+		};
+		const previewItem = (p, flag, muted) => h("li", { className: "cpm-detect-row", key: p.name },
+			h(PluginIcon, { plugin: p, isDark }),
+			h("div", { className: "cpm-detect-body" },
+				h("div", { className: "cpm-detect-name" }, p.displayName || p.name),
+				h("div", { className: "cpm-detect-desc" }, p.description || "未提供描述"),
+			),
+			flag && h("span", { className: "cpm-detect-flag" + (muted ? " cpm-detect-flag-muted" : "") }, flag),
+		);
+		const previewCount = (items, noun) => `${items.length} 个${noun}`;
+		const previewMeta = (p) => {
+			const pills = [
+				p.skillsCount > 0 && `${p.skillsCount} 个技能`,
+				p.agentsCount > 0 && `${p.agentsCount} 个智能体`,
+				p.author && `by ${p.author}`,
+			].filter(Boolean);
+			return pills.length ? h("div", { className: "cpm-detect-meta" }, pills.map((t) => h("span", { key: t }, t))) : null;
+		};
+		// A single item has nothing to scroll, so it drops the summary row and the
+		// frame entirely: one card, no nesting.
+		const previewSingle = (p, flag, muted) => h("div", { className: "cpm-detect-single", key: "single" },
+			h(PluginIcon, { plugin: p, isDark }),
+			h("div", { className: "cpm-detect-body" },
+				h("div", { className: "cpm-detect-name" }, p.displayName || p.name),
+				h("div", { className: "cpm-detect-desc" }, p.description || "未提供描述"),
+				previewMeta(p),
+			),
+			flag && h("span", { className: "cpm-detect-flag" + (muted ? " cpm-detect-flag-muted" : "") }, flag),
+		);
+		// One renderer for every preview body: the marketplace, a skill pack and a
+		// plugin folder differ only in nouns and in what each row calls a flag.
+		const previewBody = (preview, { noun, source, ariaLabel, flagOf, muted = false }) => {
+			const rows = preview.plugins || [];
+			// An empty package has nothing to show as a card: say so instead of
+			// rendering a blank one and calling it "1".
+			if (!rows.length) return h("div", { className: "cpm-detect-well", key: "well" },
+				h("div", { className: "cpm-detect-summary", key: "summary" },
+					h("span", { className: "cpm-detect-count" }, previewCount(rows, noun)),
+					h("span", { className: "cpm-detect-sep" }),
+					h("span", { className: "cpm-detect-source" }, preview.uploadName || source),
+				),
+				h("div", { className: "cpm-detect-empty", key: "empty" }, `未识别到任何${noun}`));
+			if (rows.length === 1) return previewSingle(preview.plugin, flagOf(preview.plugin), muted);
+			return h("div", { className: "cpm-detect-well", key: "well" },
+				h("div", { className: "cpm-detect-summary", key: "summary" },
+					h("span", { className: "cpm-detect-count" }, previewCount(rows, noun)),
+					h("span", { className: "cpm-detect-sep" }),
+					h("span", { className: "cpm-detect-source" }, preview.uploadName || source),
+				),
+				h("ul", {
+					className: "cpm-detect-list" + wellMask, key: "list", tabIndex: 0, role: "region",
+					"aria-label": ariaLabel, ref: listRef, onScroll: (e) => syncWellMask(e.currentTarget),
+				}, rows.map((p) => previewItem(p, flagOf(p), muted))),
+			);
+		};
+
+		// A fresh preview mounts at the top, and may already overflow: measure once
+		// so a list that was never scrolled still shows the fade.
+		useEffect(() => {
+			setWellMask("");
+			syncWellMask(listRef.current);
+		}, [phase, localPreview?.kind, localPreview?.plugins?.length]);
+
+
 		const handleInspectLocal = async (rawPath) => {
 			if (busy) {
 				showToast("正在解析中", "请等待当前解析完成后再操作", { restart: false });
@@ -8106,13 +8441,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("无法解析导入内容", res.error || "请选择含 SKILL.md 的技能、Claude/Codex 插件或插件市场", { restart: false });
 					return;
 				}
-				if (res.exists) {
-					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind: res.kind });
-					setPhase("local-duplicate");
-				} else {
-					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind: res.kind });
-					setPhase("local-preview");
-				}
+				await settleInspect(res, payload);
 			} catch (e) {
 				showToast("不符合规范，不可以上传", cleanError(e), { restart: false });
 			} finally {
@@ -8129,6 +8458,44 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
 			reader.readAsDataURL(file);
 		});
+
+		// Decide where an inspected upload goes. A plain plugin joins the local
+		// tab, which was named on its very first upload — asking again would let
+		// a second tab appear beside the first one. A marketplace keeps its own
+		// tab and therefore keeps asking, seeded with the manifest's name.
+		const settleInspect = async (res, payload) => {
+			const kind = res.kind;
+			if (kind === "skills") {
+				setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind, uploadName: uploadLabel(payload), takenSkillNames: res.takenSkillNames || [] });
+				setPhase("local-preview");
+				return;
+			}
+			if (kind === "marketplace") {
+				setSuggested(res.suggestedName || "");
+				setMode("suggest");
+				setCustomName("");
+				if (res.exists) {
+					// A same-named market is already here: confirm the overwrite.
+					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind });
+					setPhase("local-duplicate");
+					return;
+				}
+				setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind, uploadName: uploadLabel(payload) });
+				setPhase("local-preview");
+				return;
+			}
+			// Every upload is shown before it is imported, including one that lands
+			// in an already-named local tab: the preview is the only chance to see
+			// what was recognised. No sourceName is sent for these, so the tab keeps
+			// the name it was born with.
+			if (res.exists) {
+				setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind });
+				setPhase("local-duplicate");
+			} else {
+				setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind, uploadName: uploadLabel(payload), localTabName: res.localTabName });
+				setPhase("local-preview");
+			}
+		};
 
 		const handleInspectLocalUpload = async (file) => {
 			if (busy) {
@@ -8155,13 +8522,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("无法解析导入内容", res.error || "请选择含 SKILL.md 的技能、Claude/Codex 插件或插件市场", { restart: false });
 					return;
 				}
-				if (res.exists) {
-					setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind: res.kind });
-					setPhase("local-duplicate");
-				} else {
-					setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind: res.kind });
-					setPhase("local-preview");
-				}
+				await settleInspect(res, payload);
 			} catch (e) {
 				showToast("不符合规范，不可以上传", cleanError(e), { restart: false });
 			} finally {
@@ -8169,7 +8530,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
-		const handleImportLocal = async (payload, overwrite, sourceName, kindOverride) => {
+		async function handleImportLocal(payload, overwrite, sourceName, kindOverride, overwriteNames) {
 			setBusy(true);
 			try {
 				// A pure skill package must not go through the plugin pipeline:
@@ -8180,9 +8541,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const kind = kindOverride || (localPreview && localPreview.kind);
 				const isSkillPackage = kind === "skills";
 				const isMarketplace = kind === "marketplace";
+				// A skill collection names the members it agreed to replace, so
+				// uploading a pack does not silently take over the others.
 				const res = await api(isSkillPackage ? "/skills/import" : isMarketplace ? "/marketplaces/import" : "/plugins/local/import", {
 					method: "POST",
-					body: JSON.stringify(isSkillPackage ? { ...payload, overwrite } : isMarketplace ? { ...payload, overwrite, sourceName } : { ...payload, overwrite, sourceName })
+					body: JSON.stringify(isSkillPackage
+						? { ...payload, overwrite, ...(overwriteNames?.length ? { overwriteNames } : {}) }
+						: { ...payload, overwrite, sourceName })
 				});
 				if (res.kind === "marketplace") {
 					showToast("插件市场已添加", `「${res.source?.name || localName}」已作为独立标签页加入`, { restart: false });
@@ -8214,7 +8579,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			} finally {
 				setBusy(false);
 			}
-		};
+		}
 
 		const extractRepoLabel = (raw) => {
 			if (!raw) return "";
@@ -8448,96 +8813,155 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? "正在解析…" : "下一步"),
 					),
 				],
-				phase === "local-preview" && localPreview && [
-					h("div", { className: "cpm-source-header", key: "header" },
-						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, "发现插件 / Skills"),
-						h("div", { className: "cpm-source-meta-row" },
-							h("div", { className: "cpm-source-live-dot" }),
-							h("span", { className: "cpm-source-count-text", style: { maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-								localPreview.payload?.filename || String(localPreview.payload?.path || "").split(/[\\/]/).filter(Boolean).pop() || "本地文件"),
-						),
-					),
-					h("div", { className: "cpm-local-preview-card", key: "card" },
-						h(PluginIcon, { plugin: localPreview.plugin, isDark }),
-						h("div", { style: { flex: 1, minWidth: 0 } },
-							h("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 } },
-								h("span", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)" } }, localPreview.plugin.displayName || localPreview.plugin.name),
-								h("span", {
-									style: {
-										fontSize: 11,
-										padding: "1px 6px",
-										borderRadius: 4,
-										background: "var(--cpm-pill-bg)",
-										border: "1px solid var(--cpm-pill-border)",
-										color: "var(--cpm-text)",
-										fontWeight: 600,
-									}
-								}, `v${localPreview.plugin.version || '1.0.0'}`),
-								localPreview.plugin.author && h("span", { style: { fontSize: 11.5, color: "var(--cpm-muted)" } }, `by ${localPreview.plugin.author}`),
-							),
-							h("div", {
-								style: {
-									fontSize: 12,
-									color: "var(--cpm-muted)",
-									lineHeight: 1.5,
-									display: "-webkit-box",
-									WebkitLineClamp: 2,
-									WebkitBoxOrient: "vertical",
-									overflow: "hidden",
-									textOverflow: "ellipsis",
-									marginBottom: 8,
-								}
-							}, localPreview.plugin.description || "本地插件，未提供额外描述。"),
-							h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
-								h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.skillsCount || 0} 个技能`),
-								localPreview.plugin.agentsCount > 0 && h("span", { className: "cpm-card-pill", style: { fontSize: 11, height: 22, padding: "0 8px" } }, `${localPreview.plugin.agentsCount} 个智能体`),
-							),
-							localPreview.plugins?.length > 1 && h("ul", { style: { margin: "8px 0 0", paddingLeft: 18, maxHeight: 160, overflowY: "auto", fontSize: 12 } },
-								localPreview.plugins.map((p) => h("li", { key: p.name }, p.displayName || p.name)),
-							),
-						),
-					),
-					h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "请选择本地插件分类标签的显示名称："),
+				phase === "local-preview" && localPreview && localPreview.kind === "marketplace" && [
+					previewHeader(localPreview, "marketplace"),
+					previewBody(localPreview, {
+						noun: "插件", source: "导入后可逐个安装", ariaLabel: "市场中识别到的插件",
+						flagOf: () => null,
+					}),
+					h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "为这个市场起一个分类标签名"),
 					h("div", { className: "cpm-radio-group", key: "group" },
 						h("div", {
-							className: "cpm-radio-card" + (localName === "本地插件" ? " is-selected" : ""),
-							onClick: () => setLocalName("本地插件")
+							className: "cpm-radio-card" + (mode === "suggest" ? " is-selected" : ""),
+							onClick: () => setMode("suggest")
 						},
-							h("div", { className: "cpm-custom-radio" + (localName === "本地插件" ? " checked" : "") },
+							h("div", { className: "cpm-custom-radio" + (mode === "suggest" ? " checked" : "") },
 								h("div", { className: "cpm-custom-radio-inner" })
 							),
 							h("div", { className: "cpm-radio-card-content" },
 								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "使用中文名"),
-									h("span", { className: "cpm-radio-rec-badge" }, "DEFAULT")
+									h("div", { className: "cpm-radio-card-title" }, "使用系统建议简化名")
 								),
 								h("div", { className: "cpm-radio-card-desc" },
 									"分类标签名：",
-									h("span", { className: "cpm-tag-preview" }, "本地插件")
+									// Only the market's own name: falling back to the local
+									// tab's label would show a name the server rejects as taken.
+									h("span", { className: "cpm-tag-preview" }, suggested || "（未提供，请自行命名）")
 								)
 							)
 						),
 						h("div", {
-							className: "cpm-radio-card" + (localName === "Local Plugins" ? " is-selected" : ""),
-							onClick: () => setLocalName("Local Plugins")
+							className: "cpm-radio-card" + (mode === "custom" ? " is-selected" : ""),
+							onClick: () => { setMode("custom"); if (customInputRef.current) customInputRef.current.focus(); }
 						},
-							h("div", { className: "cpm-custom-radio" + (localName === "Local Plugins" ? " checked" : "") },
+							h("div", { className: "cpm-custom-radio" + (mode === "custom" ? " checked" : "") },
 								h("div", { className: "cpm-custom-radio-inner" })
 							),
 							h("div", { className: "cpm-radio-card-content" },
 								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "使用英文名")
+									h("div", { className: "cpm-radio-card-title" }, "我自己命名")
 								),
-								h("div", { className: "cpm-radio-card-desc" },
-									"分类标签名：",
-									h("span", { className: "cpm-tag-preview" }, "Local Plugins")
+								h("div", { className: "cpm-radio-card-desc" }, "自定义简短易记的分类导航标签名："),
+								h("div", { className: "cpm-input-wrap" },
+									h("input", {
+										ref: customInputRef,
+										className: "cpm-input cpm-source-custom-input",
+										value: customName,
+										autoComplete: "off",
+										placeholder: "输入自定义标签名",
+										onChange: (e) => { setCustomName(e.target.value); setMode("custom"); },
+										onFocus: () => setMode("custom"),
+										onClick: (e) => e.stopPropagation(),
+									}),
+									h(ClearBtn, { value: customName, onClear: () => setCustomName("") }),
 								)
 							)
 						)
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => handleImportLocal(localPreview.payload, false, localName) }, busy ? "正在导入…" : "确认添加"),
+						h("button", {
+							className: "cpm-btn cpm-btn-primary",
+							disabled: busy || (mode === "custom" ? !customName.trim() : !suggested),
+							onClick: () => handleImportLocal(localPreview.payload, false, mode === "custom" ? customName.trim() : suggested, "marketplace"),
+						}, busy ? "正在导入…" : "确认添加"),
+					),
+				],
+				phase === "local-preview" && localPreview && localPreview.kind === "skills" && [
+					previewHeader(localPreview, "skills"),
+					// One SKILL.md is one skill, so the common upload gets a single card
+					// with no frame around a frame. A folder of skills still lists them.
+					previewBody(localPreview, {
+						noun: "技能", source: "加入 Skills 标签页", ariaLabel: "识别到的技能",
+						flagOf: (p) => (localPreview.takenSkillNames?.includes(p.name) ? "同名" : null),
+					}),
+					// The name already answers to a skill, so DSH would keep using that
+					// copy. Overwriting replaces it in the DSH root, which outranks the
+					// agents root, so one switch controls one command again.
+					localPreview.takenSkillNames?.length && h("div", { className: "cpm-source-prompt-label", key: "prompt", style: { color: "#d97706" } },
+						`已存在同名 Skill：${localPreview.takenSkillNames.join("、")}。覆盖后将使用你上传的这份`),
+					h("div", { className: "cpm-dialog-actions", key: "a" },
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "取消"),
+						localPreview.takenSkillNames?.length
+							? h("button", {
+								className: "cpm-btn cpm-btn-primary",
+								disabled: busy,
+								onClick: () => handleImportLocal(localPreview.payload, true, undefined, "skills", localPreview.takenSkillNames),
+							}, busy ? "正在覆盖…" : "覆盖")
+							: h("button", {
+								className: "cpm-btn cpm-btn-primary",
+								disabled: busy,
+								onClick: () => handleImportLocal(localPreview.payload, false, undefined, "skills"),
+							}, busy ? "正在导入…" : "确认添加"),
+					),
+				],
+				phase === "local-preview" && localPreview && localPreview.kind !== "marketplace" && localPreview.kind !== "skills" && [
+					previewHeader(localPreview, "plugin"),
+					// One plugin is shown as that plugin. Only a multi-plugin folder
+					// needs the framed, scrollable list.
+					previewBody(localPreview, {
+						noun: "插件", ariaLabel: "识别到的插件", muted: true,
+						source: localPreview.localTabName ? `加入「${localPreview.localTabName}」` : "将新建本地插件标签",
+						flagOf: (p) => (p.version ? `v${p.version}` : null),
+					}),
+					localPreview.localTabName
+						? null
+						: [
+							h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "请选择本地插件分类标签的显示名称："),
+							h("div", { className: "cpm-radio-group", key: "group" },
+								h("div", {
+									className: "cpm-radio-card" + (localName === "本地插件" ? " is-selected" : ""),
+									onClick: () => setLocalName("本地插件")
+								},
+									h("div", { className: "cpm-custom-radio" + (localName === "本地插件" ? " checked" : "") },
+										h("div", { className: "cpm-custom-radio-inner" })
+									),
+									h("div", { className: "cpm-radio-card-content" },
+										h("div", { className: "cpm-radio-card-header" },
+											h("div", { className: "cpm-radio-card-title" }, "使用中文名")
+										),
+										h("div", { className: "cpm-radio-card-desc" },
+											"分类标签名：",
+											h("span", { className: "cpm-tag-preview" }, "本地插件")
+										)
+									)
+								),
+								h("div", {
+									className: "cpm-radio-card" + (localName === "Local Plugins" ? " is-selected" : ""),
+									onClick: () => setLocalName("Local Plugins")
+								},
+									h("div", { className: "cpm-custom-radio" + (localName === "Local Plugins" ? " checked" : "") },
+										h("div", { className: "cpm-custom-radio-inner" })
+									),
+									h("div", { className: "cpm-radio-card-content" },
+										h("div", { className: "cpm-radio-card-header" },
+											h("div", { className: "cpm-radio-card-title" }, "使用英文名")
+										),
+										h("div", { className: "cpm-radio-card-desc" },
+											"分类标签名：",
+											h("span", { className: "cpm-tag-preview" }, "Local Plugins")
+										)
+									)
+								)
+							),
+						],
+					h("div", { className: "cpm-dialog-actions", key: "a" },
+						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
+						h("button", {
+							className: "cpm-btn cpm-btn-primary",
+							disabled: busy,
+							onClick: () => handleImportLocal(localPreview.payload, false, localPreview.localTabName ? undefined : localName),
+						}, busy ? "正在导入…" : "确认添加"),
 					),
 				],
 				phase === "local-duplicate" && localDuplicate && [
@@ -8610,8 +9034,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							),
 							h("div", { className: "cpm-radio-card-content" },
 								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "使用系统建议简化名"),
-									h("span", { className: "cpm-radio-rec-badge" }, "RECOMMENDED")
+									h("div", { className: "cpm-radio-card-title" }, "使用系统建议简化名")
 								),
 								h("div", { className: "cpm-radio-card-desc" },
 									"分类标签名：",

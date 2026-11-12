@@ -317,6 +317,9 @@ test('DSH Hub import formats', async (t) => {
       const context = {
         useState(initial) { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value) => { state[index] = value }] },
         useRef: () => ({ current: null }),
+        // The dialog reads the existing local tab once on mount; this harness
+        // calls the component directly, so effects simply never run.
+        useEffect: () => {},
         h: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity).filter(Boolean) }),
         UploadDropIcon() {}, PluginIcon() {}, ClearBtn() {},
         api: async (path, options) => {
@@ -339,7 +342,7 @@ test('DSH Hub import formats', async (t) => {
       assert.equal(requests[0].path, '/plugins/local/inspect')
       assert.equal(requests[0].body.path, 'C:/skills/example')
       tree = render()
-      assert.ok(find(tree, (n) => n.children.includes('发现插件 / Skills')))
+      assert.ok(find(tree, (n) => n.children.includes('发现插件')), '预览标题要说明识别到的是什么')
       find(tree, (n) => n.type === 'button' && n.children.includes('返回')).props.onClick()
       tree = render()
       assert.ok(find(tree, (n) => n.props.id === 'cpm-upload-path'))

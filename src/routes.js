@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
-  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, removeManagedDir, sourceCacheDir,
+  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, removeManagedDir, sourceCacheDir, safeRmDir,
 } from './store.js'
 import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from './market.js'
 import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceCache } from './parser.js'
@@ -230,7 +230,12 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const body = await readJsonBody(req, 30_000_000)
       const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
       const result = await inspectLocalPlugin(target)
-      return sendJson(res, 200, result)
+      // The extraction is only for this preview: the import call brings its own
+      // copy of the payload and extracts again, so keeping this one would leak a
+      // temp directory per upload. Server paths stay out of the response too.
+      if (result.tempExtractDir) safeRmDir(result.tempExtractDir)
+      const { tempExtractDir, effectiveDir, entries, ...preview } = result
+      return sendJson(res, 200, preview)
     }
 
     if (method === 'POST' && path === '/plugins/local/import') {
@@ -247,7 +252,10 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       requireSameOrigin(req)
       const body = await readJsonBody(req, 30_000_000)
       const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
-      const result = await importLocalSkills(target, { overwrite: body.overwrite === true })
+      const result = await importLocalSkills(target, {
+        overwrite: body.overwrite === true,
+        overwriteNames: Array.isArray(body.overwriteNames) ? body.overwriteNames.map(String) : null,
+      })
       skills?.refresh()
       return sendJson(res, 200, result)
     }

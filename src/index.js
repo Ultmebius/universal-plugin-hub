@@ -11,6 +11,7 @@ import { cancelAllOAuthVerifications } from './oauth.js'
 import { syncAllInstalledSkillsToDsh, installProfilePackages, findDshMainNodeModules, toolCallIconGroups, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
 import { createSkillsManager } from './skills.js'
 import { restoreUploadedSkills } from './skill-uploads.js'
+import { removeDuplicateLocalMarketTabs } from './local.js'
 import { createProfileApplicator } from './runtime.js'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -33,6 +34,11 @@ export function apply(ctx) {
     // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
     try {
       restoreUploadedSkills()
+
+      // Earlier versions created one tab per uploaded marketplace and named it
+      // after the local tab, producing two identical tabs. Drop the duplicate.
+      const { removed } = removeDuplicateLocalMarketTabs()
+      if (removed.length) ctx.logger?.info?.(`[universal-plugin-hub] removed duplicate local tabs: ${removed.join(', ')}`)
 
       await syncAllInstalledSkillsToDsh()
     } catch (err) {

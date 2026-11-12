@@ -3,10 +3,11 @@
  * DSH's native user-dsh root. Directory bundles use junctions on Windows (and
  * directory symlinks elsewhere); a bare SKILL.md is copied as <name>.md.
  */
-import { cpSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs'
+import { cpSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { dshSkillsDir, readState, safeRmDir, uploadedSkillsDir, writeState } from './store.js'
+import { homedir } from 'node:os'
+import { dshSkillsDir, installedDir, readState, safeRmDir, uploadedSkillsDir, writeState } from './store.js'
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -14,6 +15,15 @@ function samePath(a, b) {
   if (!a || !b) return false
   const left = resolve(a), right = resolve(b)
   return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right
+}
+
+function canonical(path) {
+  try { return realpathSync.native(path) } catch { return resolve(path) }
+}
+
+function pathKey(path) {
+  const value = canonical(path)
+  return process.platform === 'win32' ? value.toLowerCase() : value
 }
 
 /**
@@ -92,25 +102,107 @@ function readFileSyncSafe(file) {
   try { return readFileSync(file, 'utf8') } catch { return '' }
 }
 
+/**
+ * Every name that already answers to a skill, scanned once per import. The
+ * name a skill answers to is its frontmatter `name` — the directory is only a
+ * fallback, exactly as the Skills tab reads it — so a collection member can
+ * be detected even when its folder is named differently.
+ */
+export function takenSkillNames() {
+  return collectTakenNames(pluginMirrorPaths())
+}
+
+function collectTakenNames(mirrors) {
+  const names = new Set()
+  for (const record of readState().uploadedSkills || []) names.add(record.name)
+  for (const root of [dshSkillsDir(), join(process.env.DSH_AGENTS_HOME || join(homedir(), '.agents'), 'skills')]) {
+    let children
+    try { children = readdirSync(root, { withFileTypes: true }) } catch { continue }
+    for (const entry of children) {
+      const path = join(root, entry.name)
+      try {
+        // A junction reads as a link, not a directory, so the entry alone
+        // cannot decide the shape — the stat the Skills tab uses does.
+        const stat = entry.isSymbolicLink() ? statSync(path) : entry
+        if (stat.isDirectory()) {
+          if (mirrors.has(pathKey(path))) continue
+          const manifest = readdirSync(path).find((file) => /^skill\.md$/i.test(file))
+          if (!manifest) continue
+          names.add(declaredName(readFileSyncSafe(join(path, manifest))) || entry.name)
+        } else if (stat.isFile() && /\.md$/i.test(entry.name)) {
+          names.add(declaredName(readFileSyncSafe(path)) || entry.name.replace(/\.md$/i, ''))
+        }
+      } catch {}
+    }
+  }
+  return names
+}
+
+/**
+ * A plugin's skills are mirrored into the user-dsh root by the plugin pipeline.
+ * The Skills tab hides them, so reporting one as taken would offer an overwrite
+ * that permanently costs the plugin its own copy. Ownership is decided the way
+ * the tab decides it: the mirror is a byte copy of the plugin's SKILL.md.
+ *
+ * This reads files, so it is scanned once per batch and passed down rather
+ * than cached module-wide: nothing would tell such a cache when to expire.
+ */
+function pluginMirrorPaths() {
+  const owned = new Set()
+  for (const plugin of readState().plugins || []) {
+    let children
+    try { children = readdirSync(join(installedDir(plugin.name), 'skills'), { withFileTypes: true }) } catch { continue }
+    for (const child of children) {
+      try {
+        const source = readFileSync(join(installedDir(plugin.name), 'skills', child.name, 'SKILL.md'), 'utf8')
+        const target = join(dshSkillsDir(), child.name)
+        if (isUploadedSkillTarget(target)) continue
+        if (readFileSyncSafe(join(target, 'SKILL.md')) !== source) continue
+        owned.add(pathKey(target))
+      } catch {}
+    }
+  }
+  return owned
+}
+
+function declaredName(raw) {
+  const frontmatter = raw.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/)
+  if (!frontmatter) return ''
+  return (frontmatter[1].match(/^name:\s*(.+)$/m)?.[1] || '').trim().replace(/^['"]|['"]$/g, '')
+}
+
+/** Both shapes a skill can be exposed as, since one name may leave a stale other. */
+function targetPaths(name) {
+  return [recordPaths(name, 'directory').target, recordPaths(name, 'file').target]
+}
+
 /** Every rejection this import can raise, so a batch can be checked up front. */
-function preflight(entry, { overwrite, singleFile, fileDir = null }) {
+function preflight(entry, { overwrite, overwriteNames, singleFile, fileDir = null, taken = null }) {
   const { name, file } = validateEntry(entry)
   const kind = singleFile ? 'file' : 'directory'
   const paths = recordPaths(name, kind)
   const previous = uploadedSkillRecord(name)
-  if (previous && !overwrite) throw new Error(`已存在同名 Skill「${name}」`)
-  if (!previous && pathExists(paths.target)) {
+  // Overwriting one clashing member of a collection must not silently replace
+  // the others, so a named list wins over the blanket flag: it names exactly
+  // what the user was shown.
+  const replace = Array.isArray(overwriteNames) && overwriteNames.length
+    ? overwriteNames.includes(name)
+    : overwrite === true
+  if (!replace && (taken || takenSkillNames()).has(name)) throw new Error(`已存在同名 Skill「${name}」`)
+  // A recorded upload is already in `taken`, so reaching here means nothing
+  // answers to the name yet and whatever sits at the target is the user's own.
+  if (!replace && targetPaths(name).some(pathExists)) {
     throw new Error(`DSH Skills 目录已存在「${name}」，为避免覆盖你的文件，本次未导入`)
   }
   const source = resolve(entry.dir)
   if (contains(uploadedSkillsDir(), source) || contains(source, uploadedSkillsDir())) {
     throw new Error('导入源与技能存储目录重叠，请从独立文件夹导入')
   }
-  return { name, file, kind, paths, previous, source }
+  return { name, file, kind, paths, previous, source, replace }
 }
 
 function installOne(entry, options) {
-  const { name, file, kind, paths, previous, source } = preflight(entry, options)
+  const { name, file, kind, paths, previous, source, replace } = preflight(entry, options)
   // A bare SKILL.md file, or a flat `<name>.md` sitting beside other skills in
   // one folder, has no assets to carry: only the manifest is copied.
   const manifestOnly = options.singleFile || options.fileDir
@@ -131,6 +223,13 @@ function installOne(entry, options) {
     if (previous) {
       removeTarget(previous)
       safeRmDir(recordPaths(previous.name, previous.kind).sourceDir)
+    } else if (replace) {
+      // A copy the user placed in the DSH root themselves: they just agreed to
+      // replace it. Clear both exposed shapes: a leftover of the other one
+      // answers to the same name and splits one command across two cards.
+      removeTarget({ name, kind })
+      removeTarget({ name, kind: kind === 'file' ? 'directory' : 'file' })
+      if (pathExists(paths.sourceDir)) safeRmDir(paths.sourceDir)
     }
     renameSync(staging, paths.sourceDir)
     staged = false
@@ -142,7 +241,7 @@ function installOne(entry, options) {
     state.uploadedSkills = [...(state.uploadedSkills || []).filter(item => item.name !== name),
       { name, kind, ...paths, uploadedAt: previous?.uploadedAt || Date.now(), updatedAt: Date.now() }]
     writeState(state)
-    return { name, kind }
+    return { name, kind, replace }
   } catch (error) {
     // Roll back only what this attempt created; never delete an old original
     // that was already removed before the failure (its target is gone too, so
@@ -155,20 +254,25 @@ function installOne(entry, options) {
   }
 }
 
-export function installUploadedSkills(entries, { overwrite = false, singleFile = false } = {}) {
+export function installUploadedSkills(entries, { overwrite = false, overwriteNames = null, singleFile = false } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) throw new Error('未检测到可上传的 Skill')
   // A batch must not half-install: every rejection this import can predict is
   // raised before the first file moves, so a duplicate name in the middle of
   // the package cannot leave the earlier skills live while the UI reports a
   // failure.
-  for (const entry of entries) preflight(entry, { overwrite, singleFile, fileDir: entry.singleFile })
+  const taken = takenSkillNames()
+  const options = { overwrite, overwriteNames, singleFile, taken }
+  for (const entry of entries) preflight(entry, { ...options, fileDir: entry.singleFile })
   const installed = []
   try {
     for (const entry of entries) {
       const replaced = !!uploadedSkillRecord(String(entry?.row?.name || ''))
-      installed.push({ ...installOne(entry, { overwrite, singleFile, fileDir: entry.singleFile }), replaced })
+      const installedOne = installOne(entry, { ...options, fileDir: entry.singleFile })
+      // An overwrite has already destroyed whatever it replaced, so undoing it
+      // would leave nothing behind, not even the copy this import just wrote.
+      installed.push({ ...installedOne, replaced: replaced || installedOne.replace })
     }
-    return installed.map(({ replaced, ...skill }) => skill)
+    return installed.map(({ replaced, replace, ...skill }) => skill)
   } catch (error) {
     // Only a failure preflight cannot see (disk, permissions) gets here. Undo
     // the entries this batch created; an overwrite has already replaced its

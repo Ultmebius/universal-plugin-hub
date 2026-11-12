@@ -7,7 +7,7 @@ import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, readState, writeState, safeRmDir, slugify } from './store.js'
 import { safeSegment, pluginPath } from './market.js'
 import { parsePluginRowFromDir, parseMarketplaceFromDisk, listSkills, listAgents, readPluginManifest, invalidateMarketplaceCache, formatDisplayName } from './parser.js'
-import { installUploadedSkills } from './skill-uploads.js'
+import { installUploadedSkills, takenSkillNames } from './skill-uploads.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -64,6 +64,16 @@ export function saveUploadedZip(dataBase64, filename) {
   return file
 }
 
+/**
+ * The one way this codebase tells a marketplace from a plain plugin: a
+ * marketplace carries its own manifest. A plugin never does.
+ */
+const MARKETPLACE_MANIFESTS = ['.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json', 'marketplace.json']
+
+function isMarketplaceDir(dir) {
+  return MARKETPLACE_MANIFESTS.some((path) => existsSync(join(dir, path)))
+}
+
 function isPluginDir(dir) {
   if (!dir || !existsSync(dir)) return false
   const rootSkill = existsSync(join(dir, 'SKILL.md')) || existsSync(join(dir, 'skill.md'))
@@ -77,7 +87,7 @@ function isPluginDir(dir) {
 
 export function resolvePluginDir(rootDir) {
   if (!existsSync(rootDir) || !statSync(rootDir).isDirectory()) return null
-  if (existsSync(join(rootDir, '.agents', 'plugins', 'marketplace.json')) || existsSync(join(rootDir, '.claude-plugin', 'marketplace.json')) || existsSync(join(rootDir, 'marketplace.json'))) return rootDir
+  if (isMarketplaceDir(rootDir)) return rootDir
   if (isPluginDir(rootDir)) return rootDir
 
   // Unwrap nested directory wrappers (common in repository archives).
@@ -154,7 +164,7 @@ function isPureSkillPackage(dir) {
 }
 
 function marketSourceName(dir, fallbackName) {
-  for (const path of ['.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json', 'marketplace.json']) {
+  for (const path of MARKETPLACE_MANIFESTS) {
     try {
       const raw = JSON.parse(readFileSync(join(dir, path), 'utf8'))
       if (typeof raw.name === 'string' && raw.name.trim()) return raw.name.trim()
@@ -203,7 +213,7 @@ export async function inspectLocalPlugin(rawPath) {
   // Recognition follows the package formats, not the upload transport:
   // marketplace -> Claude -> Codex -> pure skills. Claude/Codex precedence in
   // readPluginManifest is shared with the existing source installation path.
-  const isMarket = ['.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json', 'marketplace.json'].some((p) => existsSync(join(effectiveDir, p)))
+  const isMarket = isMarketplaceDir(effectiveDir)
   const pureSkills = !isMarket && isPureSkillPackage(effectiveDir)
   const directSkills = pureSkills ? collectDirectSkills(effectiveDir, fallbackName) : []
   const singleFile = !isZip && statSync(targetPath).isFile()
@@ -243,6 +253,7 @@ export async function inspectLocalPlugin(rawPath) {
   const cleanPluginName = safeSegment(row.name, 'plugin name')
   row.name = cleanPluginName
 
+  const names = kind === 'skills' ? takenSkillNames() : new Set()
   const skills = entries.flatMap((e) => listSkills(e.dir))
   const agents = entries.flatMap((e) => listAgents(e.dir))
 
@@ -277,6 +288,13 @@ export async function inspectLocalPlugin(rawPath) {
     exists,
     existingVersion,
     existingUpdatedAt,
+    suggestedName: kind === 'marketplace' ? formatDisplayName(marketSourceName(effectiveDir, fallbackName)) : undefined,
+    // Whether the local tab is already named decides if this upload still has
+    // to ask for a name, so inspect reports it instead of the dialog guessing.
+    localTabName: String(readState().sources.find((source) => source.id === 'local')?.name || ''),
+    // Every skill in the package is checked, not just the aggregate row: a
+    // collection with one clashing member must still offer the overwrite.
+    takenSkillNames: kind === 'skills' ? entries.map((e) => e.row.name).filter((name) => names.has(name)) : [],
   }
 }
 
@@ -284,7 +302,7 @@ export async function inspectLocalPlugin(rawPath) {
  * Pure skill packages go straight into the Skills tab instead of the plugin
  * install pipeline: no mirrored copy, no agents/commands conversion.
  */
-export async function importLocalSkills(rawPath, { overwrite = false } = {}) {
+export async function importLocalSkills(rawPath, { overwrite = false, overwriteNames = null } = {}) {
   const inspectRes = await inspectLocalPlugin(rawPath)
   if (!inspectRes.ok) throw new Error(inspectRes.error)
   if (inspectRes.kind !== 'skills') throw new Error('该内容不是纯 Skills 包')
@@ -293,7 +311,7 @@ export async function importLocalSkills(rawPath, { overwrite = false } = {}) {
     // A bare SKILL.md upload is one flat skill. When the folder it came from is
     // a collection, the walk up yields several entries, and flattening those
     // would drop each skill's assets along with its directory.
-    const installed = installUploadedSkills(entries, { overwrite, singleFile: singleFile && entries.length === 1 })
+    const installed = installUploadedSkills(entries, { overwrite, overwriteNames, singleFile: singleFile && entries.length === 1 })
     return { ok: true, sourceId: 'skills-local', skills: installed, kind: 'skills' }
   } finally {
     if (tempExtractDir) safeRmDir(tempExtractDir)
@@ -311,10 +329,18 @@ export async function importLocalMarketplace(rawPath, { sourceName = '', overwri
   if (inspectRes.kind !== 'marketplace') throw new Error('该内容不是插件市场')
   const { effectiveDir, tempExtractDir, entries } = inspectRes
   const label = marketSourceName(effectiveDir, basename(effectiveDir))
-  const name = String(sourceName || '').trim().slice(0, 30) || label
+  const name = String(sourceName || '').trim().slice(0, 30) || formatDisplayName(label)
   const sourceId = `local-${slugify(label) || 'market'}`
   const dest = sourceCacheDir(sourceId)
   const state = readState()
+  const existing = state.sources.find(source => source.id === sourceId)
+  // Only a *new* tab can collide with an existing one. An overwrite reuses its
+  // own tab, and the name it compares here is the manifest's, not whatever the
+  // user renamed that tab to.
+  if (!existing && state.sources.some(source => String(source.name || '').trim() === name)) {
+    if (tempExtractDir) safeRmDir(tempExtractDir)
+    throw new Error(`分类标签「${name}」已存在，请换一个名称`)
+  }
   if (existsSync(dest) && !overwrite && state.sources.some(source => source.id === sourceId)) {
     if (tempExtractDir) safeRmDir(tempExtractDir)
     throw new Error(`已存在同名插件市场「${label}」`)
@@ -339,7 +365,7 @@ export async function importLocalMarketplace(rawPath, { sourceName = '', overwri
     }
     // Carry the marketplace manifest itself so the standard reader finds the
     // same rows on the next start, not only during this upload.
-    for (const relativePath of ['.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json', 'marketplace.json']) {
+    for (const relativePath of MARKETPLACE_MANIFESTS) {
       const file = join(effectiveDir, relativePath)
       if (!existsSync(file)) continue
       const out = join(dest, relativePath)
@@ -349,7 +375,15 @@ export async function importLocalMarketplace(rawPath, { sourceName = '', overwri
   } finally {
     if (tempExtractDir) safeRmDir(tempExtractDir)
   }
-  if (!state.sources.some(source => source.id === sourceId)) {
+  if (existing) {
+    // Overwriting keeps the tab's name unless the user typed a new one;
+    // otherwise a plain "overwrite update" would revert their naming.
+    const renamed = String(sourceName || '').trim().slice(0, 30)
+    if (renamed && existing.name !== renamed) {
+      existing.name = renamed
+      writeState(state)
+    }
+  } else {
     state.sources.push({ id: sourceId, name, url: `local-market://${sourceId}`, addedAt: Date.now() })
     writeState(state)
   }
@@ -398,16 +432,13 @@ export async function importLocalPlugin({ path: rawPath, overwrite = false, sour
     if (tempExtractDir) safeRmDir(tempExtractDir)
   }
 
-  // Ensure 'local' source exists in state.sources; apply the user-chosen tab name if given
+  // The tab is named once, on the first import. Later imports land in that
+  // same tab: re-applying a name here would silently rename a tab the user
+  // already chose, and every upload would ask the same question again.
   const srcName = String(sourceName || '').trim().slice(0, 30)
   const state = readState()
   let localSource = state.sources.find((s) => s.id === 'local')
-  if (localSource) {
-    if (srcName && localSource.name !== srcName) {
-      localSource.name = srcName
-      writeState(state)
-    }
-  } else {
+  if (!localSource) {
     localSource = {
       id: 'local',
       name: srcName || '本地插件',
@@ -426,4 +457,55 @@ export async function importLocalPlugin({ path: rawPath, overwrite = false, sour
     plugin,
     plugins: entries.map((e) => e.row),
   }
+}
+
+const UPLOADED_MARKET_URL = 'local-market://'
+
+function isUploadedMarket(source) {
+  return Boolean(source) && String(source.url || '').startsWith(UPLOADED_MARKET_URL)
+}
+
+/**
+ * Remove an uploaded marketplace tab that old versions created *beside* the
+ * local tab under the very same name. That duplicate is what put two
+ * identical labels in the tab bar.
+ *
+ * It is removed, never merged: an uploaded marketplace is a marketplace (its
+ * cache root is a market, read through its own marketplace.json), while the
+ * local tab is a flat list of plugin directories. Flattening one into the
+ * other would silently turn a market into a plugin.
+ *
+ * Narrow on purpose: only an uploaded-market source, only when its display
+ * name *exactly* equals the local tab's, only when its cache really holds a
+ * marketplace manifest, and never when one of its plugins is still installed
+ * (that deletion is the user's call, not a startup side effect).
+ *
+ * Idempotent: with nothing to remove it writes nothing.
+ */
+export function removeDuplicateLocalMarketTabs() {
+  const state = readState()
+  const localName = String(state.sources.find((source) => source.id === 'local')?.name || '').trim()
+  if (!localName) return { removed: [] }
+
+  const duplicates = state.sources.filter((source) =>
+    source && isUploadedMarket(source) &&
+    source.id !== 'local' &&
+    String(source.name || '').trim() === localName &&
+    isMarketplaceDir(sourceCacheDir(source.id)),
+  )
+  if (!duplicates.length) return { removed: [] }
+
+  const ids = duplicates.map((source) => source.id)
+  const installed = state.plugins.filter((record) => ids.includes(record.sourceId))
+  if (installed.length) {
+    // Keep the tab rather than orphan install records behind the user's back.
+    return { removed: [], kept: ids, installed: installed.map((record) => record.name) }
+  }
+
+  for (const id of ids) safeRmDir(sourceCacheDir(id))
+  state.sources = state.sources.filter((source) => !ids.includes(source.id))
+  if (Array.isArray(state.tabOrder)) state.tabOrder = state.tabOrder.filter((id) => !ids.includes(id))
+  writeState(state)
+  for (const id of ids) invalidateMarketplaceCache(id)
+  return { removed: ids }
 }

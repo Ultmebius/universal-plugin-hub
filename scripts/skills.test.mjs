@@ -10,6 +10,9 @@ import { mountRoutes } from '../src/routes.js'
 
 const temp = mkdtempSync(join(tmpdir(), 'hub-skills-'))
 process.env.DSH_HOME = join(temp, 'dsh')
+// Keep the user's real skill roots out of these assertions: import checks
+// whether a name is already answered by a scanned skill anywhere.
+process.env.DSH_AGENTS_HOME = join(temp, 'native-agents')
 const root = join(temp, 'agents', 'skills')
 function write(path, value) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value) }
 function add(dir, name, extra = '') {
