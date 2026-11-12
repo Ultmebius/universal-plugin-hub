@@ -256,10 +256,13 @@ test('Skills warms only its first rows and reuses local image requests across re
   assert.deepEqual(warmed, ['/bundled', ...Array.from({ length: 9 }, (_, id) => local + id)])
 })
 
-test('plugin previews and MCP tool details share the host radius and continuous corner shape', () => {
+test('MCP details match the tool pill at the aligned corner and use the host styling elsewhere', () => {
   const shared = source.match(/\.cpm-smart-hover\s*\{([^}]+)\}/)?.[1]
   assert.match(shared || '', /border-radius: var\(--dsw-radius-lg, 16px\)/)
   assert.match(shared || '', /corner-shape: squircle/)
+  const alignedCorner = source.match(/\.cpm-mcp-tool-popover\.cpm-smart-hover\s*\{([^}]+)\}/)?.[1]
+  assert.match(alignedCorner || '', /border-top-left-radius: var\(--cpm-card-icon-radius\)/)
+  assert.match(alignedCorner || '', /corner-top-left-shape: var\(--cpm-icon-corner-shape\)/)
   for (const name of ['PluginPreviewPopover', 'McpToolPopover']) {
     assert.match(code(func(name)), /h\(SmartHoverPopover,/)
   }

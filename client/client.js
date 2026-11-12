@@ -3184,6 +3184,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	corner-shape: squircle;
 	user-select: text;
 }
+.cpm-mcp-tool-popover.cpm-smart-hover {
+	border-top-left-radius: var(--cpm-card-icon-radius);
+	corner-top-left-shape: var(--cpm-icon-corner-shape);
+}
 .cpm-root:has(.cpm-smart-hover[data-pointer-inside="true"]) :is(.cpm-card, .cpm-mcp-tool-dot) {
 	transition: none;
 }
