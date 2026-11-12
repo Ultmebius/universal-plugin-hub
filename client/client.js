@@ -1884,7 +1884,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		overflow-y: auto;
 	}
 	.cpm-upload-dialog .cpm-dialog-title,
-	.cpm-upload-dialog .cpm-field,
 	.cpm-upload-dialog .cpm-dialog-actions { margin: 0; }
 	.cpm-upload-dialog .cpm-dropzone {
 		width: 100%;
@@ -1898,14 +1897,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 	.cpm-upload-dialog .cpm-dropzone-sub { line-height: 1.6; }
 	.cpm-upload-dialog .cpm-dropzone-icon { margin-bottom: 4px; }
-	.cpm-upload-dialog .cpm-field { min-width: 0; }
-	.cpm-upload-dialog .cpm-field label { margin-bottom: 8px; }
-	.cpm-upload-dialog .cpm-input { box-sizing: border-box; min-width: 0; }
 	.cpm-upload-dialog .cpm-dialog-actions { gap: 10px; padding-top: 4px; }
 	/* The dropzone is the only control here that needs an outline of its own —
-	   it has no border to light up. The text field's focus is the .cpm-input
-	   ring above; giving it this outline too drew a second, wider blue loop
-	   around the same field. */
+	   it has no border to light up. */
 	.cpm-upload-dialog .cpm-dropzone:focus-visible {
 		outline: 2px solid var(--cpm-accent);
 		outline-offset: 3px;
@@ -1932,6 +1926,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-dark .cpm-dropzone:hover, .cpm-dark .cpm-dropzone.is-active {
 	background: rgba(59, 130, 246, 0.08);
 }
+/* :hover still matches a disabled button, so the busy upload would otherwise
+   keep the accent border and the lift, promising a click it no longer takes.
+   The dark hover rule carries one more class, so it needs its own. */
+.cpm-dropzone:disabled,
+.cpm-dark .cpm-dropzone:disabled {
+	cursor: default;
+	border-color: var(--cpm-border);
+	background: var(--cpm-search-bg);
+}
+.cpm-dropzone:disabled .cpm-dropzone-icon,
+.cpm-dark .cpm-dropzone:disabled .cpm-dropzone-icon { color: var(--cpm-muted); transform: none; }
 .cpm-dropzone-icon {
 	color: var(--cpm-muted);
 	display: flex;
@@ -4809,7 +4814,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						uploaded && onRemove && h("button", {
 							className: "cpm-btn cpm-btn-danger cpm-skill-remove", disabled: removing || busy,
 							onClick: remove,
-						}, removing ? "卸载中…" : "卸载"),
+						}, removing ? "Removing…" : "Remove"),
 						h(SkillSwitch, { skill, busy, onToggle })),
 					skill.description && h("p", { className: "cpm-skill-summary" }, skill.description),
 					(skill.activePath || skill.path) && h("div", { className: "cpm-skill-location" },
@@ -7948,7 +7953,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			!mcpsOpen && view.type === "skill-detail" && (() => {
-				const selected = ((rows && rows["skills-local"]) || []).find(s => s.id === view.skill.id) || view.skill;
+				const skills = (rows && rows["skills-local"]) || [];
+				// An overwrite re-exposes the skill at a new path, so the id the card
+				// was opened with is no longer any card's own id. It is still one of
+				// that card's locations, though: the re-uploaded copy is the same
+				// card. Name is the last resort, and only after the location ids run
+				// out, because two same-named skills are two different cards.
+				const known = new Set([view.skill.id, ...(view.skill.locations || []).map((l) => l.id)]);
+				const selected = skills.find(s => s.id === view.skill.id)
+					|| skills.find(s => (s.locations || []).some((l) => known.has(l.id)))
+					|| skills.find(s => s.path === view.skill.path)
+					|| skills.find(s => s.name === view.skill.name)
+					|| view.skill;
 				return h(SkillDetail, { skill: selected, isDark, containerRef: detailContainerRef, scrollState: view, busy: skillBusy === selected.id, onToggle: toggleSkill, onRemove: removeUploadedSkill, onBack: () => setView({ type: "browse", sourceId: "skills-local" }) });
 			})(),
 
@@ -8149,25 +8165,31 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				onAdded: async (newSourceId, keepOpen) => {
 					if (!keepOpen) setAddDialog(false);
 					await refreshState();
-					// The tab list and the rows both come from the server state, and
-					// the row cache is what the grid renders. Forget the catalog check
-					// so the existing effect refetches it; only a source that is already
-					// the active tab (an overwrite update) needs the load here, since
-					// its effect does not re-run for the same id.
+					// The tab list and the rows both come from the server state.
 					if (newSourceId) {
 						SESSION_STORE.checkedCatalogs?.delete(newSourceId);
-						if (newSourceId === activeSourceId) {
-							// Same tab: its browse effect will not re-run for an
-							// unchanged id, so fetch once here.
+						// The Skills tab is not a market: /market has nothing for it, and
+						// an overwrite re-exposes the skill under a new path, so its cached
+						// rows hold ids the server no longer knows. Whether this tab is
+						// active or about to become active, load it from /skills.
+						const isSkills = newSourceId === "skills-local";
+						const loadRows = async () => {
 							try {
-								const body = await api("/market?sourceId=" + encodeURIComponent(newSourceId));
-								if (Array.isArray(body?.plugins)) {
-									setRows((prev) => ({ ...(prev || {}), [newSourceId]: body.plugins }));
+								const body = isSkills
+									? await api("/skills")
+									: await api("/market?sourceId=" + encodeURIComponent(newSourceId));
+								const list = isSkills ? body?.skills : body?.plugins;
+								if (Array.isArray(list)) {
+									setRows((prev) => ({ ...(prev || {}), [newSourceId]: list }));
 								}
 							} catch {}
-						} else {
-							setActiveSourceId(newSourceId);
-						}
+						};
+						if (newSourceId !== activeSourceId) setActiveSourceId(newSourceId);
+						// A tab that is already active has no effect to re-run for the
+						// same id, and the Skills tab has no browse effect at all, so
+						// both need the load here. A newly opened market tab refetches
+						// on its own; loading it here too would double the request.
+						if (isSkills || newSourceId === activeSourceId) await loadRows();
 					}
 				},
 				showToast,
@@ -8507,7 +8529,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				return;
 			}
 			if (file.size > 22 * 1024 * 1024) {
-				showToast("压缩包过大", "本地压缩包上限 22MB，请解压后改用文件夹路径导入", { restart: false });
+				showToast("压缩包过大", "本地压缩包上限 22MB，请解压后重新打包上传", { restart: false });
 				return;
 			}
 			setBusy(true);
@@ -8730,12 +8752,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const dropPath = file?.path || text;
 					if (!dropPath && file && (/\.(zip|tgz|tar\.gz)$/i.test(file.name) || /^skill\.md$/i.test(file.name))) {
 						// Web drop: no filesystem path available — upload the zip content instead.
-						setUrl("");
 						handleInspectLocalUpload(file);
 					} else if (!dropPath && file) {
-						showToast("无法读取拖入内容", "浏览器环境拿不到文件夹路径，请将路径粘贴到输入框，或改为拖入 .zip 压缩包", { restart: false });
+						showToast("无法读取拖入内容", "浏览器环境拿不到文件夹路径，请改为拖入 .zip 压缩包", { restart: false });
 					} else if (dropPath) {
-						setUrl(dropPath);
 						if (/^https?:\/\//i.test(dropPath)) ensure(dropPath); else handleInspectLocal(dropPath);
 					}
 				},
@@ -8756,10 +8776,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						type: "button",
 						key: "dz",
 						style: { cursor: "pointer" },
+						disabled: busy,
 						onClick: () => uploadInputRef.current && uploadInputRef.current.click(),
 					},
 						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
-						h("span", { className: "cpm-dropzone-title" }, "拖入插件 / Skills，或点击上传"),
+						h("span", { className: "cpm-dropzone-title" }, busy ? "正在解析…" : "拖入插件 / Skills，或点击上传"),
 						h("span", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件、插件市场和 Skills",
 							h("br"), ".zip / .tgz / .tar.gz / SKILL.md · 上限 22MB"),
 					),
@@ -8776,14 +8797,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							e.target.value = "";
 						},
 					}),
-					h("div", { className: "cpm-field", key: "path" },
-						h("label", { htmlFor: "cpm-upload-path" }, "本地路径或 Git 仓库地址"),
-						h("input", { id: "cpm-upload-path", className: "cpm-input", value: url, autoComplete: "off", autoCorrect: "off", autoCapitalize: "none", spellCheck: false,
-							placeholder: "粘贴插件 / Skills 文件夹路径或仓库地址", onChange: (e) => setUrl(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && !busy && url.trim()) ensure(); } }),
-					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy, onClick: () => url.trim() ? ensure() : uploadInputRef.current && uploadInputRef.current.click() }, busy ? "解析中…" : "解析并添加"),
 					),
 				],
 				phase === "url" && [

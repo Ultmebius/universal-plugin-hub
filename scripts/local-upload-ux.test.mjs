@@ -284,17 +284,19 @@ test('市场预览的摘要行显示压缩包完整名，而不是固定文案',
   }
 })
 
-test('路径导入时摘要行只取文件名，不显示整条路径', async (t) => {
+test('拖入文件夹路径时摘要行只取文件名，不显示整条路径', async (t) => {
   const members = [1, 2].map((i) => ({ name: `m${i}`, displayName: `M${i}` }))
   const ctx = await mount({
     inspect: () => ({ ok: true, kind: 'marketplace', suggestedName: 'Kept', plugin: { name: 'kept' }, plugins: members }),
   })
   try {
-    const input = ctx.view.root.findByProps({ id: 'cpm-upload-path' })
-    await act(async () => { input.props.onChange({ target: { value: 'C:/work/remotion.zip' } }) })
-    await act(async () => { await ctx.button('解析并添加').props.onClick() })
+    const root = ctx.view.root.find((n) => typeof n.props?.onDrop === 'function')
+    await act(async () => {
+      root.props.onDrop({ preventDefault() {}, dataTransfer: { files: [], getData: () => 'C:/work/remotion.zip' } })
+    })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
     const summary = ctx.view.root.findAll((n) => n.props?.className === 'cpm-detect-source')
-    assert.ok(summary.length === 1, '要有摘要行')
+    assert.equal(summary.length, 1, '要有摘要行')
     assert.equal(summary[0].props.children, 'remotion.zip', '只显示文件名')
   } finally {
     await ctx.unmount()
@@ -379,10 +381,43 @@ test('onAdded 不引用 BrowseView 作用域内的 loadMarket', () => {
   // 两者不是同一作用域：引用会直接抛 ReferenceError，导入成功后崩溃。
   const i = source.indexOf('onAdded: async (newSourceId, keepOpen)')
   assert.ok(i > 0, '要能找到 onAdded')
-  const seg = source.slice(i, i + 1200)
+  const seg = source.slice(i, i + 1600)
   const end = seg.indexOf('showToast,')
   const body = end > 0 ? seg.slice(0, end) : seg
   assert.doesNotMatch(body, /loadMarket/, 'onAdded 不能调用 BrowseView 内的 loadMarket')
+})
+
+test('onAdded 刷新 Skills 标签页走 /skills，不走 /market', () => {
+  // 覆盖导入会把技能换到新路径，id 随之改变。若按市场去拉 /market，
+  // 旧的 rows 会原地不动，之后每次切换都报「Skill 不存在」。
+  const i = source.indexOf('onAdded: async (newSourceId, keepOpen)')
+  const seg = source.slice(i, i + 1600)
+  const body = seg.slice(0, seg.indexOf('showToast,') || undefined)
+  assert.match(body, /newSourceId === "skills-local"/, '要单独识别 Skills 标签页')
+  assert.match(body, /api\("\/skills"\)/, 'Skills 标签页要从 /skills 取列表')
+  assert.match(body, /body\?\.skills/, '取 skills 字段，不是 plugins')
+})
+
+test('Skill 详情按名字兜底，覆盖换掉 id 后仍能打开', () => {
+  // 覆盖导入把技能从 ~/.agents/skills 换到 .dsh/skills，卡片 id 也随之改变。
+  // 只按 id 找会让详情页停在一个服务端已不认识的 id 上。
+  const i = source.indexOf('view.type === "skill-detail" && (() => {')
+  assert.ok(i > 0, '要能找到 skill-detail 分支')
+  const body = source.slice(i, i + 1200)
+  // 旧 id 变成新卡片的 location 之一，按 location 匹配才不会撞上同名但不同的那张卡。
+  assert.match(body, /view\.skill\.locations/, '要先取旧卡片自己的 location id')
+  assert.match(body, /known\.has\(l\.id\)/, '按 location id 匹配到覆盖后的那张卡')
+  assert.match(body, /s\.name === view\.skill\.name/, '最后才按名字兜底')
+})
+
+test('Skill 详情的移除按钮用 Remove 文案', () => {
+  // 第一处是 CSS 选择器，按钮在第二处。
+  const first = source.indexOf('cpm-skill-remove')
+  const i = source.indexOf('cpm-skill-remove', first + 1)
+  assert.ok(i > 0, '要能找到移除按钮')
+  const body = source.slice(i, i + 400)
+  assert.match(body, /"Remove"/)
+  assert.doesNotMatch(body, /"卸载"/)
 })
 
 test('单卡片预览仍显示技能数/智能体数/作者', async (t) => {

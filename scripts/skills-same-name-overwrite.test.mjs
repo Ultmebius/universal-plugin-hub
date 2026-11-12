@@ -226,3 +226,54 @@ test('插件镜像的同名技能不算占用，避免覆盖后插件永久丢�
   assert.equal(takenSkillNames().has('plugin-skill'), true)
 })
 
+test('覆盖会把卡片 id 换掉：旧 id 变成新卡片的 location', async (t) => {
+  const manager = createSkillsManager()
+  await t.test('从 agents 覆盖到 DSH 根后，卡片 id 与路径都会变', () => {
+    reset()
+    write(join(agentsRoot, 'moves', 'SKILL.md'), manifest('moves', 'old', 'old body'))
+    manager.refresh()
+    const before = manager.entries().find((e) => e.name === 'moves')
+    assert.ok(before, '要先有一张卡片')
+    assert.match(before.path, /agents/, '覆盖前在 agents 根')
+
+    const src = join(temp, 'up-moves', 'moves')
+    write(join(src, 'SKILL.md'), manifest('moves', 'new', 'new body'))
+    installUploadedSkills([{ dir: src, row: { name: 'moves', description: 'new' } }], { overwrite: true })
+    manager.refresh()
+    const after = manager.entries().find((e) => e.name === 'moves')
+    assert.ok(after, '覆盖后仍应有一张卡片')
+    assert.notEqual(after.id, before.id, 'id 是按文件路径哈希的，换根必然换 id')
+    assert.notEqual(after.path, before.path, '路径也换了')
+    assert.equal(after.name, before.name, '名字不变')
+    // 详情页因此靠 location 找回这张卡：旧 id 仍是它的一个位置。
+    assert.ok(
+      after.locations.some((l) => l.id === before.id),
+      '旧 id 要留在新卡片的 locations 里，否则前端只能退回按名字猜',
+    )
+  })
+})
+
+test('覆盖一个已关闭的技能，保留用户的关闭状态', () => {
+  reset()
+  const src = join(temp, 'up-off', 'switchy')
+  write(join(src, 'SKILL.md'), manifest('switchy', 'v1', 'body v1'))
+  installUploadedSkills([{ dir: src, row: { name: 'switchy', description: 'v1' } }], {})
+
+  const manager = createSkillsManager()
+  manager.refresh()
+  const card = manager.entries().find((e) => e.name === 'switchy')
+  const state = readState()
+  state.disabledLocalSkills = { ...(state.disabledLocalSkills || {}) }
+  for (const location of card.locations) state.disabledLocalSkills[location.id] = true
+  writeState(state)
+  manager.refresh()
+  assert.equal(manager.entries().find((e) => e.name === 'switchy').enabled, false, '先确认关掉了')
+
+  const next = join(temp, 'up-off2', 'switchy')
+  write(join(next, 'SKILL.md'), manifest('switchy', 'v2', 'body v2'))
+  installUploadedSkills([{ dir: next, row: { name: 'switchy', description: 'v2' } }], { overwrite: true })
+  manager.refresh()
+  const after = manager.entries().find((e) => e.name === 'switchy')
+  assert.equal(after.description, 'v2', '内容换成了新版')
+  assert.equal(after.enabled, false, '用户关掉的是这个技能，覆盖不该把它悄悄打开')
+})

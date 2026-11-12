@@ -307,7 +307,7 @@ test('DSH Hub import formats', async (t) => {
       assert.equal(preview.ok, false)
       assert.match(preview.error, /添加插件市场/)
     })
-    await t.test('upload dialog routes local paths and dropped Git URLs, then returns to upload', async () => {
+    await t.test('upload dialog routes dropped local paths and Git URLs, then returns to upload', async () => {
       const client = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
       const start = client.indexOf('function AddSourceDialog(')
       const end = client.indexOf('function AddMcpDialog(', start)
@@ -335,20 +335,20 @@ test('DSH Hub import formats', async (t) => {
       const all = (node) => typeof node === 'object' ? [node, ...node.children.flatMap(all)] : []
       const find = (tree, predicate) => all(tree).find(predicate)
       let tree = render()
-      const field = find(tree, (n) => n.props.id === 'cpm-upload-path')
-      field.props.onChange({ target: { value: 'C:/skills/example' } })
-      tree = render()
-      await find(tree, (n) => n.type === 'button' && n.children.includes('解析并添加')).props.onClick()
+      // 上传阶段只有一个拖放区：路径输入框已经删掉，拖入的本地路径直接走解析。
+      assert.equal(find(tree, (n) => n.props.id === 'cpm-upload-path'), undefined, '不该再有路径输入框')
+      const drop = (path) => find(tree, (n) => typeof n.props.onDrop === 'function').props.onDrop({ preventDefault() {}, dataTransfer: { files: [], getData: () => path } })
+      drop('C:/skills/example')
+      // 拖放回调不返回 promise，等它自己走完解析链。
+      await new Promise((r) => setTimeout(r, 0))
       assert.equal(requests[0].path, '/plugins/local/inspect')
       assert.equal(requests[0].body.path, 'C:/skills/example')
       tree = render()
       assert.ok(find(tree, (n) => n.children.includes('发现插件')), '预览标题要说明识别到的是什么')
       find(tree, (n) => n.type === 'button' && n.children.includes('返回')).props.onClick()
       tree = render()
-      assert.ok(find(tree, (n) => n.props.id === 'cpm-upload-path'))
-      find(tree, (n) => typeof n.props.onDrop === 'function').props.onDrop({ preventDefault() {}, dataTransfer: { files: [], getData: () => 'https://github.com/example/codex' } })
-      await Promise.resolve()
-      await Promise.resolve()
+      drop('https://github.com/example/codex')
+      await new Promise((r) => setTimeout(r, 0))
       assert.equal(requests.at(-1).path, '/sources/ensure')
       assert.equal(requests.at(-1).body.url, 'https://github.com/example/codex')
     })
