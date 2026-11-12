@@ -203,21 +203,23 @@ test('Skills loads once in the background across tabs and keeps identical or new
   assert.ok(browse.includes('!rows?.["skills-local"] ? (skillsLoadFailed ?'))
 })
 
-test('MCP tool chips share the icon curve and draw their hover edge with a single border', () => {
+test('MCP tool chips share the icon curve and draw a single outer hover outline', () => {
   for (const selector of ['.cpm-card-icon', '.cpm-mcp-tool-pill']) {
     const css = source.slice(source.indexOf(selector + ' {')).split('}')[0]
     assert.match(css, /border-radius: var\(--cpm-card-icon-radius\)/)
     assert.match(css, /corner-shape: var\(--cpm-icon-corner-shape\)/)
   }
   const hoverEdges = [...source.matchAll(/\.cpm-mcp-tool-pill-wrap:hover > \.cpm-mcp-tool-pill:not\(\.is-disabled\) \{([^}]+)\}/g)].filter(([, css]) => css.includes('border-color'))
-  assert.equal(hoverEdges.length, 2)
-  for (const [, css] of hoverEdges) {
-    assert.doesNotMatch(css, /transform:|box-shadow:\s*0/)
-  }
+  assert.equal(hoverEdges.length, 1)
+  assert.match(hoverEdges[0][1], /border-color: transparent;/)
+  assert.match(source, /\.cpm-mcp-tool-pill:not\(\.is-disabled, :focus-visible\) \{\s*outline: 1px solid var\(--cpm-tool-hover-outline\);\s*outline-offset: 0;/)
   assert.match(source, /\.cpm-mcp-tool-pill:focus-visible \{[^}]*outline: 2px solid/)
   assert.match(source, /top: 0;\s*transition: top 190ms cubic-bezier\(0\.18, 0\.78, 0\.3, 1\)/)
-  assert.match(source, /\.cpm-mcp-tool-pill::before\s*\{[^}]*inset: -4px;[^}]*box-shadow: 0 0 9px/)
-  assert.doesNotMatch(source.match(/\.cpm-mcp-tool-pill \{([^}]+)\}/)[1], /\b(?:translate|transform|will-change):/)
+  const glow = source.match(/\.cpm-mcp-tool-pill::before\s*\{([^}]+)\}/)[1]
+  assert.match(glow, /inset: -1px;/, 'the glow starts at the border instead of leaving a gap')
+  assert.match(glow, /border-radius: inherit;\s*corner-shape: inherit;/)
+  assert.match(glow, /box-shadow: 0 0 [\d.]+px var\(--cpm-tool-hover-glow\);/)
+  assert.doesNotMatch(source.match(/\.cpm-mcp-tool-pill \{([^}]+)\}/)[1], /\b(?:translate:|transform:|will-change:|border-color \d)/)
 })
 
 test('MCP mouse and keyboard previews use the same stationary anchor during lift', () => {
