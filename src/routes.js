@@ -15,7 +15,7 @@ import { readMarketplace, pluginDetail, invalidateMarketplaceCache, resolveMarke
 import { getOrFetchIcon, readLocalIconCached, invalidateLocalIconCache } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered, toolCallIconGroups,
-  toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
+  toggleConnector, isConnectorActive, isOAuthConnectorAuthenticated, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, importLocalSkills, importLocalMarketplace, saveUploadedZip, saveUploadedStream, MAX_UPLOAD_BYTES } from './local.js'
@@ -560,20 +560,22 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
           if (cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
             state.userMcps.push(userMcpConfig(cfg.serverName, {
               transport: cfg.transport, url: cfg.url, command: cfg.command,
-              args: Array.isArray(cfg.args) ? cfg.args : [], env: cfg.env || {},
-              headers: cfg.headers || {}, oauth: cfg.oauth || 'none',
+              args: Array.isArray(cfg.args) ? cfg.args : [], cwd: cfg.cwd,
+              env: cfg.env || {}, headers: cfg.headers || {}, oauth: cfg.oauth || 'none',
             }))
             changed = true
           }
         }
       }
       if (changed) writeState(state)
+      const toolsState = readMcpToolsState()
       const mcps = state.userMcps
         .filter((x) => x && x.name)
         .map((x) => {
           const entry = getConnectorEntry('user-mcp', x.name)
-          const remote = remoteConfigFromEntry(entry?.config) || readMcpToolsState()[`user-mcp::${x.name}`]?.savedOAuthRemoteConfig
+          const remote = remoteConfigFromEntry(entry?.config) || toolsState[`user-mcp::${x.name}`]?.savedOAuthRemoteConfig
           const client = remote?.oauth === 'custom' ? readSavedOAuthClient('user-mcp', x.name, remote.url, remote.oauth) : null
+          const oauthAuthenticated = isOAuthConnectorAuthenticated('user-mcp', x.name, remote, toolsState)
           // The live registration says what is *running*; the saved definition
           // says what the editor should show. The client id comes from the
           // credential record, since the definition never stores the secret.
@@ -589,6 +591,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
               oauthCallbackPort: x.oauthCallbackPort ?? remote.oauthCallbackPort ?? null,
               oauthScope: x.oauthScope ?? remote.oauthScope ?? '',
             } : entry?.config?.headers ? { headers: entry.config.headers } : {}),
+            oauthAuthenticated,
             enabled: enabledIds.has(getConnectorId('user-mcp', x.name)),
           }
         })

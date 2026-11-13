@@ -87,6 +87,16 @@ export function installedDir(name) {
   return join(marketRoot(), 'installed', name)
 }
 
+/** Persistent per-plugin data directory (${PLUGIN_DATA} / ${CLAUDE_PLUGIN_DATA}). */
+export function pluginDataDir(name) {
+  return join(marketRoot(), 'plugin-data', name)
+}
+
+/** Compiled normalized JSON hook file used when hooks need compilation/expansion. */
+export function compiledHooksPath(name) {
+  return join(marketRoot(), 'compiled-hooks', `${name}.json`)
+}
+
 /** Original copies of skills imported directly into the Skills tab. */
 export function uploadedSkillsDir() {
   return join(marketRoot(), 'uploaded')

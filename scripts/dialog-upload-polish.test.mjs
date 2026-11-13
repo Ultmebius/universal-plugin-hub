@@ -34,17 +34,28 @@ function mountUploadDialog({
   const apiCalls = []
   const xhrRequests = []
   const keyListeners = { capture: [], bubble: [] }
+  const windowListeners = new Map()
   const mockWindow = {
     addEventListener(type, fn, capture) {
-      if (type !== 'keydown') return
+      if (type !== 'keydown') {
+        if (!windowListeners.has(type)) windowListeners.set(type, new Set())
+        windowListeners.get(type).add(fn)
+        return
+      }
       const bucket = capture ? keyListeners.capture : keyListeners.bubble
       bucket.push(fn)
     },
     removeEventListener(type, fn, capture) {
-      if (type !== 'keydown') return
+      if (type !== 'keydown') {
+        windowListeners.get(type)?.delete(fn)
+        return
+      }
       const bucket = capture ? keyListeners.capture : keyListeners.bubble
       const idx = bucket.indexOf(fn)
       if (idx >= 0) bucket.splice(idx, 1)
+    },
+    dispatchWindowEvent(type) {
+      for (const fn of [...(windowListeners.get(type) || [])]) fn({ type })
     },
     dispatchEscape() {
       let stopped = false
@@ -561,4 +572,204 @@ test('upload dialog, progress bar, and 500MB bottom toast render cleanly in a re
   assert.equal(m.toastAboveDialog, true, 'bottom toast must layer above modal dialog overlay')
   assert.ok(m.toastBottomGap >= 20 && m.toastBottomGap <= 34, `unexpected toast bottom gap: ${m.toastBottomGap}`)
   assert.ok(m.toastCenterError < 1, `toast off-center by ${m.toastCenterError}px`)
+})
+
+test('drag overlay CSS fills edge-to-edge without white outer rim or restarting keyframe animations', () => {
+  const css = extractCss()
+  const overlay = css.match(/(?:^|\n)\.cpm-source-drag-overlay\s*\{([^}]+)\}/)
+  assert.ok(overlay, '.cpm-source-drag-overlay rule must exist')
+  assert.match(overlay[1], /inset:\s*0/)
+  assert.match(overlay[1], /box-sizing:\s*border-box/)
+  assert.match(overlay[1], /border-radius:\s*calc\(var\(--dsw-radius-lg,\s*20px\)\s*-\s*1px\)/)
+  assert.match(overlay[1], /transition:/)
+  assert.doesNotMatch(overlay[1], /animation:|cpm-dialog-in|backdrop-filter:/, 'overlay backdrop must not restart keyframe transform or stack nested backdrop-filter')
+  assert.doesNotMatch(css, /\.cpm-source-drag-overlay::before\s*\{[^}]*inset:\s*10px/, 'must not inset dashed frame by 10px leaving a white border')
+
+  // Children during active drag must not steal dragenter/dragleave hit tests
+  assert.match(css, /\.cpm-upload-dialog\s+\.cpm-dropzone\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/)
+  assert.match(css, /\.cpm-upload-dialog\.is-dragging\s*>\s*:not\(\.cpm-source-drag-overlay\)\s*\{[^}]*pointer-events:\s*none/)
+  assert.match(css, /\.cpm-source-drag-overlay\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/)
+
+  // Content transitions compositor-only opacity/transform cleanly and respects reduced motion + forced colors
+  const content = css.match(/\.cpm-source-drag-content\s*\{([^}]+)\}/)
+  assert.ok(content, '.cpm-source-drag-content rule must exist')
+  assert.match(content[1], /transform:\s*scale\(/)
+  assert.match(content[1], /padding-bottom:\s*calc\(8px \+ 1\.0875rem\)/)
+  assert.doesNotMatch(css, /\.cpm-source-drag-sub\b/)
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.cpm-source-drag-content[\s\S]*transform:\s*none/)
+  assert.match(css, /@media \(forced-colors: active\)[\s\S]*\.cpm-source-drag-overlay\s*\{/)
+})
+
+test('AddSourceDialog drag overlay resists spurious dragleave flicker and stays mounted for reversible transitions', async () => {
+  const ctx = mountUploadDialog()
+  try {
+    const dialogBox = () => ctx.view.root.find((n) => n.props?.role === 'dialog')
+    const dragOverlay = () => ctx.view.root.find((n) => String(n.props?.className || '').includes('cpm-source-drag-overlay'))
+
+    // Only one .cpm-dropzone-title exists (overlay uses dedicated .cpm-source-drag-title)
+    assert.equal(ctx.view.root.findAll((n) => n.props?.className === 'cpm-dropzone-title').length, 1)
+
+    // Overlay is pre-mounted (hidden) in upload phase so CSS enter/exit is continuously interruptible
+    let ov = dragOverlay()
+    assert.doesNotMatch(ov.props.className, /\bis-visible\b/)
+    assert.equal(ov.props['aria-hidden'], 'true')
+
+    const boxNode = { contains: (target) => target === childNode, getBoundingClientRect: () => ({ left: 100, top: 100, right: 560, bottom: 460, width: 460, height: 360 }) }
+    const childNode = {}
+    const outsideNode = {}
+    const dt = { dropEffect: '' }
+
+    // 1. dragEnter + dragOver activate overlay cleanly
+    act(() => {
+      dialogBox().props.onDragEnter?.({ preventDefault() {}, currentTarget: boxNode, dataTransfer: dt })
+      dialogBox().props.onDragOver({ preventDefault() {}, currentTarget: boxNode, dataTransfer: dt })
+    })
+    assert.equal(dt.dropEffect, 'copy')
+    assert.match(dialogBox().props.className, /\bis-dragging\b/)
+    ov = dragOverlay()
+    assert.match(ov.props.className, /\bis-visible\b/)
+    assert.equal(ov.props['aria-hidden'], undefined)
+
+    // 2. Child boundary dragleave stays active
+    act(() => {
+      dialogBox().props.onDragLeave({ currentTarget: boxNode, relatedTarget: childNode, clientX: 250, clientY: 220 })
+    })
+    assert.match(dragOverlay().props.className, /\bis-visible\b/)
+
+    // 3. Spurious Windows/Chromium dragleave(relatedTarget=null) while cursor is strictly inside rect must NOT flicker off
+    act(() => {
+      dialogBox().props.onDragLeave({ currentTarget: boxNode, relatedTarget: null, clientX: 300, clientY: 260 })
+    })
+    assert.match(dragOverlay().props.className, /\bis-visible\b/, 'spurious null-relatedTarget dragleave inside box must not flicker')
+
+    // 4. Synthetic dragleave without geometry or outside rect clears cleanly without unmounting overlay node
+    act(() => {
+      dialogBox().props.onDragLeave({ currentTarget: boxNode, relatedTarget: null, clientX: 50, clientY: 50 })
+    })
+    assert.doesNotMatch(dragOverlay().props.className, /\bis-visible\b/)
+    assert.doesNotMatch(dialogBox().props.className, /\bis-dragging\b/)
+    assert.equal(dragOverlay().props['aria-hidden'], 'true')
+
+    // 5. Exiting onto external element or window dragend clears cleanly too
+    act(() => {
+      dialogBox().props.onDragOver({ preventDefault() {}, currentTarget: boxNode, dataTransfer: dt })
+    })
+    assert.match(dragOverlay().props.className, /\bis-visible\b/)
+    act(() => {
+      dialogBox().props.onDragLeave({ currentTarget: boxNode, relatedTarget: outsideNode, clientX: 250, clientY: 220 })
+    })
+    assert.doesNotMatch(dragOverlay().props.className, /\bis-visible\b/)
+
+    act(() => {
+      dialogBox().props.onDragOver({ preventDefault() {}, currentTarget: boxNode, dataTransfer: dt })
+    })
+    assert.match(dragOverlay().props.className, /\bis-visible\b/)
+    act(() => {
+      ctx.mockWindow.dispatchWindowEvent('dragend')
+    })
+    assert.doesNotMatch(dragOverlay().props.className, /\bis-visible\b/, 'window dragend fallback must clear sticky drag state')
+  } finally {
+    await ctx.unmount()
+  }
+})
+
+test('drag overlay covers 100% of upload dialog client area with zero white border in light and dark mode', { skip: !existsSync(browser) }, (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'hub-drag-overlay-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }))
+  const css = extractCss()
+  const file = join(dir, 'drag-overlay.html')
+  writeFileSync(file, `<!doctype html><meta charset="utf-8"><style>${css}
+    body { margin: 0; font-family: sans-serif; }
+    .cpm-dialog, .cpm-dialog-box { animation: none; }
+  </style>
+  <div class="cpm-root" id="light-root" style="width:1280px;height:800px">
+    <div class="cpm-dialog">
+      <div role="dialog" class="cpm-dialog-box cpm-source-dialog-box cpm-upload-dialog is-dragging" style="position:relative">
+        <div class="cpm-upload-header">
+          <h2 class="cpm-dialog-title">上传插件 / Skills</h2>
+          <p class="cpm-upload-subtitle">自动识别本地插件与独立 Skills</p>
+        </div>
+        <button class="cpm-dropzone" type="button">
+          <span class="cpm-dropzone-title">拖入插件 / Skills，或点击上传</span>
+        </button>
+        <div class="cpm-dialog-actions"><button class="cpm-btn cpm-btn-secondary" type="button">取消</button></div>
+        <div class="cpm-source-drag-overlay is-visible">
+          <div class="cpm-source-drag-content">
+            <span class="cpm-dropzone-icon" aria-hidden="true"></span>
+            <div class="cpm-source-drag-title">释放以解析插件 / Skills</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cpm-root cpm-dark" id="dark-root" style="width:1280px;height:800px">
+    <div class="cpm-dialog">
+      <div role="dialog" class="cpm-dialog-box cpm-source-dialog-box cpm-upload-dialog is-dragging" style="position:relative">
+        <div class="cpm-upload-header">
+          <h2 class="cpm-dialog-title">上传插件 / Skills</h2>
+          <p class="cpm-upload-subtitle">自动识别本地插件与独立 Skills</p>
+        </div>
+        <button class="cpm-dropzone" type="button">
+          <span class="cpm-dropzone-title">拖入插件 / Skills，或点击上传</span>
+        </button>
+        <div class="cpm-dialog-actions"><button class="cpm-btn cpm-btn-secondary" type="button">取消</button></div>
+        <div class="cpm-source-drag-overlay is-visible">
+          <div class="cpm-source-drag-content">
+            <span class="cpm-dropzone-icon" aria-hidden="true"></span>
+            <div class="cpm-source-drag-title">释放以解析插件 / Skills</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <pre id="metrics"></pre>
+  <script>
+    const measure = (id) => {
+      const box = document.querySelector('#' + id + ' .cpm-upload-dialog');
+      const ov = box.querySelector('.cpm-source-drag-overlay');
+      const content = ov.querySelector('.cpm-source-drag-content');
+      const br = box.getBoundingClientRect();
+      const or = ov.getBoundingClientRect();
+      const cr = content.getBoundingClientRect();
+      const bs = getComputedStyle(box);
+      const os = getComputedStyle(ov);
+      const bl = parseFloat(bs.borderLeftWidth) || 0;
+      const bt = parseFloat(bs.borderTopWidth) || 0;
+      const brw = parseFloat(bs.borderRightWidth) || 0;
+      const bb = parseFloat(bs.borderBottomWidth) || 0;
+      return {
+        edgeDiffLeft: Math.abs(or.left - (br.left + bl)),
+        edgeDiffTop: Math.abs(or.top - (br.top + bt)),
+        edgeDiffRight: Math.abs((br.right - brw) - or.right),
+        edgeDiffBottom: Math.abs((br.bottom - bb) - or.bottom),
+        overflowX: box.scrollWidth > box.clientWidth,
+        overflowY: box.scrollHeight > box.clientHeight,
+        boxBorderColor: bs.borderTopColor,
+        overlayBg: os.backgroundImage !== 'none' ? os.backgroundImage : os.backgroundColor,
+        overlayPointerEvents: os.pointerEvents,
+        contentCenterDelta: Math.abs((cr.top + cr.height / 2) - (or.top + or.height / 2)),
+      };
+    };
+    document.querySelector('#metrics').textContent = JSON.stringify({
+      light: measure('light-root'),
+      dark: measure('dark-root'),
+    });
+  </script>`)
+  const html = execFileSync(browser, [
+    '--headless', '--disable-gpu', '--no-first-run', '--disable-extensions',
+    `--user-data-dir=${join(dir, 'profile')}`, '--window-size=1280,800', '--dump-dom', pathToFileURL(file).href,
+  ], { encoding: 'utf8', timeout: 25000, stdio: ['ignore', 'pipe', 'pipe'] })
+  const m = JSON.parse(html.match(/<pre id="metrics">([^<]+)<\/pre>/)[1])
+  for (const theme of ['light', 'dark']) {
+    const tMetrics = m[theme]
+    assert.ok(tMetrics.edgeDiffLeft <= 0.5, `${theme} left edge gap: ${tMetrics.edgeDiffLeft}`)
+    assert.ok(tMetrics.edgeDiffTop <= 0.5, `${theme} top edge gap: ${tMetrics.edgeDiffTop}`)
+    assert.ok(tMetrics.edgeDiffRight <= 0.5, `${theme} right edge gap: ${tMetrics.edgeDiffRight}`)
+    assert.ok(tMetrics.edgeDiffBottom <= 0.5, `${theme} bottom edge gap: ${tMetrics.edgeDiffBottom}`)
+    assert.equal(tMetrics.overflowX, false, `${theme} horizontal overflow must not trigger scrollbar`)
+    assert.equal(tMetrics.overflowY, false, `${theme} vertical overflow must not trigger scrollbar`)
+    assert.equal(tMetrics.overlayPointerEvents, 'none')
+    assert.ok(tMetrics.contentCenterDelta <= 2, `${theme} overlay content should stay vertically centered`)
+    assert.notEqual(tMetrics.boxBorderColor, 'rgb(255, 255, 255)')
+  }
 })

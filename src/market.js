@@ -42,9 +42,31 @@ export function pluginPath(root, path) {
   return dir
 }
 
+const SHORTHAND_REPO_RE = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?:\.git)?$/i
+
+/** Normalize remote plugin source objects (Claude `github` / `git-subdir` / `url`). */
+export function normalizeRemotePluginSource(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return source
+  if (source.source === 'github') {
+    const repo = typeof source.repo === 'string' ? source.repo.trim().replace(/^\/+|\.git$/gi, '') : ''
+    const url = typeof source.url === 'string' && source.url.trim()
+      ? source.url.trim()
+      : (SHORTHAND_REPO_RE.test(repo) ? `https://github.com/${repo}.git` : '')
+    return { ...source, ...(url ? { url } : {}) }
+  }
+  if (source.source === 'git-subdir' && typeof source.url === 'string') {
+    const rawUrl = source.url.trim()
+    if (SHORTHAND_REPO_RE.test(rawUrl)) {
+      return { ...source, url: `https://github.com/${rawUrl.replace(/\.git$/i, '')}.git` }
+    }
+  }
+  return source
+}
+
 /** A marketplace can point back to its own checkout (including a subdirectory). */
 export function sourceRepositoryDir(cache, source) {
-  if (!source || !['url', 'git-subdir'].includes(source.source) || typeof source.url !== 'string') return null
+  const resolved = normalizeRemotePluginSource(source)
+  if (!resolved || !['url', 'git-subdir', 'github'].includes(resolved.source) || typeof resolved.url !== 'string') return null
   const repoKey = (value) => {
     try {
       const url = new URL(value)
@@ -54,15 +76,15 @@ export function sourceRepositoryDir(cache, source) {
   try {
     const config = readFileSync(join(cache, '.git', 'config'), 'utf8')
     const origin = config.match(/\[remote "origin"\]([^\[]*)/)?.[1].match(/^\s*url\s*=\s*(.+)$/m)?.[1].trim()
-    if (!origin || !repoKey(source.url) || repoKey(origin) !== repoKey(source.url)) return null
+    if (!origin || !repoKey(resolved.url) || repoKey(origin) !== repoKey(resolved.url)) return null
     const head = readFileSync(join(cache, '.git', 'HEAD'), 'utf8').trim()
     // Reuse only the requested revision; another branch is a different plugin snapshot.
-    if (source.ref && head !== `ref: refs/heads/${source.ref}` && head !== source.ref) return null
-    if (source.sha) {
+    if (resolved.ref && head !== `ref: refs/heads/${resolved.ref}` && head !== resolved.ref) return null
+    if (resolved.sha) {
       const commit = head.startsWith('ref: ') ? readFileSync(join(cache, '.git', head.slice(5)), 'utf8').trim() : head
-      if (commit !== source.sha) return null
+      if (commit !== resolved.sha) return null
     }
-    const dir = source.path ? pluginPath(cache, source.path) : cache
+    const dir = resolved.path ? pluginPath(cache, resolved.path) : cache
     return existsSync(dir) ? dir : null
   } catch { return null }
 }
@@ -177,33 +199,42 @@ export async function materializePlugin(sourceId, pluginName, source, { refresh 
     return { dir }
   }
 
-  if (source && typeof source === 'object') {
-    if (source.source === 'url' || source.source === 'git-subdir') {
-      if (typeof source.url !== 'string' || !/^https?:\/\//.test(source.url)) {
+  const normalized = normalizeRemotePluginSource(source)
+  if (normalized && typeof normalized === 'object') {
+    if (['url', 'git-subdir', 'github'].includes(normalized.source)) {
+      if (typeof normalized.url !== 'string' || !/^https?:\/\//.test(normalized.url)) {
         throw new Error(`plugin ${pluginName}: unsupported remote url`)
       }
-      const remoteKey = slugFromUrl(source.url)
+      const remoteKey = slugFromUrl(normalized.url)
       const checkout = join(sourceCacheDir('remote'), remoteKey)
       await withGitLock(`remote:${remoteKey}`, async () => {
         if (!existsSync(join(checkout, '.git'))) {
           // --depth 1 keeps clones small; `ref` (branch/tag) is honored when
-          // the marketplace pins one. Exact sha checkout needs a full clone;
-          // first version installs the pinned ref's head.
+          // the marketplace pins one.
           const args = ['clone', '--depth', '1']
-          if (source.ref) args.push('--branch', String(source.ref))
-          args.push(source.url, checkout)
+          if (normalized.ref) args.push('--branch', String(normalized.ref))
+          args.push(normalized.url, checkout)
           await runGit(args)
         } else if (refresh) {
           // The cached checkout is otherwise reused forever, so updates would
           // reinstall the first clone's commit. Re-fetch the tracked ref.
           const args = ['fetch', '--depth', '1', 'origin']
-          if (source.ref) args.push(String(source.ref))
+          if (normalized.ref) args.push(String(normalized.ref))
           await runGit(args, checkout)
           await runGit(['reset', '--hard', 'FETCH_HEAD'], checkout)
         }
+        if (normalized.sha && /^[0-9a-f]{7,64}$/i.test(String(normalized.sha))) {
+          try {
+            const headSha = (await runGit(['rev-parse', 'HEAD'], checkout)).trim()
+            if (headSha !== normalized.sha) {
+              await runGit(['fetch', '--depth', '1', 'origin', String(normalized.sha)], checkout)
+              await runGit(['checkout', '--detach', String(normalized.sha)], checkout)
+            }
+          } catch {}
+        }
       })
-      const dir = source.path ? pluginPath(checkout, source.path) : checkout
-      if (!existsSync(dir)) throw new Error(`plugin ${pluginName}: path ${source.path} not found in remote repo`)
+      const dir = normalized.path ? pluginPath(checkout, normalized.path) : checkout
+      if (!existsSync(dir)) throw new Error(`plugin ${pluginName}: path ${normalized.path} not found in remote repo`)
       return { dir }
     }
   }

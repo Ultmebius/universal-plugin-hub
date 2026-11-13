@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, readState, writeState, safeRmDir, slugify } from './store.js'
 import { safeSegment, pluginPath } from './market.js'
-import { parsePluginRowFromDir, parseMarketplaceFromDisk, listSkills, listAgents, readPluginManifest, invalidateMarketplaceCache, invalidateParserCaches, formatDisplayName, normalizeVersion } from './parser.js'
+import { parsePluginRowFromDir, parseMarketplaceFromDisk, listSkills, listAgents, readPluginManifest, invalidateMarketplaceCache, invalidateParserCaches, formatDisplayName, normalizeVersion, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { installUploadedSkills, takenSkillNames } from './skill-uploads.js'
 import { invalidateLocalIconCache } from './icons.js'
 import { refreshInstalledPluginsFromSource } from './install.js'
@@ -508,7 +508,7 @@ export async function importLocalSkills(rawPath, { overwrite = false, overwriteN
  * plugins are copied under the source cache and listed by the normal market
  * reader, so install/update/uninstall behave exactly like a Git source.
  */
-const PLUGIN_MANIFEST_RELATIVE = ['.codex-plugin/plugin.json', '.claude-plugin/plugin.json', 'plugin.json']
+const PLUGIN_MANIFEST_RELATIVE = ['.claude-plugin/plugin.json', 'plugin.json', '.codex-plugin/plugin.json']
 
 function syncPluginManifestMetadata(destDir, row, { stripRootMarketplace = false } = {}) {
   if (stripRootMarketplace) {
@@ -517,6 +517,7 @@ function syncPluginManifestMetadata(destDir, row, { stripRootMarketplace = false
       if (existsSync(mPath)) rmSync(mPath, { force: true })
     }
   }
+  const componentKeys = ['strict', ...MARKETPLACE_COMPONENT_KEYS]
   const fields = {
     name: row.name,
     ...(row.displayName ? { displayName: row.displayName } : {}),
@@ -525,6 +526,9 @@ function syncPluginManifestMetadata(destDir, row, { stripRootMarketplace = false
     ...(row.author ? { author: row.author } : {}),
     ...(row.homepage ? { homepage: row.homepage } : {}),
     ...(row.category ? { category: row.category } : {}),
+  }
+  for (const k of componentKeys) {
+    if (row[k] !== undefined) fields[k] = row[k]
   }
   for (const rel of PLUGIN_MANIFEST_RELATIVE) {
     const file = join(destDir, rel)
@@ -542,6 +546,12 @@ function syncPluginManifestMetadata(destDir, row, { stripRootMarketplace = false
       if (!json.displayName && !json.interface?.displayName && row.displayName) { json.displayName = row.displayName; changed = true }
       if (!json.author && !json.interface?.developerName && row.author) { json.author = row.author; changed = true }
       if (!json.homepage && !json.interface?.websiteURL && row.homepage) { json.homepage = row.homepage; changed = true }
+      for (const k of componentKeys) {
+        if (row[k] !== undefined && (row.strict === false || json[k] === undefined)) {
+          json[k] = row[k]
+          changed = true
+        }
+      }
       if (changed) writeFileSync(file, JSON.stringify(json, null, 2), 'utf8')
       return
     } catch {}

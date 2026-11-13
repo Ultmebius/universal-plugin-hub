@@ -9,10 +9,10 @@
  * 5. Single-plugin Standalone Repositories (root SKILL.md, plugin.json, skills/, commands/, agents/, .cursorrules)
  */
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from 'node:fs'
-import { join, basename, dirname, isAbsolute } from 'node:path'
+import { join, basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
-import { sourceCacheDir, installedDir } from './store.js'
-import { safeSegment, pluginPath, sourceRepositoryDir } from './market.js'
+import { sourceCacheDir, installedDir, pluginDataDir } from './store.js'
+import { safeSegment, pluginPath, sourceRepositoryDir, normalizeRemotePluginSource } from './market.js'
 import { parseAgentDefinition } from './agents-map.js'
 import { buildPluginIcons, touchLru, setLru } from './icons.js'
 
@@ -43,6 +43,8 @@ const ROOT_PLUGIN_MARKER_PARTS = [
   ['mcp.json'],
   ['.mcp.json'],
   ['server.json'],
+  ['.lsp.json'],
+  ['lsp.json'],
   ['.claude-plugin', 'plugin.json'],
   ['.codex-plugin', 'plugin.json'],
   ['plugin.json'],
@@ -50,6 +52,135 @@ const ROOT_PLUGIN_MARKER_PARTS = [
   ['.cursorrules'],
   ['package.json'],
 ]
+
+export const PLUGIN_RUNTIME_ENV_KEYS = ['PLUGIN_ROOT', 'PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA']
+const BUILTIN_PLUGIN_ROOT_RE = /\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}|\$(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\b/g
+const BUILTIN_PLUGIN_DATA_RE = /\$\{(?:CLAUDE_PLUGIN_DATA|PLUGIN_DATA)\}|\$(?:CLAUDE_PLUGIN_DATA|PLUGIN_DATA)\b/g
+
+export function hasUnresolvedVarPlaceholder(value) {
+  if (typeof value !== 'string') return false
+  const stripped = value.replace(BUILTIN_PLUGIN_ROOT_RE, '').replace(BUILTIN_PLUGIN_DATA_RE, '')
+  return /\$\{[^}]+\}/.test(stripped)
+}
+
+export function isDotRelativePath(value) {
+  return typeof value === 'string' && /^\.\.?(?:[\\/]|$)/.test(value.trim())
+}
+
+export function pluginDataDirForRoot(pluginRoot, explicitDataDir) {
+  if (typeof explicitDataDir === 'string' && explicitDataDir) return explicitDataDir
+  if (typeof pluginRoot === 'string' && pluginRoot) {
+    if (basename(dirname(pluginRoot)) === 'installed') return pluginDataDir(basename(pluginRoot))
+    return join(pluginRoot, '.plugin-data')
+  }
+  return ''
+}
+
+export function expandPluginVars(val, pluginRoot, explicitDataDir) {
+  if (typeof val === 'string') {
+    const normalizedRoot = String(pluginRoot || '').replace(/\\/g, '/')
+    const resolvedData = pluginDataDirForRoot(pluginRoot, explicitDataDir)
+    const normalizedData = String(resolvedData || '').replace(/\\/g, '/')
+    let out = val.replace(BUILTIN_PLUGIN_ROOT_RE, () => normalizedRoot)
+    if (normalizedData) out = out.replace(BUILTIN_PLUGIN_DATA_RE, () => normalizedData)
+    return out
+  }
+  if (Array.isArray(val)) return val.map((item) => expandPluginVars(item, pluginRoot, explicitDataDir))
+  if (val && typeof val === 'object') {
+    const res = {}
+    for (const [k, v] of Object.entries(val)) res[k] = expandPluginVars(v, pluginRoot, explicitDataDir)
+    return res
+  }
+  return val
+}
+
+function resolvePluginScopedPath(rawVal, pluginRoot, explicitDataDir) {
+  const rawTrimmed = String(rawVal).trim()
+  const expanded = expandPluginVars(rawVal, pluginRoot, explicitDataDir).trim()
+  if (!expanded) return null
+  if (pluginRoot && isDotRelativePath(expanded)) {
+    try { return pluginPath(pluginRoot, expanded).replace(/\\/g, '/') } catch { return null }
+  }
+  if (pluginRoot && /^\$(?:\{(?:CLAUDE_)?PLUGIN_ROOT\}|(?:CLAUDE_)?PLUGIN_ROOT\b)/.test(rawTrimmed)) {
+    const rel = relative(resolve(pluginRoot), resolve(expanded))
+    if (rel === '..' || rel.startsWith('..') || isAbsolute(rel)) return null
+    try { return pluginPath(pluginRoot, rel || '.').replace(/\\/g, '/') } catch { return null }
+  }
+  return expanded
+}
+
+export function resolvePluginCommand(command, pluginRoot, explicitDataDir) {
+  if (typeof command !== 'string') return command ?? null
+  return resolvePluginScopedPath(command, pluginRoot, explicitDataDir)
+}
+
+export function resolvePluginCwd(rawCwd, pluginRoot, explicitDataDir, { command, args } = {}) {
+  if (rawCwd === '') return ''
+  if (typeof rawCwd === 'string' && rawCwd.trim()) {
+    const scoped = resolvePluginScopedPath(rawCwd, pluginRoot, explicitDataDir)
+    return scoped ? scoped.replace(/\\/g, '/') : null
+  }
+  if (pluginRoot && (isDotRelativePath(command) || (Array.isArray(args) && args.some(isDotRelativePath)))) {
+    return pluginRoot.replace(/\\/g, '/')
+  }
+  return ''
+}
+
+export function resolveConnectorDisplay(cfg, pluginRoot, explicitDataDir) {
+  if (!cfg || typeof cfg !== 'object') {
+    return { displayUrl: null, displayCommand: null, displayArgs: [], displayCwd: null }
+  }
+  const expanded = expandPluginVars({
+    url: cfg.url || null,
+    args: Array.isArray(cfg.args) ? cfg.args : [],
+  }, pluginRoot, explicitDataDir)
+  const displayCommand = cfg.command ? resolvePluginCommand(cfg.command, pluginRoot, explicitDataDir) : null
+  const cwdVal = resolvePluginCwd(cfg.cwd ?? null, pluginRoot, explicitDataDir, {
+    command: cfg.command,
+    args: Array.isArray(cfg.args) ? cfg.args : [],
+  })
+  return {
+    displayUrl: expanded.url,
+    displayCommand,
+    displayArgs: expanded.args,
+    displayCwd: cwdVal || null,
+  }
+}
+
+export function resolvePluginSpecPath(dir, specPath) {
+  if (typeof specPath !== 'string') return null
+  const trimmed = specPath.trim()
+  if (!trimmed) return null
+  try {
+    return pluginPath(dir, trimmed)
+  } catch {
+    return null
+  }
+}
+
+function resolveMarketplacePluginSource(rawSource, pluginRootMeta) {
+  if (rawSource?.source === 'local') {
+    const localPath = typeof rawSource.path === 'string' ? rawSource.path.trim() : ''
+    if (!localPath.startsWith('./')) return null
+    return localPath
+  }
+  if (rawSource && typeof rawSource === 'object') {
+    return normalizeRemotePluginSource(rawSource)
+  }
+  if (typeof rawSource === 'string') {
+    const trimmed = rawSource.trim()
+    if (!trimmed || trimmed === '.' || trimmed === './') return './'
+    if (trimmed.startsWith('./')) return trimmed
+    if (/^https?:\/\//i.test(trimmed) || /^git@/i.test(trimmed)) return trimmed
+    if (trimmed.startsWith('/') || trimmed.includes('..') || /^[a-z]:/i.test(trimmed)) return null
+    const rawBase = typeof pluginRootMeta === 'string' ? pluginRootMeta.trim() : ''
+    if (rawBase && (rawBase.includes('..') || rawBase.startsWith('/') || /^[a-z]:/i.test(rawBase))) return null
+    const baseRoot = rawBase.replace(/^\.\//, '').replace(/^\/+|\/+$/g, '')
+    const combined = baseRoot ? `${baseRoot}/${trimmed.replace(/^\/+/, '')}` : trimmed
+    return `./${combined}`
+  }
+  return './'
+}
 
 export function invalidateParserCaches() {
   DIR_PARSER_CACHE.clear()
@@ -145,7 +276,9 @@ function readPackageVersion(dir) {
   }
 }
 
-function normalizeRow(row, sourceId, dir, { skipIcons = false } = {}) {
+export const MARKETPLACE_COMPONENT_KEYS = ['mcpServers', 'lspServers', 'hooks', 'skills', 'commands', 'agents', 'prompts']
+
+function normalizeRow(row, sourceId, dir, { skipIcons = false, pluginRootMeta = undefined } = {}) {
   if (!row) return null
   const name = typeof row.name === 'string' ? row.name : (typeof row.identifier === 'string' ? row.identifier : '')
   if (!name || !VALID_PLUGIN_NAME.test(name)) return null
@@ -163,8 +296,8 @@ function normalizeRow(row, sourceId, dir, { skipIcons = false } = {}) {
   const shortDescription = readPluginShortDescription(dir)
     || (typeof row.interface?.shortDescription === 'string' ? row.interface.shortDescription.trim() : '')
 
-  const source = row.source?.source === 'local' ? row.source.path : (row.source || './')
-  if (row.source?.source === 'local' && (typeof source !== 'string' || !source.startsWith('./'))) return null
+  const source = resolveMarketplacePluginSource(row.source, pluginRootMeta)
+  if (source === null) return null
 
   return {
     id: `${sourceId}/${cleanName}`,
@@ -182,7 +315,8 @@ function normalizeRow(row, sourceId, dir, { skipIcons = false } = {}) {
     homepage: typeof row.homepage === 'string' ? row.homepage : (meta.homepage || undefined),
     source,
     local: typeof source === 'string' && (source === './' || source.startsWith('./')),
-    lspServers: row.lspServers || undefined,
+    ...(row.strict !== undefined ? { strict: row.strict } : {}),
+    ...Object.fromEntries(MARKETPLACE_COMPONENT_KEYS.filter((k) => row[k] !== undefined).map((k) => [k, row[k]])),
     ...(skipIcons ? {} : { icons: buildPluginIcons(row, { sourceId, name: cleanName, dir, source }) }),
   }
 }
@@ -240,18 +374,31 @@ function resolveMcpDict(content) {
   return null
 }
 
-function resolveCaseAEntryDir(sourceId, cache, r) {
-  const source = r.source?.source === 'local' ? r.source.path : r.source
-  let dir = typeof source === 'string' && source.startsWith('./') ? pluginPath(cache, source) : null
+function resolveCaseAEntryDir(sourceId, cache, r, pluginRootMeta) {
+  const source = resolveMarketplacePluginSource(r.source, pluginRootMeta)
+  let dir = null
+  if (typeof source === 'string' && source.startsWith('./')) {
+    try { dir = pluginPath(cache, source) } catch { return { source: null, dir: null } }
+  }
   if (source && typeof source === 'object' && r.name) {
     dir = sourceRepositoryDir(cache, source) || pluginContentDir(sourceId, r.name, source, false)
   }
   return { source, dir }
 }
 
+function isPortableRootManifest(dir) {
+  const rootPath = join(dir, 'plugin.json')
+  if (!existsSync(rootPath)) return false
+  try {
+    const raw = JSON.parse(readFileSync(rootPath, 'utf8'))
+    return /^https:\/\/agent-plugins\.org\//.test(raw?.$schema || '') || Boolean(raw?.extensions?.['com.openai'])
+  } catch { return false }
+}
+
 function hasExplicitRootPlugin(cache) {
   return existsSync(join(cache, '.codex-plugin', 'plugin.json'))
     || existsSync(join(cache, '.claude-plugin', 'plugin.json'))
+    || isPortableRootManifest(cache)
     || existsSync(join(cache, 'SKILL.md'))
     || existsSync(join(cache, 'skill.md'))
 }
@@ -261,8 +408,9 @@ function resolveDirPluginInfo(entryDir, fallbackName, { includeMetadata = true }
   const hasSkill = rootSkill || existsSync(join(entryDir, 'skills')) || existsSync(join(entryDir, 'commands'))
   const hasManifest = existsSync(join(entryDir, '.codex-plugin', 'plugin.json')) || existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
   const hasMcp = existsSync(join(entryDir, 'mcp.json')) || existsSync(join(entryDir, '.mcp.json')) || existsSync(join(entryDir, 'server.json'))
+  const hasLsp = existsSync(join(entryDir, '.lsp.json')) || existsSync(join(entryDir, 'lsp.json'))
   const hasAgents = existsSync(join(entryDir, 'agents'))
-  if (!hasSkill && !hasManifest && !hasMcp && !hasAgents) return null
+  if (!hasSkill && !hasManifest && !hasMcp && !hasLsp && !hasAgents) return null
 
   let displayName = includeMetadata ? formatDisplayName(fallbackName) : ''
   let description = ''
@@ -345,10 +493,11 @@ function indexManifestPluginDirs(sourceId, cache, content) {
   if (!content || typeof content !== 'object') return null
   if (Array.isArray(content.plugins)) {
     const entries = new Map()
+    const pluginRootMeta = content.metadata?.pluginRoot
     for (const r of content.plugins) {
       if (!r || typeof r !== 'object') continue
-      if (r.source?.source === 'local' && (typeof r.source.path !== 'string' || !r.source.path.startsWith('./'))) continue
-      const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
+      const { source, dir } = resolveCaseAEntryDir(sourceId, cache, r, pluginRootMeta)
+      if (source === null) continue
       let rawName = ''
       if (typeof r.name === 'string') {
         rawName = r.name
@@ -531,9 +680,11 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
         // Case A: Claude / standard manifest with plugins array
         if (Array.isArray(content.plugins)) {
           let skipped = false
+          const pluginRootMeta = content.metadata?.pluginRoot
           const marketVersion = normalizeVersion(content.metadata?.version) || normalizeVersion(content.version)
           const rows = content.plugins.map((r) => {
-            const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
+            const { source, dir } = resolveCaseAEntryDir(sourceId, cache, r, pluginRootMeta)
+            if (source === null) return null
             if (names && typeof r.name === 'string' && !names.has(r.name.toLowerCase())) {
               skipped = true
               return null
@@ -549,7 +700,7 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
               version: resolvedVersion,
               displayName: r.displayName || r.interface?.displayName || manifest?.displayName,
               description: r.description || r.interface?.shortDescription || manifest?.description,
-            }, sourceId, dir, options)
+            }, sourceId, dir, { ...options, pluginRootMeta })
           }).filter(Boolean)
           if (rows.length > 0) return rows
           // Preserve manifest precedence and discovery fallbacks on a miss.
@@ -558,7 +709,8 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
         // Case B: Direct array of plugin descriptors
         if (Array.isArray(content)) {
           const rows = content.map((r) => {
-            const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
+            const { source, dir } = resolveCaseAEntryDir(sourceId, cache, r)
+            if (source === null) return null
             const manifest = dir ? readPluginManifest(dir, false) : null
             const resolvedVersion =
               normalizeVersion(r?.version)
@@ -671,14 +823,15 @@ export function pluginContentDir(sourceId, pluginName, source, preferInstalled =
   }
 
   // Check if in remote git cache
-  if (source && typeof source === 'object' && (source.source === 'url' || source.source === 'git-subdir')) {
-    if (typeof source.url === 'string') {
-      const ownDir = sourceRepositoryDir(sourceCacheDir(sourceId), source)
+  const remoteSrc = normalizeRemotePluginSource(source)
+  if (remoteSrc && typeof remoteSrc === 'object' && (remoteSrc.source === 'url' || remoteSrc.source === 'git-subdir' || remoteSrc.source === 'github')) {
+    if (typeof remoteSrc.url === 'string' && remoteSrc.url) {
+      const ownDir = sourceRepositoryDir(sourceCacheDir(sourceId), remoteSrc)
       if (ownDir) return ownDir
-      const clean = String(source.url).replace(/^https?:\/\//, '').replace(/\.git$/, '')
+      const clean = String(remoteSrc.url).replace(/^https?:\/\//, '').replace(/\.git$/, '')
       const remoteKey = clean.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'repo'
       const checkout = join(sourceCacheDir('remote'), remoteKey)
-      const dir = source.path ? pluginPath(checkout, source.path) : checkout
+      const dir = remoteSrc.path ? pluginPath(checkout, remoteSrc.path) : checkout
       return existsSync(dir) ? dir : null
     }
   }
@@ -688,7 +841,7 @@ export function pluginContentDir(sourceId, pluginName, source, preferInstalled =
   return existsSync(fallback) ? fallback : null
 }
 
-/** Read plugin metadata with Claude precedence when multiple formats coexist. */
+/** Read plugin metadata with Claude/portable precedence and Codex overlay merge. */
 export function readPluginManifest(dir, includeParent = true) {
   const rootManifest = join(dir, 'plugin.json')
   let portable = false
@@ -748,29 +901,42 @@ export function readPluginManifest(dir, includeParent = true) {
               || normalizeVersion(raw.metadata?.version)
               || normalizeVersion(raw.version),
             author: matched.author || raw.owner?.name || undefined,
+            strict: matched.strict,
+            prompts: matched.prompts,
             skills: matched.skills,
             commands: matched.commands,
             agents: matched.agents,
+            hooks: matched.hooks,
             mcpServers: matched.mcpServers,
             lspServers: matched.lspServers,
           }
         }
         const openai = raw.extensions?.['com.openai']
-        const settings = openai && typeof openai === 'object' ? openai : raw
+        let overlay = openai && typeof openai === 'object' && !Array.isArray(openai) ? openai : null
+        if (!overlay && (p === join(dir, '.claude-plugin', 'plugin.json') || p === rootManifest)) {
+          const codexPath = join(manifestRootDir(p), '.codex-plugin', 'plugin.json')
+          if (existsSync(codexPath)) {
+            try {
+              const codexRaw = JSON.parse(readFileSync(codexPath, 'utf8'))
+              if (codexRaw && typeof codexRaw === 'object') overlay = codexRaw
+            } catch {}
+          }
+        }
+        const merged = overlay ? { ...overlay, ...raw } : raw
+        const iface = overlay?.interface || raw.interface || {}
         const version =
           normalizeVersion(raw.version)
-          || normalizeVersion(settings.version)
-          || normalizeVersion(settings.interface?.version)
+          || normalizeVersion(overlay?.version)
+          || normalizeVersion(iface.version)
           || readPackageVersion(manifestRootDir(p))
         return {
-          ...raw,
-          ...settings,
-          name: raw.name,
+          ...merged,
+          name: raw.name || overlay?.name,
           version,
-          displayName: raw.displayName || settings.interface?.displayName,
-          description: raw.description || settings.interface?.shortDescription || settings.interface?.longDescription || '',
-          author: raw.author || settings.interface?.developerName,
-          homepage: raw.homepage || settings.interface?.websiteURL,
+          displayName: raw.displayName || iface.displayName,
+          description: raw.description || iface.shortDescription || iface.longDescription || '',
+          author: raw.author || iface.developerName,
+          homepage: raw.homepage || iface.websiteURL,
         }
       } catch {}
     }
@@ -778,81 +944,221 @@ export function readPluginManifest(dir, includeParent = true) {
   return null
 }
 
-/** List skill & command directories/files (skills/*, commands/*, root SKILL.md, .cursor/rules). */
-export function listSkills(dir, manifest = readPluginManifest(dir)) {
-  const out = []
-  const seen = new Set()
-
-  const addSkill = (name, skillMdPath) => {
-    if (!name || seen.has(name)) return
-    let description = ''
-    if (skillMdPath) {
-      try {
-        description = extractMdDescription(readFileSync(skillMdPath, 'utf8'))
-      } catch {}
-    }
-    out.push({ name, command: `/${name}`, description })
-    seen.add(name)
-  }
-
-  // 1. Check skills/ subdirectory
-  const declaredSkills = typeof manifest?.skills === 'string' ? [manifest.skills] : (Array.isArray(manifest?.skills) ? manifest.skills.filter((s) => typeof s === 'string' && s.startsWith('./')) : [])
-  const candidateSkillRoots = [...declaredSkills.map((p) => pluginPath(dir, p)), join(dir, 'skills'), join(dir, '..', 'skills')]
-  for (const sRoot of candidateSkillRoots) {
-    if (existsSync(sRoot)) {
-      try {
-        if (statSync(sRoot).isFile()) {
-          if (/^skill\.md$/i.test(basename(sRoot))) addSkill(basename(dirname(sRoot)), sRoot)
-          continue
+function scanCommandDirectory(cmdRoot, seenFiles, addCommandEntry, prefix = '') {
+  if (!cmdRoot || !existsSync(cmdRoot)) return
+  try {
+    const st = statSync(cmdRoot)
+    if (st.isFile()) {
+      if (/\.(md)$/i.test(cmdRoot)) {
+        const key = resolve(cmdRoot)
+        if (!seenFiles.has(key)) {
+          seenFiles.add(key)
+          const stem = basename(cmdRoot).replace(/\.md$/i, '')
+          const name = prefix || stem
+          addCommandEntry({ name, filePath: cmdRoot, content: null, description: '' })
         }
-        const rootMd = ['SKILL.md', 'skill.md'].map((f) => join(sRoot, f)).find(existsSync)
-        if (rootMd) addSkill(basename(sRoot), rootMd)
-        for (const entry of readdirSync(sRoot, { withFileTypes: true })) {
-          if (entry.isDirectory()) {
-            if (['node_modules', '.git', '.agents', 'agents', 'commands', 'prompts', 'hooks', '.cursor', 'docs', 'assets', 'eval', 'staging', 'walkthroughs'].includes(entry.name)) continue
-            const skillMd = join(sRoot, entry.name, 'SKILL.md')
-            const altMd = join(sRoot, entry.name, 'skill.md')
-            if (existsSync(skillMd)) {
-              addSkill(entry.name, skillMd)
-            } else if (existsSync(altMd)) {
-              addSkill(entry.name, altMd)
-            }
-          } else if (entry.isFile() && entry.name.endsWith('.md') && !['README.md', 'CONTRIBUTING.md', 'LICENSE.md', 'CHANGELOG.md'].includes(entry.name)) {
-            const name = entry.name.replace(/\.md$/, '')
-            addSkill(name, join(sRoot, entry.name))
+      }
+      return
+    }
+    for (const entry of readdirSync(cmdRoot, { withFileTypes: true })) {
+      const fullPath = join(cmdRoot, entry.name)
+      if (entry.isFile() && entry.name.endsWith('.md') && !/^readme\.md$/i.test(entry.name)) {
+        const key = resolve(fullPath)
+        if (seenFiles.has(key)) continue
+        seenFiles.add(key)
+        const stem = entry.name.replace(/\.md$/i, '')
+        const name = prefix ? `${prefix}-${stem}` : stem
+        addCommandEntry({ name, filePath: fullPath, content: null, description: '' })
+      } else if (entry.isDirectory()) {
+        const nextPrefix = prefix ? `${prefix}-${entry.name}` : entry.name
+        const skillMd = join(fullPath, 'SKILL.md')
+        const altMd = join(fullPath, 'skill.md')
+        const directMd = existsSync(skillMd) ? skillMd : (existsSync(altMd) ? altMd : null)
+        if (directMd) {
+          const key = resolve(directMd)
+          if (!seenFiles.has(key)) {
+            seenFiles.add(key)
+            addCommandEntry({ name: nextPrefix, filePath: directMd, content: null, description: '' })
           }
         }
-      } catch {}
+        scanCommandDirectory(fullPath, seenFiles, addCommandEntry, nextPrefix)
+      }
     }
+  } catch {}
+}
+
+/** Resolve disk/inline slash command entries from commands/ dirs and manifest.commands. */
+export function resolvePluginCommandEntries(dir, manifest = readPluginManifest(dir)) {
+  const entries = []
+  const seenNames = new Set()
+  const seenFiles = new Set()
+  const pushEntry = (item) => {
+    if (!item?.name || seenNames.has(item.name)) return
+    seenNames.add(item.name)
+    entries.push(item)
   }
 
-  // 2. Check commands/ and .claude/commands/ (Claude Code slash commands)
   const candidateCmdRoots = [
     join(dir, 'commands'),
     join(dir, '..', 'commands'),
     join(dir, '.claude', 'commands'),
     join(dir, '..', '.claude', 'commands'),
   ]
-  for (const cRoot of candidateCmdRoots) {
-    if (existsSync(cRoot)) {
-      try {
-        for (const entry of readdirSync(cRoot, { withFileTypes: true })) {
-          if (entry.isFile() && entry.name.endsWith('.md')) {
-            addSkill(entry.name.replace(/\.md$/, ''), join(cRoot, entry.name))
-          } else if (entry.isDirectory()) {
-            const skillMd = join(cRoot, entry.name, 'SKILL.md')
-            const directMd = join(cRoot, `${entry.name}.md`)
-            const targetMd = existsSync(skillMd) ? skillMd : (existsSync(directMd) ? directMd : null)
-            if (targetMd) {
-              addSkill(entry.name, targetMd)
-            }
+  const inlineFallbacks = []
+  const declared = manifest?.commands
+  if (typeof declared === 'string') {
+    const resolved = resolvePluginSpecPath(dir, declared)
+    if (resolved) candidateCmdRoots.push(resolved)
+  } else if (Array.isArray(declared)) {
+    for (const item of declared) {
+      if (typeof item === 'string') {
+        const resolved = resolvePluginSpecPath(dir, item)
+        if (resolved && existsSync(resolved)) {
+          candidateCmdRoots.push(resolved)
+        } else {
+          inlineFallbacks.push(item)
+        }
+      } else if (item && typeof item === 'object') {
+        const rel = item.source || item.path || item.file
+        const resolved = typeof rel === 'string' ? resolvePluginSpecPath(dir, rel) : null
+        if (resolved && existsSync(resolved)) {
+          if (statSync(resolved).isFile()) {
+            const name = item.name || basename(resolved).replace(/\.md$/i, '')
+            seenFiles.add(resolve(resolved))
+            pushEntry({ name, filePath: resolved, content: null, description: item.description || '' })
+          } else {
+            candidateCmdRoots.push(resolved)
+          }
+        } else if (item.name) {
+          if (typeof item.content === 'string') {
+            pushEntry({
+              name: item.name,
+              filePath: null,
+              content: item.content,
+              description: item.description || '',
+            })
+          } else {
+            inlineFallbacks.push({ name: item.name, description: item.description || '' })
           }
         }
-      } catch {}
+      }
+    }
+  } else if (declared && typeof declared === 'object') {
+    for (const [cmdName, cfg] of Object.entries(declared)) {
+      if (typeof cfg === 'string') {
+        const resolved = resolvePluginSpecPath(dir, cfg)
+        if (resolved && existsSync(resolved)) {
+          if (statSync(resolved).isFile()) {
+            seenFiles.add(resolve(resolved))
+            pushEntry({ name: cmdName, filePath: resolved, content: null, description: '' })
+          } else {
+            scanCommandDirectory(resolved, seenFiles, pushEntry, cmdName)
+          }
+        } else {
+          inlineFallbacks.push({ name: cmdName, description: cfg })
+        }
+      } else if (cfg && typeof cfg === 'object') {
+        const rel = cfg.source || cfg.path || cfg.file
+        const resolved = typeof rel === 'string' ? resolvePluginSpecPath(dir, rel) : null
+        if (resolved && existsSync(resolved) && statSync(resolved).isFile()) {
+          seenFiles.add(resolve(resolved))
+          pushEntry({ name: cmdName, filePath: resolved, content: null, description: cfg.description || '' })
+        } else if (typeof cfg.content === 'string') {
+          pushEntry({
+            name: cmdName,
+            filePath: null,
+            content: cfg.content,
+            description: cfg.description || '',
+          })
+        } else {
+          inlineFallbacks.push({ name: cmdName, description: cfg.description || '' })
+        }
+      }
     }
   }
 
+  for (const cRoot of candidateCmdRoots) {
+    scanCommandDirectory(cRoot, seenFiles, pushEntry)
+  }
 
+  return { entries, inlineFallbacks }
+}
+
+/** List skill & command directories/files (skills/*, commands/*, root SKILL.md, manifest declarations). */
+export function listSkills(dir, manifest = readPluginManifest(dir)) {
+  const out = []
+  const seen = new Set()
+
+  const addSkill = (name, skillMdPath, inlineContent = null, fallbackDesc = '') => {
+    if (!name || seen.has(name)) return
+    let description = ''
+    if (skillMdPath) {
+      try {
+        description = extractMdDescription(readFileSync(skillMdPath, 'utf8'))
+      } catch {}
+    } else if (typeof inlineContent === 'string') {
+      description = extractMdDescription(inlineContent)
+    }
+    out.push({ name, command: `/${name}`, description: description || fallbackDesc || '' })
+    seen.add(name)
+  }
+
+  const NON_SKILL_DIRS = new Set([
+    'node_modules', '.git', '.agents', '.claude-plugin', '.codex-plugin', '.well-known',
+    'agents', 'commands', 'prompts', 'hooks', '.cursor', 'docs', 'assets', 'eval',
+    'staging', 'walkthroughs', 'mcp', 'lsp', 'scripts', 'server', 'dist', 'build', '__pycache__',
+  ])
+
+  // 1. Check skills/ and manifest.skills paths (including '.' and './...')
+  const rawSkills = typeof manifest?.skills === 'string' ? [manifest.skills] : (Array.isArray(manifest?.skills) ? manifest.skills : [])
+  const declaredSkillPaths = rawSkills
+    .filter((s) => typeof s === 'string' && isDotRelativePath(s))
+    .map((p) => resolvePluginSpecPath(dir, p))
+    .filter(Boolean)
+  const candidateSkillRoots = []
+  const seenSkillRoots = new Set()
+  for (const rootCandidate of [...declaredSkillPaths, join(dir, 'skills'), join(dir, '..', 'skills')]) {
+    const resolvedRoot = resolve(rootCandidate)
+    if (seenSkillRoots.has(resolvedRoot)) continue
+    seenSkillRoots.add(resolvedRoot)
+    candidateSkillRoots.push(rootCandidate)
+  }
+
+  for (const sRoot of candidateSkillRoots) {
+    if (!existsSync(sRoot)) continue
+    try {
+      if (statSync(sRoot).isFile()) {
+        if (/^skill\.md$/i.test(basename(sRoot))) addSkill(basename(dirname(sRoot)), sRoot)
+        else if (/\.md$/i.test(sRoot)) addSkill(basename(sRoot).replace(/\.md$/i, ''), sRoot)
+        continue
+      }
+      const rootMd = ['SKILL.md', 'skill.md'].map((f) => join(sRoot, f)).find(existsSync)
+      if (rootMd && resolve(sRoot) !== resolve(dir)) {
+        addSkill(basename(sRoot), rootMd)
+      }
+      for (const entry of readdirSync(sRoot, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (NON_SKILL_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+          const skillMd = join(sRoot, entry.name, 'SKILL.md')
+          const altMd = join(sRoot, entry.name, 'skill.md')
+          if (existsSync(skillMd)) {
+            addSkill(entry.name, skillMd)
+          } else if (existsSync(altMd)) {
+            addSkill(entry.name, altMd)
+          }
+        } else if (entry.isFile() && entry.name.endsWith('.md') && !['README.md', 'CONTRIBUTING.md', 'LICENSE.md', 'CHANGELOG.md', 'SKILL.md', 'skill.md'].includes(entry.name)) {
+          const name = entry.name.replace(/\.md$/, '')
+          addSkill(name, join(sRoot, entry.name))
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Check commands/ and .claude/commands/ and manifest.commands
+  const { entries: cmdEntries, inlineFallbacks: cmdFallbacks } = resolvePluginCommandEntries(dir, manifest)
+  for (const cmd of cmdEntries) {
+    addSkill(cmd.name, cmd.filePath, cmd.content, cmd.description)
+  }
 
   // 4. Single-skill repository fallback: if no skills/ or commands/ exist, check root SKILL.md
   if (out.length === 0) {
@@ -868,14 +1174,14 @@ export function listSkills(dir, manifest = readPluginManifest(dir)) {
     }
   }
 
-  // 5. Check manifest (plugin.json / package.json / marketplace.json "skills" / "commands")
+  // 5. Fallback for non-path entries declared in manifest.skills / manifest.commands
   if (manifest && out.length === 0) {
     if (Array.isArray(manifest.skills)) {
       for (const item of manifest.skills) {
         const rawName = typeof item === 'string' ? item : item?.name
         if (rawName) {
           const name = basename(rawName).replace(/\.(md|mdc)$/i, '')
-          if (name && !['skills', 'commands'].includes(name.toLowerCase()) && !seen.has(name)) {
+          if (name && !['.', 'skills', 'commands'].includes(name.toLowerCase()) && !seen.has(name)) {
             seen.add(name)
             out.push({
               name,
@@ -886,20 +1192,12 @@ export function listSkills(dir, manifest = readPluginManifest(dir)) {
         }
       }
     }
-    if (Array.isArray(manifest.commands)) {
-      for (const item of manifest.commands) {
-        const rawName = typeof item === 'string' ? item : item?.name
-        if (rawName) {
-          const name = basename(rawName).replace(/\.md$/i, '')
-          if (name && !['skills', 'commands'].includes(name.toLowerCase()) && !seen.has(name)) {
-            seen.add(name)
-            out.push({
-              name,
-              command: `/${name}`,
-              description: typeof item === 'object' ? item.description || '' : '',
-            })
-          }
-        }
+    for (const item of cmdFallbacks) {
+      const rawName = typeof item === 'string' ? item : item?.name
+      const name = rawName ? basename(rawName).replace(/\.md$/i, '') : ''
+      if (name && !['.', 'skills', 'commands'].includes(name.toLowerCase()) && !seen.has(name)) {
+        seen.add(name)
+        out.push({ name, command: `/${name}`, description: typeof item === 'object' ? (item.description || '') : '' })
       }
     }
   }
@@ -907,79 +1205,28 @@ export function listSkills(dir, manifest = readPluginManifest(dir)) {
   return out
 }
 
-/** List agent definition files (agents/*.yaml|yml|md|json, .well-known/agent-card.json, agent.json). */
+/** List agent definition files (agents/<subpath>/*.yaml|yml|md|json, .well-known/agent-card.json, agent.json, manifest.agents). */
 export function listAgents(dir, manifest = readPluginManifest(dir)) {
   const out = []
-  const seen = new Set()
-
-  const candidateAgentRoots = [
-    join(dir, 'agents'),
-    join(dir, '.agents'),
-    join(dir, '..', 'agents'),
-    join(dir, '..', '.agents'),
-    join(dir, '.claude-plugin', 'agents'),
-    join(dir, '..', '.claude-plugin', 'agents'),
-  ]
-
+  const seenFiles = new Set()
+  const seenNames = new Set()
   const pluginName = basename(dir)
 
-  for (const agentsRoot of candidateAgentRoots) {
-    if (existsSync(agentsRoot)) {
-      try {
-        for (const entry of readdirSync(agentsRoot, { withFileTypes: true })) {
-          if (!entry.isFile()) continue
-          if (!/\.(ya?ml|md|json)$/i.test(entry.name)) continue
-          if (seen.has(entry.name)) continue
-
-          try {
-            const raw = readFileSync(join(agentsRoot, entry.name), 'utf8')
-            if (raw) {
-              const parsed = parseAgentDefinition(pluginName, entry.name, raw)
-              if (parsed && !parsed.error) {
-                seen.add(entry.name)
-                out.push({
-                  file: entry.name,
-                  name: parsed.name,
-                  displayName: parsed.displayName || parsed.name,
-                  description: parsed.description,
-                  tools: parsed.tools,
-                  model: parsed.model,
-                  instructions: parsed.instructions,
-                  raw,
-                })
-                continue
-              }
-            }
-          } catch { /* skip */ }
-
-          // Fallback if parsing failed
-          seen.add(entry.name)
-          const fallbackName = entry.name.replace(/\.[^.]+$/, '')
-          out.push({
-            file: entry.name,
-            name: fallbackName,
-            displayName: formatDisplayName(fallbackName),
-            description: 'Autonomous sub-agent workflow',
-            tools: null,
-            model: null,
-            instructions: '',
-            raw: null,
-          })
-        }
-      } catch {}
-    }
-  }
-
-  // Check Agent Card format (.well-known/agent-card.json or agent.json)
-  for (const agentCardPath of [join(dir, '.well-known', 'agent-card.json'), join(dir, 'agent.json')]) {
-    if (existsSync(agentCardPath) && !seen.has(basename(agentCardPath))) {
-      try {
-        const raw = readFileSync(agentCardPath, 'utf8')
-        const parsed = parseAgentDefinition(pluginName, basename(agentCardPath), raw)
-        seen.add(basename(agentCardPath))
+  const addAgentFile = (filePath, labelName) => {
+    const absPath = resolve(filePath)
+    if (seenFiles.has(absPath)) return
+    seenFiles.add(absPath)
+    const fileLabel = labelName.replace(/\\/g, '/')
+    try {
+      const raw = readFileSync(filePath, 'utf8')
+      if (raw) {
+        const parsed = parseAgentDefinition(pluginName, fileLabel, raw)
         if (parsed && !parsed.error) {
+          const dedupeKey = parsed.name || fileLabel
+          if (seenNames.has(dedupeKey)) return
+          seenNames.add(dedupeKey)
           out.push({
-            file: basename(agentCardPath),
+            file: fileLabel,
             name: parsed.name,
             displayName: parsed.displayName || parsed.name,
             description: parsed.description,
@@ -988,42 +1235,137 @@ export function listAgents(dir, manifest = readPluginManifest(dir)) {
             instructions: parsed.instructions,
             raw,
           })
+          return
+        }
+      }
+    } catch { /* skip */ }
+
+    const fallbackName = basename(fileLabel).replace(/\.[^.]+$/, '')
+    if (seenNames.has(fallbackName)) return
+    seenNames.add(fallbackName)
+    out.push({
+      file: fileLabel,
+      name: fallbackName,
+      displayName: formatDisplayName(fallbackName),
+      description: 'Autonomous sub-agent workflow',
+      tools: null,
+      model: null,
+      instructions: '',
+      raw: null,
+    })
+  }
+
+  const walkAgentDir = (rootDir, prefix = '', allowRecurse = true) => {
+    if (!existsSync(rootDir)) return
+    try {
+      const st = statSync(rootDir)
+      if (st.isFile()) {
+        if (/\.(ya?ml|md|json)$/i.test(rootDir)) {
+          addAgentFile(rootDir, (relative(dir, rootDir) || basename(rootDir)).replace(/\\/g, '/'))
+        }
+        return
+      }
+      for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue
+        const full = join(rootDir, entry.name)
+        const relLabel = prefix ? `${prefix}/${entry.name}` : entry.name
+        if (entry.isFile() && /\.(ya?ml|md|json)$/i.test(entry.name)) {
+          addAgentFile(full, relLabel)
+        } else if (entry.isDirectory() && allowRecurse && entry.name !== 'plugins' && entry.name !== 'skills') {
+          walkAgentDir(full, relLabel, true)
+        }
+      }
+    } catch {}
+  }
+
+  const declaredAgents = typeof manifest?.agents === 'string'
+    ? [manifest.agents]
+    : (Array.isArray(manifest?.agents) ? manifest.agents : [])
+  const fallbackAgentItems = []
+
+  // Explicit manifest paths resolved first (supports nested files and custom subdirs like './custom-agents')
+  for (const item of declaredAgents) {
+    const spec = typeof item === 'string' ? item : (item?.source || item?.path || item?.file)
+    if (typeof spec === 'string') {
+      const resolved = resolvePluginSpecPath(dir, spec)
+      if (resolved && existsSync(resolved)) {
+        const relPrefix = relative(dir, resolved).replace(/\\/g, '/')
+        const initPrefix = (!relPrefix || relPrefix === '.' || relPrefix === 'agents' || relPrefix === '.agents' || relPrefix === '.claude-plugin/agents')
+          ? ''
+          : relPrefix
+        walkAgentDir(resolved, initPrefix, true)
+        continue
+      }
+    }
+    fallbackAgentItems.push(item)
+  }
+
+  walkAgentDir(join(dir, 'agents'), '', true)
+  walkAgentDir(join(dir, '.agents'), '', false)
+  walkAgentDir(join(dir, '..', 'agents'), '', true)
+  walkAgentDir(join(dir, '..', '.agents'), '', false)
+  walkAgentDir(join(dir, '.claude-plugin', 'agents'), '', true)
+  walkAgentDir(join(dir, '..', '.claude-plugin', 'agents'), '', true)
+
+  // Check Agent Card format (.well-known/agent-card.json or agent.json)
+  for (const agentCardPath of [join(dir, '.well-known', 'agent-card.json'), join(dir, 'agent.json')]) {
+    if (existsSync(agentCardPath) && !seenFiles.has(resolve(agentCardPath))) {
+      seenFiles.add(resolve(agentCardPath))
+      try {
+        const raw = readFileSync(agentCardPath, 'utf8')
+        const parsed = parseAgentDefinition(pluginName, basename(agentCardPath), raw)
+        if (parsed && !parsed.error) {
+          if (!seenNames.has(parsed.name)) {
+            seenNames.add(parsed.name)
+            out.push({
+              file: basename(agentCardPath),
+              name: parsed.name,
+              displayName: parsed.displayName || parsed.name,
+              description: parsed.description,
+              tools: parsed.tools,
+              model: parsed.model,
+              instructions: parsed.instructions,
+              raw,
+            })
+          }
         } else {
           const jsonDoc = JSON.parse(raw)
-          out.push({
-            file: basename(agentCardPath),
-            name: jsonDoc.name || basename(dir),
-            displayName: jsonDoc.displayName || formatDisplayName(jsonDoc.name || basename(dir)),
-            description: jsonDoc.description || '',
-            tools: jsonDoc.tools || null,
-            model: jsonDoc.model || null,
-            instructions: jsonDoc.instructions || '',
-            raw,
-          })
+          const agentName = jsonDoc.name || basename(dir)
+          if (!seenNames.has(agentName)) {
+            seenNames.add(agentName)
+            out.push({
+              file: basename(agentCardPath),
+              name: agentName,
+              displayName: jsonDoc.displayName || formatDisplayName(agentName),
+              description: jsonDoc.description || '',
+              tools: jsonDoc.tools || null,
+              model: jsonDoc.model || null,
+              instructions: jsonDoc.instructions || '',
+              raw,
+            })
+          }
         }
       } catch {}
     }
   }
 
-  // Check manifest "agents" array
-  if (manifest && Array.isArray(manifest.agents)) {
-    for (const item of manifest.agents) {
-      const rawName = typeof item === 'string' ? item : item?.name
-      if (rawName && !seen.has(rawName)) {
-        seen.add(rawName)
-        const name = typeof item === 'string' ? item : (item.name || rawName)
-        const displayName = typeof item === 'object' && item.displayName ? item.displayName : (typeof item === 'object' && item.name ? item.name : formatDisplayName(name))
-        out.push({
-          file: typeof item === 'object' && item.file ? item.file : `${name}.md`,
-          name,
-          displayName,
-          description: typeof item === 'object' ? item.description || '' : '',
-          tools: typeof item === 'object' ? item.tools || null : null,
-          model: typeof item === 'object' ? item.model || null : null,
-          instructions: '',
-          raw: null,
-        })
-      }
+  // Fallback for non-path items declared in manifest.agents
+  for (const item of fallbackAgentItems) {
+    const rawName = typeof item === 'string' ? item : item?.name
+    if (rawName && !seenNames.has(rawName)) {
+      seenNames.add(rawName)
+      const name = typeof item === 'string' ? item : (item.name || rawName)
+      const displayName = typeof item === 'object' && item.displayName ? item.displayName : (typeof item === 'object' && item.name ? item.name : formatDisplayName(name))
+      out.push({
+        file: typeof item === 'object' && item.file ? item.file : `${name}.md`,
+        name,
+        displayName,
+        description: typeof item === 'object' ? item.description || '' : '',
+        tools: typeof item === 'object' ? item.tools || null : null,
+        model: typeof item === 'object' ? item.model || null : null,
+        instructions: '',
+        raw: null,
+      })
     }
   }
 
@@ -1066,6 +1408,25 @@ function formatHookEventName(evt) {
   return map[evt] || evt
 }
 
+function extractHookEventMap(raw, isJson) {
+  let parsed
+  try {
+    parsed = isJson ? JSON.parse(raw) : parseYaml(raw)
+  } catch {
+    return null
+  }
+  return unwrapHookObject(parsed)
+}
+
+function unwrapHookObject(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  let hookObj = (parsed.hooks && typeof parsed.hooks === 'object' && !Array.isArray(parsed.hooks)) ? parsed.hooks : parsed
+  if (hookObj && typeof hookObj === 'object' && !Array.isArray(hookObj) && typeof hookObj.hooks === 'object' && !Array.isArray(hookObj.hooks)) {
+    hookObj = hookObj.hooks
+  }
+  return hookObj
+}
+
 /**
  * Parse hook event names from a Claude/Codex hook config file's content.
  * Accepts `{ hooks: {...} }`, a doubly-nested `{ hooks: { hooks: {...} } }`,
@@ -1073,17 +1434,8 @@ function formatHookEventName(evt) {
  */
 export function parseHookConfig(raw, isJson) {
   const out = []
-  let parsed
-  try {
-    parsed = isJson ? JSON.parse(raw) : parseYaml(raw)
-  } catch {
-    return out
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out
-  let hookObj = (parsed.hooks && typeof parsed.hooks === 'object' && !Array.isArray(parsed.hooks)) ? parsed.hooks : parsed
-  if (hookObj && typeof hookObj === 'object' && !Array.isArray(hookObj) && typeof hookObj.hooks === 'object' && !Array.isArray(hookObj.hooks)) {
-    hookObj = hookObj.hooks
-  }
+  const hookObj = extractHookEventMap(raw, isJson)
+  if (!hookObj) return out
   for (const [eventName, val] of Object.entries(hookObj)) {
     const formattedEvent = formatHookEventName(eventName)
     if (Array.isArray(val)) {
@@ -1101,31 +1453,82 @@ export function parseHookConfig(raw, isJson) {
   return out
 }
 
+function collectHookSources(dir, manifest = readPluginManifest(dir)) {
+  const sources = []
+  const seenFiles = new Set()
+
+  const addFile = (filePath) => {
+    if (!filePath || !existsSync(filePath)) return false
+    try {
+      if (!statSync(filePath).isFile()) return false
+      const key = resolve(filePath)
+      if (seenFiles.has(key)) return true
+      seenFiles.add(key)
+      sources.push({ type: 'file', path: filePath, isJson: /\.json$/i.test(filePath) })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const addInlineItem = (item) => {
+    if (typeof item === 'string') {
+      const resolved = resolvePluginSpecPath(dir, item)
+      if (resolved && addFile(resolved)) return
+      if (!/\.(json|ya?ml)$/i.test(item) && !isDotRelativePath(item)) {
+        sources.push({ type: 'label', label: item })
+      }
+      return
+    }
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      if (typeof item.name === 'string' && !item.hooks && Object.keys(item).length <= 2) {
+        sources.push({ type: 'label', label: item.name })
+        return
+      }
+      const eventMap = unwrapHookObject(item)
+      if (eventMap && Object.keys(eventMap).length > 0) {
+        sources.push({ type: 'inline', eventMap })
+      }
+    }
+  }
+
+  if (manifest?.hooks !== undefined) {
+    if (Array.isArray(manifest.hooks)) {
+      for (const item of manifest.hooks) addInlineItem(item)
+    } else {
+      addInlineItem(manifest.hooks)
+    }
+  }
+
+  const hooksRoot = join(dir, 'hooks')
+  if (existsSync(hooksRoot)) {
+    for (const fixedName of ['hooks.json', 'hooks.yaml', 'hooks.yml']) {
+      if (addFile(join(hooksRoot, fixedName))) break
+    }
+    if (seenFiles.size === 0) {
+      try {
+        const dialect = readdirSync(hooksRoot)
+          .filter((n) => /-hooks\.(json|ya?ml)$/i.test(n) && statSync(join(hooksRoot, n)).isFile())
+          .sort((a, b) => {
+            const score = (n) => (/claude/i.test(n) ? 0 : (/codex/i.test(n) ? 1 : 2))
+            return score(a) - score(b)
+          })
+        if (dialect.length > 0) addFile(join(hooksRoot, dialect[0]))
+      } catch {}
+    }
+  }
+
+  return sources
+}
+
 /**
  * Resolve the plugin's Claude/Codex hook config file path: the manifest `hooks`
  * path first, then `hooks/hooks.json|yaml|yml`, then `*-hooks.{json,yaml}` files.
  * Returns null when the plugin declares no hook config (e.g. only scripts).
  */
 export function resolveHookConfigPath(dir, manifest = readPluginManifest(dir)) {
-  if (manifest && typeof manifest.hooks === 'string') {
-    const p = isAbsolute(manifest.hooks) ? manifest.hooks : join(dir, manifest.hooks)
-    if (existsSync(p) && statSync(p).isFile()) return p
-  }
-  const hooksRoot = join(dir, 'hooks')
-  if (existsSync(hooksRoot)) {
-    const fixed = ['hooks.json', 'hooks.yaml', 'hooks.yml'].map((n) => join(hooksRoot, n)).find((p) => existsSync(p) && statSync(p).isFile())
-    if (fixed) return fixed
-    try {
-      const dialect = readdirSync(hooksRoot)
-        .filter((n) => /-hooks\.(json|ya?ml)$/i.test(n) && statSync(join(hooksRoot, n)).isFile())
-        .sort((a, b) => {
-          const score = (n) => (/claude/i.test(n) ? 0 : (/codex/i.test(n) ? 1 : 2))
-          return score(a) - score(b)
-        })
-      if (dialect.length > 0) return join(hooksRoot, dialect[0])
-    } catch {}
-  }
-  return null
+  const firstFile = collectHookSources(dir, manifest).find((s) => s.type === 'file')
+  return firstFile ? firstFile.path : null
 }
 
 /** Hook entries: follow the plugin manifest's `hooks` config, then hooks/ config files. */
@@ -1134,26 +1537,90 @@ export function listHooks(dir, manifest = readPluginManifest(dir)) {
   const seen = new Set()
   const add = (h) => { if (h && !seen.has(h)) { seen.add(h); hooks.push(h) } }
 
-  const cfg = resolveHookConfigPath(dir, manifest)
-  if (cfg) {
-    try {
-      const raw = readFileSync(cfg, 'utf8')
-      for (const h of parseHookConfig(raw, /\.json$/i.test(cfg))) add(h)
-    } catch {}
-  }
-
-  // Manifest `hooks` as inline object/array (no file path to follow).
-  if (hooks.length === 0) {
-    if (manifest && manifest.hooks) {
-      if (Array.isArray(manifest.hooks)) {
-        for (const h of manifest.hooks) add(typeof h === 'string' ? h : (h && h.name))
-      } else if (typeof manifest.hooks === 'object') {
-        for (const h of parseHookConfig(JSON.stringify({ hooks: manifest.hooks }), true)) add(h)
-      }
+  for (const src of collectHookSources(dir, manifest)) {
+    if (src.type === 'file') {
+      try {
+        const raw = readFileSync(src.path, 'utf8')
+        for (const h of parseHookConfig(raw, src.isJson)) add(h)
+      } catch {}
+    } else if (src.type === 'inline') {
+      for (const h of parseHookConfig(JSON.stringify({ hooks: src.eventMap }), true)) add(h)
+    } else if (src.type === 'label') {
+      add(src.label)
     }
   }
 
   return hooks
+}
+
+function formatHookCmdArg(arg) {
+  return /[\s"'\\$`]/.test(arg) ? JSON.stringify(arg) : arg
+}
+
+/**
+ * Compile all Claude/Codex hook sources (JSON, YAML, inline objects, mixed arrays,
+ * `args` arrays, and builtin variables) into a single JSON structure compatible
+ * with `@deepseek-ai/dsh-hooks-claude-code`. Returns null if no hook rules exist.
+ */
+export function compileResolvedHooks(pluginRoot, manifest = readPluginManifest(pluginRoot), explicitDataDir) {
+  const compiled = {}
+  const eventMaps = []
+
+  for (const src of collectHookSources(pluginRoot, manifest)) {
+    if (src.type === 'file') {
+      try {
+        const map = extractHookEventMap(readFileSync(src.path, 'utf8'), src.isJson)
+        if (map) eventMaps.push(map)
+      } catch {}
+    } else if (src.type === 'inline') {
+      eventMaps.push(src.eventMap)
+    }
+  }
+
+  for (const eventMap of eventMaps) {
+    for (const [eventName, val] of Object.entries(eventMap)) {
+      const rules = Array.isArray(val) ? val : (val && typeof val === 'object' ? [val] : [])
+      for (const rule of rules) {
+        if (!rule || typeof rule !== 'object') continue
+        const rawInner = Array.isArray(rule.hooks) ? rule.hooks : (rule.command || rule.type ? [rule] : [])
+        const compiledInner = []
+        for (const h of rawInner) {
+          if (!h || typeof h !== 'object') continue
+          if (h.type === undefined || h.type === 'command') {
+            let cmd = typeof h.command === 'string' ? expandPluginVars(h.command, pluginRoot, explicitDataDir).trim() : ''
+            if (pluginRoot && /^\.\.?[\\/]/.test(cmd)) {
+              const m = cmd.match(/^(\S+)([\s\S]*)$/)
+              if (m) {
+                const resolvedBin = resolvePluginCommand(m[1], pluginRoot, explicitDataDir)
+                cmd = resolvedBin ? `${resolvedBin}${m[2]}` : ''
+              }
+            }
+            if (Array.isArray(h.args) && h.args.length > 0) {
+              const extraArgs = h.args.map((a) => {
+                const expanded = expandPluginVars(String(a), pluginRoot, explicitDataDir)
+                return formatHookCmdArg(expanded)
+              })
+              cmd = [cmd, ...extraArgs].filter(Boolean).join(' ')
+            }
+            if (!cmd) continue
+            const { args: _droppedArgs, ...rest } = h
+            compiledInner.push({ ...rest, type: 'command', command: cmd })
+          } else {
+            compiledInner.push(expandPluginVars(h, pluginRoot, explicitDataDir))
+          }
+        }
+        if (compiledInner.length > 0) {
+          if (!compiled[eventName]) compiled[eventName] = []
+          compiled[eventName].push({
+            ...(rule.matcher !== undefined ? { matcher: rule.matcher } : {}),
+            hooks: compiledInner,
+          })
+        }
+      }
+    }
+  }
+
+  return Object.keys(compiled).length > 0 ? { hooks: compiled } : null
 }
 
 /**
@@ -1178,94 +1645,99 @@ export function isRemoteTransportName(type) {
   return type === 'http' || type === 'sse' || type === 'streamable-http' || type === 'streamableHttp'
 }
 
-/** Connector-ish entries: .mcp.json, mcp.json, server.json, or plugin.json "mcp" / "connectors". */
+function extractConnectorDict(mcp) {
+  if (!mcp || typeof mcp !== 'object' || Array.isArray(mcp)) return null
+  if (mcp.mcpServers && typeof mcp.mcpServers === 'object') return mcp.mcpServers
+  if (mcp.servers && typeof mcp.servers === 'object') return mcp.servers
+  if (mcp.name && (mcp.url || mcp.command || mcp.type)) return { [mcp.name]: mcp }
+  const direct = {}
+  for (const [k, v] of Object.entries(mcp)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (v.url || v.command || v.type || v.args || v.headers || v.env || v.cwd !== undefined) {
+        direct[k] = v
+      }
+    }
+  }
+  return Object.keys(direct).length > 0 ? direct : null
+}
+
+function pushConnectorDict(dict, seen, connectors) {
+  if (!dict || typeof dict !== 'object') return
+  for (const [name, cfg] of Object.entries(dict)) {
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue
+    if (!seen.has(name)) {
+      seen.add(name)
+      connectors.push({
+        name,
+        type: connectorTransport(cfg.type, cfg.url, cfg.command),
+        url: cfg.url || null,
+        command: cfg.command || null,
+        args: Array.isArray(cfg.args) ? cfg.args : [],
+        ...(cfg.cwd !== undefined ? { cwd: cfg.cwd } : {}),
+        env: cfg.env || {},
+        headers: cfg.headers || {},
+      })
+    }
+  }
+}
+
+function loadMcpEntry(entry, dir, seen, connectors, seenFiles) {
+  if (!entry) return
+  if (typeof entry === 'string') {
+    const resolved = resolvePluginSpecPath(dir, entry)
+    if (!resolved || !existsSync(resolved)) return
+    const key = resolve(resolved)
+    if (seenFiles.has(key)) return
+    seenFiles.add(key)
+    try {
+      const mcp = JSON.parse(readFileSync(resolved, 'utf8'))
+      pushConnectorDict(extractConnectorDict(mcp), seen, connectors)
+    } catch { /* ignore malformed */ }
+    return
+  }
+  if (Array.isArray(entry)) {
+    for (const item of entry) loadMcpEntry(item, dir, seen, connectors, seenFiles)
+    return
+  }
+  if (typeof entry === 'object') {
+    pushConnectorDict(extractConnectorDict(entry), seen, connectors)
+  }
+}
+
+/** Connector-ish entries: .mcp.json, mcp.json, server.json, or plugin.json "mcpServers" / "connectors". */
 export function listConnectors(dir, manifest = readPluginManifest(dir)) {
   const connectors = []
   const seen = new Set()
+  const seenFiles = new Set()
 
   for (const mcpFile of ['.mcp.json', 'mcp.json', 'server.json', 'mcp-servers.json']) {
     const mcpPath = join(dir, mcpFile)
     if (existsSync(mcpPath)) {
-      try {
-        const mcp = JSON.parse(readFileSync(mcpPath, 'utf8'))
-        let dict = null
-        if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
-          if (mcp.mcpServers && typeof mcp.mcpServers === 'object') {
-            dict = mcp.mcpServers
-          } else if (mcp.servers && typeof mcp.servers === 'object') {
-            dict = mcp.servers
-          } else if (mcp.name && (mcp.url || mcp.command || mcp.type)) {
-            dict = { [mcp.name]: mcp }
-          } else {
-            const direct = {}
-            for (const [k, v] of Object.entries(mcp)) {
-              if (v && typeof v === 'object' && !Array.isArray(v)) {
-                if (v.url || v.command || v.type || v.args || v.headers || v.env) {
-                  direct[k] = v
-                }
-              }
-            }
-            if (Object.keys(direct).length > 0) dict = direct
-          }
-        }
-        if (dict && typeof dict === 'object') {
-          for (const [name, cfg] of Object.entries(dict)) {
-            if (!seen.has(name)) {
-              seen.add(name)
-              connectors.push({
-                name,
-                type: connectorTransport(cfg.type, cfg.url, cfg.command),
-                url: cfg.url || null,
-                command: cfg.command || null,
-                args: cfg.args || [],
-                env: cfg.env || {},
-                headers: cfg.headers || {},
-              })
-            }
-          }
-        }
-      } catch { /* ignore malformed */ }
+      loadMcpEntry(`./${mcpFile}`, dir, seen, connectors, seenFiles)
     }
   }
 
   if (manifest) {
-    let dict = null
-    if (manifest.mcpServers && typeof manifest.mcpServers === 'object') {
-      dict = manifest.mcpServers
-    } else if (manifest.servers && typeof manifest.servers === 'object') {
-      dict = manifest.servers
-    } else if (manifest.mcp && typeof manifest.mcp === 'object') {
-      dict = manifest.mcp.mcpServers || manifest.mcp
+    loadMcpEntry(manifest.mcpServers, dir, seen, connectors, seenFiles)
+    loadMcpEntry(manifest.servers, dir, seen, connectors, seenFiles)
+    if (manifest.mcp && typeof manifest.mcp === 'object') {
+      loadMcpEntry(manifest.mcp.mcpServers || manifest.mcp, dir, seen, connectors, seenFiles)
     }
-    if (dict && typeof dict === 'object') {
-      for (const [name, cfg] of Object.entries(dict)) {
-        if (!seen.has(name)) {
+    if (Array.isArray(manifest.connectors)) {
+      for (const c of manifest.connectors) {
+        const name = typeof c === 'string' ? c : c?.name
+        if (name && !seen.has(name)) {
           seen.add(name)
+          const cfg = typeof c === 'object' ? c : {}
           connectors.push({
             name,
             type: connectorTransport(cfg.type, cfg.url, cfg.command),
             url: cfg.url || null,
             command: cfg.command || null,
-            args: cfg.args || [],
+            args: Array.isArray(cfg.args) ? cfg.args : [],
+            ...(cfg.cwd !== undefined ? { cwd: cfg.cwd } : {}),
             env: cfg.env || {},
             headers: cfg.headers || {},
-          })
-        }
-      }
-    }
-    if (Array.isArray(manifest.connectors)) {
-      for (const c of manifest.connectors) {
-        const name = typeof c === 'string' ? c : c.name
-        if (name && !seen.has(name)) {
-          seen.add(name)
-          connectors.push({
-            name,
-            type: connectorTransport(c.type, c.url, c.command),
-            url: c.url || null,
-            command: c.command || null,
-            args: c.args || [],
-            env: c.env || {},
-            headers: c.headers || {},
           })
         }
       }
@@ -1274,38 +1746,85 @@ export function listConnectors(dir, manifest = readPluginManifest(dir)) {
   return connectors
 }
 
-/**
- * List LSP server definitions from a plugin's manifest (`lspServers` record).
- *
- * Accepts either a directory path (reads the on-disk manifest via
- * `readPluginManifest`) or a pre-resolved marketplace row object (uses
- * `row.lspServers` directly). The fallback path lets the plugin detail
- * surface LSP servers in browse mode, where the plugin directory itself
- * is only a README placeholder and the lspServers live in marketplace.json.
- */
-export function listLspServers(input) {
-  let raw
-  if (typeof input === 'string') {
-    raw = readPluginManifest(input)?.lspServers
-  } else if (input && typeof input === 'object' && !Array.isArray(input)) {
-    raw = input.lspServers
+function collectLspDicts(spec, dir, seenFiles, outDicts) {
+  if (!spec) return
+  if (typeof spec === 'string') {
+    if (!dir) return
+    const resolved = resolvePluginSpecPath(dir, spec)
+    if (!resolved || !existsSync(resolved)) return
+    const key = resolve(resolved)
+    if (seenFiles.has(key)) return
+    seenFiles.add(key)
+    try {
+      const parsed = JSON.parse(readFileSync(resolved, 'utf8'))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        outDicts.push(parsed.lspServers && typeof parsed.lspServers === 'object' ? parsed.lspServers : parsed)
+      }
+    } catch {}
+    return
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  if (Array.isArray(spec)) {
+    for (const item of spec) collectLspDicts(item, dir, seenFiles, outDicts)
+    return
+  }
+  if (typeof spec === 'object') {
+    outDicts.push(spec.lspServers && typeof spec.lspServers === 'object' ? spec.lspServers : spec)
+  }
+}
+
+/**
+ * List LSP server definitions from `.lsp.json` / `lsp.json` and manifest
+ * `lspServers` (object, file path, or array of paths/objects). Maps Claude's
+ * `settings` field to `configuration` for DSH compatibility.
+ */
+export function listLspServers(input, manifestOverride) {
+  const dicts = []
+  const seenFiles = new Set()
+
+  if (typeof input === 'string') {
+    for (const fname of ['.lsp.json', 'lsp.json']) {
+      const p = join(input, fname)
+      if (existsSync(p)) collectLspDicts(`./${fname}`, input, seenFiles, dicts)
+    }
+    const manifest = manifestOverride ?? readPluginManifest(input)
+    collectLspDicts(manifest?.lspServers, input, seenFiles, dicts)
+  } else if (input && typeof input === 'object' && !Array.isArray(input)) {
+    collectLspDicts(input.lspServers, null, seenFiles, dicts)
+  }
+
   const out = []
-  for (const [name, cfg] of Object.entries(raw)) {
-    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue
-    out.push({
-      name,
-      command: cfg.command || null,
-      args: Array.isArray(cfg.args) ? cfg.args : [],
-      env: (cfg.env && typeof cfg.env === 'object') ? cfg.env : {},
-      extensionToLanguage: (cfg.extensionToLanguage && typeof cfg.extensionToLanguage === 'object') ? cfg.extensionToLanguage : {},
-      initializationOptions: cfg.initializationOptions ?? null,
-      configuration: cfg.configuration ?? null,
-      startupTimeout: cfg.startupTimeout ?? null,
-    })
+  const seen = new Set()
+  for (const raw of dicts) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    for (const [name, cfg] of Object.entries(raw)) {
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue
+      if (seen.has(name)) continue
+      seen.add(name)
+      out.push({
+        name,
+        command: cfg.command || null,
+        args: Array.isArray(cfg.args) ? cfg.args : [],
+        env: (cfg.env && typeof cfg.env === 'object') ? cfg.env : {},
+        extensionToLanguage: (cfg.extensionToLanguage && typeof cfg.extensionToLanguage === 'object') ? cfg.extensionToLanguage : {},
+        initializationOptions: cfg.initializationOptions ?? null,
+        configuration: cfg.configuration ?? cfg.settings ?? null,
+        startupTimeout: cfg.startupTimeout ?? null,
+      })
+    }
   }
   return out
+}
+
+/** Merge manifest metadata with marketplace row overrides (especially `strict: false`). */
+export function mergeManifestWithRow(manifest, rowFallback) {
+  if (!rowFallback || typeof rowFallback !== 'object') return manifest
+  const base = manifest && typeof manifest === 'object' ? { ...manifest } : {}
+  for (const key of MARKETPLACE_COMPONENT_KEYS) {
+    if (rowFallback[key] !== undefined && (rowFallback.strict === false || !manifest || manifest[key] === undefined)) {
+      base[key] = rowFallback[key]
+    }
+  }
+  return Object.keys(base).length > 0 ? base : null
 }
 
 /** Full detail view for one plugin (installed copy or cache). */
@@ -1313,23 +1832,20 @@ export function pluginDetail(sourceId, pluginName, source, rowFallback) {
   const dir = pluginContentDir(sourceId, pluginName, source)
   if (!dir) return null
   const manifest = readPluginManifest(dir)
-  // LSP servers: prefer the on-disk manifest (post-install writes `lspServers`
-  // into `installed/<name>/.claude-plugin/plugin.json`); if absent — e.g. when
-  // browsing an uninstalled plugin whose directory is only a README placeholder
-  // — fall back to the `lspServers` field carried by the marketplace row.
-  let lspServers = listLspServers(dir)
+  const effectiveManifest = mergeManifestWithRow(manifest, rowFallback)
+  let lspServers = listLspServers(dir, effectiveManifest)
   if (lspServers.length === 0 && rowFallback) {
     lspServers = listLspServers(rowFallback)
   }
   return {
     name: pluginName,
-    displayName: manifest?.displayName || rowFallback?.displayName || formatDisplayName(pluginName),
-    description: manifest?.description || rowFallback?.description || '',
-    author: manifest?.author?.name || (typeof manifest?.author === 'string' ? manifest.author : rowFallback?.author),
-    version: manifest?.version || rowFallback?.version,
-    icons: buildPluginIcons(manifest, { sourceId, name: pluginName, dir, source }),
-    skills: listSkills(dir),
-    agents: listAgents(dir).map((a) => ({
+    displayName: effectiveManifest?.displayName || rowFallback?.displayName || formatDisplayName(pluginName),
+    description: effectiveManifest?.description || rowFallback?.description || '',
+    author: effectiveManifest?.author?.name || (typeof effectiveManifest?.author === 'string' ? effectiveManifest.author : rowFallback?.author),
+    version: effectiveManifest?.version || rowFallback?.version,
+    icons: buildPluginIcons(effectiveManifest, { sourceId, name: pluginName, dir, source }),
+    skills: listSkills(dir, effectiveManifest),
+    agents: listAgents(dir, effectiveManifest).map((a) => ({
       file: a.file,
       name: a.name,
       displayName: a.displayName || a.name,
@@ -1337,9 +1853,12 @@ export function pluginDetail(sourceId, pluginName, source, rowFallback) {
       tools: a.tools || null,
       model: a.model || null,
     })),
-    prompts: listPrompts(dir),
-    connectors: listConnectors(dir),
-    hooks: listHooks(dir),
+    prompts: listPrompts(dir, effectiveManifest),
+    connectors: listConnectors(dir, effectiveManifest).map((c) => ({
+      ...c,
+      ...resolveConnectorDisplay(c, dir),
+    })),
+    hooks: listHooks(dir, effectiveManifest),
     lspServers,
   }
 }

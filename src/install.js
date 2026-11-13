@@ -9,7 +9,7 @@
  */
 import { existsSync, lstatSync, mkdirSync, rmSync, readFileSync, writeFileSync, renameSync, readdirSync, copyFileSync, statSync, accessSync, constants as fsConstants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join, basename, isAbsolute, resolve, extname, delimiter } from 'node:path'
+import { dirname, join, basename, isAbsolute, resolve, extname, delimiter, sep } from 'node:path'
 import { execFile, execFileSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
@@ -20,9 +20,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
-import { installedDir, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir } from './store.js'
-import { materializePlugin, pullSource, pluginPath } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, resolveHookConfigPath, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName } from './parser.js'
+import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir } from './store.js'
+import { materializePlugin, pullSource } from './market.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { isUploadedSkillTarget } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
@@ -128,18 +128,18 @@ export function connectorRequiresAuth(cfg) {
   // 2. If URL explicitly embeds a concrete API key / token query parameter (e.g. Tavily: ?api_key=tvly-...)
   if (cfg.url && typeof cfg.url === 'string' && /[?&](api_key|apiKey|token|key|access_token)=([^&]+)/i.test(cfg.url)) {
     const match = cfg.url.match(/[?&](api_key|apiKey|token|key|access_token)=([^&]+)/i)
-    if (match && !match[2].includes('${') && match[2].trim().length > 3) {
+    if (match && !hasUnresolvedVarPlaceholder(match[2]) && match[2].trim().length > 3) {
       return false // Ready to connect directly without separate header
     }
   }
   // 3. Explicit template placeholders in headers (e.g. ${GITHUB_PERSONAL_ACCESS_TOKEN})
   if (cfg.headers && typeof cfg.headers === 'object') {
-    if (Object.values(cfg.headers).some((v) => typeof v === 'string' && v.includes('${'))) return true
+    if (Object.values(cfg.headers).some((v) => typeof v === 'string' && hasUnresolvedVarPlaceholder(v))) return true
     if (Object.keys(cfg.headers).some((k) => /auth|token|key|secret/i.test(k) && !cfg.headers[k])) return true
   }
   // 4. Explicit template placeholders in env (e.g. ${NOTION_API_KEY} or ${API_KEY})
   if (cfg.env && typeof cfg.env === 'object') {
-    if (Object.values(cfg.env).some((v) => typeof v === 'string' && v.includes('${'))) return true
+    if (Object.values(cfg.env).some((v) => typeof v === 'string' && hasUnresolvedVarPlaceholder(v))) return true
     if (Object.keys(cfg.env).some((k) => /auth|token|key|secret|password/i.test(k) && !cfg.env[k])) return true
   }
   // 5. Known cloud MCP services that mandate authentication tokens
@@ -155,7 +155,7 @@ export function connectorRequiresAuth(cfg) {
   if (isHttp) {
     if (cfg.url && /^https?:\/\//i.test(cfg.url) && !/localhost|127\.0\.0\.1/i.test(cfg.url)) {
       const authHeader = cfg.headers?.Authorization || cfg.headers?.authorization
-      if (!authHeader || authHeader.includes('${')) {
+      if (!authHeader || hasUnresolvedVarPlaceholder(authHeader)) {
         return true
       }
     }
@@ -195,18 +195,18 @@ function connectorAuthenticated(found, entry) {
   const url = cfg.url || found.url || ''
   if (url && typeof url === 'string' && /[?&](api_key|apiKey|token|key|access_token)=([^&]+)/i.test(url)) {
     const match = url.match(/[?&](api_key|apiKey|token|key|access_token)=([^&]+)/i)
-    if (match && !match[2].includes('${') && match[2].trim().length > 3) {
+    if (match && !hasUnresolvedVarPlaceholder(match[2]) && match[2].trim().length > 3) {
       return true
     }
   }
   const authHeader = cfg.headers?.Authorization || cfg.headers?.authorization || ''
-  if (authHeader && !authHeader.includes('${') && authHeader.trim().length > 0) {
+  if (authHeader && !hasUnresolvedVarPlaceholder(authHeader) && authHeader.trim().length > 0) {
     return true
   }
-  if (cfg.headers && Object.values(cfg.headers).some((v) => typeof v === 'string' && !v.includes('${') && v.trim().length > 0)) {
+  if (cfg.headers && Object.values(cfg.headers).some((v) => typeof v === 'string' && !hasUnresolvedVarPlaceholder(v) && v.trim().length > 0)) {
     return true
   }
-  if (cfg.env && Object.values(cfg.env).some((v) => typeof v === 'string' && !v.includes('${') && v.trim().length > 0)) {
+  if (cfg.env && Object.values(cfg.env).some((v) => typeof v === 'string' && !hasUnresolvedVarPlaceholder(v) && v.trim().length > 0)) {
     return true
   }
   return false
@@ -246,6 +246,15 @@ function setRemoteVerification(pluginName, connectorName, payload, verified) {
   writeMcpToolsState(state)
 }
 
+export function isOAuthConnectorAuthenticated(pluginName, connectorName, remote, toolsState) {
+  if (!remote || !isOAuthMode(remote.oauth) || !remote.credentialKey) return false
+  const record = readOAuthRecord(remote.credentialKey)
+  if (!record?.tokens) return false
+  if (remote.oauth === 'custom' && record.customClient?.client_id !== remote.oauthClientId) return false
+  const stateEntry = (toolsState || readMcpToolsState())[`${pluginName}::${connectorName}`]
+  return stateEntry?.verifiedRemoteConfig === remoteConfigFingerprint(remote)
+}
+
 export function isConnectorActive(pluginName, connectorName) {
   const entry = getConnectorEntry(pluginName, connectorName)
   return connectorActive(entry, () => isConnectorAuthenticated(pluginName, connectorName),
@@ -261,31 +270,47 @@ function connectorActive(entry, authenticated, toolState) {
 
 export const getPluginConnectors = listConnectors
 
-export function substitutePluginRoot(val, pluginRoot) {
-  if (typeof val === 'string') {
-    const normalizedRoot = pluginRoot.replace(/\\/g, '/')
-    return val
-      .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, normalizedRoot)
-      .replace(/\$CLAUDE_PLUGIN_ROOT\b/g, normalizedRoot)
-  }
-  if (Array.isArray(val)) {
-    return val.map((item) => substitutePluginRoot(item, pluginRoot))
-  }
-  if (val && typeof val === 'object') {
-    const res = {}
-    for (const [k, v] of Object.entries(val)) {
-      res[k] = substitutePluginRoot(v, pluginRoot)
+export function substitutePluginRoot(val, pluginRoot, explicitDataDir) {
+  return expandPluginVars(val, pluginRoot, explicitDataDir)
+}
+
+function stripSyntheticRuntimeEnv(envObj, pluginName, pluginRoot) {
+  if (!envObj || typeof envObj !== 'object') return {}
+  const normRoot = pluginRoot ? pluginRoot.replace(/\\/g, '/') : ''
+  const normData = pluginName && pluginName !== 'user-mcp' ? pluginDataDir(pluginName).replace(/\\/g, '/') : ''
+  const out = {}
+  for (const [k, v] of Object.entries(envObj)) {
+    if (PLUGIN_RUNTIME_ENV_KEYS.includes(k)) {
+      const val = typeof v === 'string' ? v.replace(/\\/g, '/') : v
+      if (val === normRoot || val === normData) continue
     }
-    return res
+    out[k] = v
   }
-  return val
+  return out
+}
+
+function pluginRuntimeEnv(pluginName, pluginRoot, existingEnv = {}, pluginOwned = pluginName !== 'user-mcp') {
+  if (!pluginOwned || !pluginRoot) return { ...(existingEnv || {}) }
+  const normRoot = pluginRoot.replace(/\\/g, '/')
+  const dataDir = pluginDataDir(pluginName)
+  mkdirSync(dataDir, { recursive: true })
+  const normData = dataDir.replace(/\\/g, '/')
+  return {
+    PLUGIN_ROOT: normRoot,
+    PLUGIN_DATA: normData,
+    CLAUDE_PLUGIN_ROOT: normRoot,
+    CLAUDE_PLUGIN_DATA: normData,
+    ...(existingEnv || {}),
+  }
 }
 
 export function registerConnector(pluginName, connectorName, connectorConfig) {
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
-  const pluginRoot = installedDir(pluginName)
-  const resolvedConfig = substitutePluginRoot(connectorConfig, pluginRoot)
+  const pluginOwned = pluginName !== 'user-mcp'
+  const pluginRoot = pluginOwned ? installedDir(pluginName) : ''
+  const dataDir = pluginOwned ? pluginDataDir(pluginName) : ''
+  const resolvedConfig = substitutePluginRoot(connectorConfig || {}, pluginRoot, dataDir)
 
   let insertBlock = patch.find((item) => item && Array.isArray(item.insert))
   if (!insertBlock) {
@@ -309,9 +334,25 @@ export function registerConnector(pluginName, connectorName, connectorConfig) {
   if (resolvedConfig.headers && Object.keys(resolvedConfig.headers).length > 0) {
     clientConfig.headers = resolvedConfig.headers
   }
-  if (resolvedConfig.command) clientConfig.command = resolvedConfig.command
-  if (resolvedConfig.args && resolvedConfig.args.length > 0) clientConfig.args = resolvedConfig.args
-  if (resolvedConfig.env && Object.keys(resolvedConfig.env).length > 0) clientConfig.env = resolvedConfig.env
+  if (!isHttp) {
+    const resolvedCmd = resolvePluginCommand(connectorConfig?.command, pluginRoot, dataDir)
+    if (resolvedCmd) clientConfig.command = resolvedCmd
+    if (resolvedConfig.args && resolvedConfig.args.length > 0) clientConfig.args = resolvedConfig.args
+    const resolvedCwd = resolvePluginCwd(connectorConfig?.cwd, pluginRoot, dataDir, {
+      command: connectorConfig?.command,
+      args: connectorConfig?.args,
+    })
+    if (resolvedCwd) clientConfig.cwd = resolvedCwd
+    const isOAuthBridge = Array.isArray(resolvedConfig.args) && resolvedConfig.args[0] === OAUTH_BRIDGE_PATH
+    const mergedEnv = isOAuthBridge
+      ? (resolvedConfig.env || {})
+      : pluginRuntimeEnv(pluginName, pluginRoot, resolvedConfig.env, pluginOwned)
+    if (Object.keys(mergedEnv).length > 0) clientConfig.env = mergedEnv
+  } else {
+    if (resolvedConfig.command) clientConfig.command = resolvedConfig.command
+    if (resolvedConfig.args && resolvedConfig.args.length > 0) clientConfig.args = resolvedConfig.args
+    if (resolvedConfig.env && Object.keys(resolvedConfig.env).length > 0) clientConfig.env = resolvedConfig.env
+  }
 
   insertBlock.insert.push({
     id,
@@ -323,24 +364,58 @@ export function registerConnector(pluginName, connectorName, connectorConfig) {
   return { ok: true, connected: true }
 }
 
+function canonicalConnectorSpec(cfg = {}, pluginName, pluginRoot) {
+  const isHttp = isRemoteConnector(cfg)
+  const rawEnv = cfg.env ? stripSyntheticRuntimeEnv(cfg.env, pluginName, pluginRoot) : {}
+  const sortEntries = (obj) => Object.entries(obj || {}).sort(([a], [b]) => a.localeCompare(b))
+  return JSON.stringify({
+    transport: isHttp ? 'http' : 'stdio',
+    url: isHttp ? (cfg.url || null) : null,
+    command: cfg.command || null,
+    args: Array.isArray(cfg.args) ? cfg.args : [],
+    cwd: !isHttp ? (cfg.cwd || '') : '',
+    headers: sortEntries(cfg.headers),
+    env: sortEntries(rawEnv),
+  })
+}
+
 export function unregisterConnector(pluginName, connectorName, { keepDefinition = false } = {}) {
   const key = `${pluginName}::${connectorName}`
   MCP_ACTIVATIONS.delete(key)
   MCP_TOOLS_INFLIGHT.delete(key)
   MEMORY_TOOLS_CACHE.delete(key)
+  cancelActivePluginProbes(pluginName, connectorName)
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
   const config = getConnectorEntry(pluginName, connectorName)?.config
   const remote = remoteConfigFromEntry(config)
   if (remote || (keepDefinition && config)) {
     const state = readMcpToolsState()
-    const saved = state[key] ||= {}
-    if (remote) saved.savedOAuthRemoteConfig = remote
-    else {
-      saved.savedConnectorDefinition = { ...saved.savedConnectorDefinition, ...config }
-      saved.pluginConnectorOwned = true
+    const prevSaved = state[key]
+    const pluginTarget = pluginName !== 'user-mcp' ? installedDir(pluginName) : ''
+    const cleanedConfig = config?.env
+      ? { ...config, env: stripSyntheticRuntimeEnv(config.env, pluginName, pluginTarget) }
+      : config
+    const manifestDefault = !remote && pluginTarget && existsSync(pluginTarget)
+      ? getPluginConnectors(pluginTarget).find((c) => c.name === connectorName)
+      : null
+    const matchesDefault = Boolean(
+      manifestDefault
+      && !connectorRequiresAuth(manifestDefault)
+      && !prevSaved?.savedConnectorDefinition
+      && !prevSaved?.savedConnectorTemplate
+      && canonicalConnectorSpec(cleanedConfig, pluginName, pluginTarget)
+        === canonicalConnectorSpec(connectorDefinition(pluginName, connectorName, manifestDefault, true), pluginName, pluginTarget),
+    )
+    if (remote || !matchesDefault) {
+      const saved = state[key] ||= {}
+      if (remote) saved.savedOAuthRemoteConfig = remote
+      else {
+        saved.savedConnectorDefinition = { ...saved.savedConnectorDefinition, ...cleanedConfig }
+        saved.pluginConnectorOwned = true
+      }
+      writeMcpToolsState(state, { required: keepDefinition })
     }
-    writeMcpToolsState(state, { required: keepDefinition })
   }
 
   for (const item of patch) {
@@ -413,6 +488,8 @@ export function userMcpConfig(name, body = {}, fallback = {}) {
   for (const candidate of [fallback.url, body.url]) {
     if (typeof candidate === 'string' && candidate.trim()) usedUrls.add(candidate)
   }
+  const rawCwd = pick(body.cwd, fallback.cwd ?? null)
+  const cwd = typeof rawCwd === 'string' && rawCwd.trim() ? rawCwd.trim() : null
   return {
     name,
     usedUrls: [...usedUrls],
@@ -420,6 +497,7 @@ export function userMcpConfig(name, body = {}, fallback = {}) {
     url: pick(body.url, fallback.url ?? null),
     command: pick(body.command, fallback.command ?? null),
     args: Array.isArray(body.args) ? body.args : (fallback.args || []),
+    ...(cwd ? { cwd } : {}),
     env: body.env && typeof body.env === 'object' ? body.env : (fallback.env || {}),
     headers: body.headers && typeof body.headers === 'object' ? body.headers : (fallback.headers || {}),
     oauth: body.oauth || fallback.oauth || 'none',
@@ -563,38 +641,37 @@ export function renameUserMcp(oldName, newName, payload, { enable = false, probe
  * package fine, then `lsp-stdio.apply()` rejects the command at load time
  * and the entire DSH plugin tree fails to come up.
  */
-export function resolveCommandPath(command, env = process.env) {
+function findExecutable(basePath, exts) {
+  for (const ext of exts) {
+    const candidate = basePath + ext
+    try {
+      if (!statSync(candidate).isFile()) continue
+      accessSync(candidate, fsConstants.X_OK)
+      return candidate
+    } catch {
+      // try next extension candidate
+    }
+  }
+  return null
+}
+
+export function resolveCommandPath(command, env = process.env, { cwd } = {}) {
   if (typeof command !== 'string') return null
   const trimmed = command.trim()
   if (!trimmed) return null
-  if (isAbsolute(trimmed)) {
-    try {
-      if (!statSync(trimmed).isFile()) return null
-      accessSync(trimmed, fsConstants.X_OK)
-      return trimmed
-    } catch {
-      return null
-    }
-  }
+  const exts = process.platform === 'win32' && !extname(trimmed)
+    ? String(env?.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : ['']
+  if (isAbsolute(trimmed)) return findExecutable(trimmed, exts)
+  if (cwd && isDotRelativePath(trimmed)) return findExecutable(resolve(cwd, trimmed), exts)
   if (trimmed.includes('/') || (process.platform === 'win32' && trimmed.includes('\\'))) {
     return null
   }
   const pathEnv = (env && (env.PATH || env.Path)) || ''
   if (!pathEnv) return null
-  const exts = process.platform === 'win32' && !extname(trimmed)
-    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : ['']
   for (const dir of pathEnv.split(delimiter).filter(Boolean)) {
-    for (const ext of exts) {
-      const candidate = resolve(dir, trimmed + ext)
-      try {
-        if (!statSync(candidate).isFile()) continue
-        accessSync(candidate, fsConstants.X_OK)
-        return candidate
-      } catch {
-        // not a match, try next candidate
-      }
-    }
+    const hit = findExecutable(resolve(dir, trimmed), exts)
+    if (hit) return hit
   }
   return null
 }
@@ -1031,9 +1108,11 @@ export function registerLspServer(pluginName, serverName, serverConfig) {
   const patch = readCordisPatch()
   const id = getLspServerId(pluginName, serverName)
   const pluginRoot = installedDir(pluginName)
-  const resolved = substitutePluginRoot(serverConfig || {}, pluginRoot)
+  const dataDir = pluginDataDir(pluginName)
+  const resolved = substitutePluginRoot(serverConfig || {}, pluginRoot, dataDir)
+  const resolvedCmd = resolvePluginCommand(serverConfig?.command, pluginRoot, dataDir)
 
-  if (!resolved.command || typeof resolved.command !== 'string' || !resolved.command.trim()) {
+  if (!resolvedCmd || typeof resolvedCmd !== 'string' || !resolvedCmd.trim()) {
     return { ok: false, active: false, error: `LSP server ${serverName} 缺少有效的 command` }
   }
   if (!resolved.extensionToLanguage || typeof resolved.extensionToLanguage !== 'object' || Object.keys(resolved.extensionToLanguage).length === 0) {
@@ -1045,12 +1124,12 @@ export function registerLspServer(pluginName, serverName, serverConfig) {
   // time and throws if the command is missing — that exception aborts the
   // entire plugin tree. Returning here keeps DSH bootable and surfaces a
   // concrete remediation hint to the caller (UI / install result).
-  if (!resolveCommandPath(resolved.command)) {
+  if (!resolveCommandPath(resolvedCmd, process.env, { cwd: pluginRoot })) {
     return {
       ok: false,
       active: false,
-      error: `LSP server ${serverName} 注册失败：未找到可执行文件 "${resolved.command}"。` +
-        `请先安装并确保其在 PATH 中（常见做法：npm install -g ${resolved.command}），` +
+      error: `LSP server ${serverName} 注册失败：未找到可执行文件 "${resolvedCmd}"。` +
+        `请先安装并确保其在 PATH 中（常见做法：npm install -g ${resolvedCmd}），` +
         `然后在管理页点击「更新」重新注册。`,
     }
   }
@@ -1061,7 +1140,7 @@ export function registerLspServer(pluginName, serverName, serverConfig) {
   block.insert = block.insert.filter((item) => item && item.id !== id)
 
   const serverEntry = {
-    command: resolved.command,
+    command: resolvedCmd,
     extensionToLanguage: resolved.extensionToLanguage,
   }
   if (Array.isArray(resolved.args) && resolved.args.length > 0) serverEntry.args = resolved.args
@@ -1136,13 +1215,19 @@ export function getHookBridgeId(pluginName) {
  */
 export async function registerPluginHooks(pluginName) {
   const target = installedDir(pluginName)
-  const configPath = resolveHookConfigPath(target)
+  const dataDir = pluginDataDir(pluginName)
+  const compiled = compileResolvedHooks(target, readPluginManifest(target), dataDir)
   // A version that dropped its hooks must also lose the previous bridge entry,
   // otherwise the old hooks keep firing after reinstall.
-  if (!configPath) {
+  if (!compiled) {
     unregisterPluginHooks(pluginName)
     return { ok: true, registered: [] }
   }
+
+  const outPath = compiledHooksPath(pluginName)
+  mkdirSync(dirname(outPath), { recursive: true })
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(outPath, JSON.stringify(compiled, null, 2), 'utf8')
 
   const patch = readCordisPatch()
   const id = getHookBridgeId(pluginName)
@@ -1152,12 +1237,12 @@ export async function registerPluginHooks(pluginName) {
     id,
     name: HOOK_BRIDGE_PKG,
     config: {
-      configPath,
+      configPath: outPath,
       pluginRoot: target,
     },
   })
   writeCordisPatch(patch)
-  return { ok: true, registered: [configPath] }
+  return { ok: true, registered: [outPath] }
 }
 
 /** Remove a plugin's hooks bridge entry from cordis.patch.yml. */
@@ -1171,6 +1256,9 @@ export function unregisterPluginHooks(pluginName) {
   }
   const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
   writeCordisPatch(cleaned)
+  try {
+    rmSync(compiledHooksPath(pluginName), { force: true })
+  } catch {}
   return { ok: true }
 }
 
@@ -1188,9 +1276,12 @@ export function isLspActive(pluginName, serverName) {
 const autoActivatedLspServers = new Set()
 
 export function toggleConnector(pluginName, connectorName, enabled) {
-  return enabled
-    ? enableConnector(pluginName, connectorName, undefined, { pluginOwned: true })
-    : unregisterConnector(pluginName, connectorName, { keepDefinition: true })
+  if (!enabled) return unregisterConnector(pluginName, connectorName, { keepDefinition: true })
+  const saved = readMcpToolsState()[`${pluginName}::${connectorName}`]
+  const rememberDefinition = Boolean(
+    saved?.savedConnectorDefinition || saved?.savedConnectorTemplate || saved?.savedOAuthRemoteConfig,
+  )
+  return enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, rememberDefinition })
 }
 
 function savedConnectorDefinition(pluginName, connectorName) {
@@ -1198,12 +1289,12 @@ function savedConnectorDefinition(pluginName, connectorName) {
   const state = readMcpToolsState()[`${pluginName}::${connectorName}`]
   const saved = state?.savedConnectorDefinition
   if (entry) return remoteConfigFromEntry(entry.config) || { ...saved, ...entry.config }
-  return saved || state?.savedOAuthRemoteConfig
+  return state?.savedConnectorTemplate || saved || state?.savedOAuthRemoteConfig
 }
 
 function connectorEnvironment(found, payload) {
   const base = Object.fromEntries(Object.entries(found?.env || {}).filter(([, value]) =>
-    typeof value !== 'string' || !value.includes('${')))
+    typeof value !== 'string' || !hasUnresolvedVarPlaceholder(value)))
   const overrides = payload?.env || found?.env || {}
   return { ...base, ...overrides }
 }
@@ -1246,13 +1337,13 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload, { 
   }
 }
 
-function connectorDefinition(pluginName, connectorName, payload = {}, pluginOwned = pluginName !== 'user-mcp') {
-  const target = installedDir(pluginName)
+function connectorTemplateDefinition(pluginName, connectorName, payload = {}, pluginOwned = pluginName !== 'user-mcp') {
+  const target = pluginOwned ? installedDir(pluginName) : ''
   const found = (pluginOwned && getPluginConnectors(target).find(c => c.name === connectorName)) || {}
   const transport = connectorTransport(payload.transport || payload.type || found.type, payload.url ?? found.url, payload.command ?? found.command)
   const headers = new Map()
   for (const [key, value] of Object.entries(found.headers || {})) {
-    if (typeof value === 'string' && !value.includes('${')) headers.set(key.toLowerCase(), [key, value])
+    if (typeof value === 'string' && !hasUnresolvedVarPlaceholder(value)) headers.set(key.toLowerCase(), [key, value])
   }
   for (const [key, value] of Object.entries(payload.headers || {})) {
     headers.set(key.toLowerCase(), [key, value])
@@ -1262,19 +1353,43 @@ function connectorDefinition(pluginName, connectorName, payload = {}, pluginOwne
   if (token && !isOAuthMode(oauth) && !headers.has('authorization')) {
     headers.set('authorization', ['Authorization', token.startsWith('Bearer ') ? token : `Bearer ${token}`])
   }
-  return substitutePluginRoot({
+  const rawCwd = payload.cwd !== undefined
+    ? (typeof payload.cwd === 'string' ? payload.cwd.trim() : '')
+    : (found.cwd !== undefined ? String(found.cwd).trim() : undefined)
+  return {
     transport,
     type: transport,
     url: transport === 'http' ? (payload.url ?? found.url ?? (connectorName === 'notion' ? 'https://mcp.notion.com/mcp' : null))?.trim() : null,
     command: payload.command ?? found.command ?? null,
     args: Array.isArray(payload.args) ? payload.args : (found.args || []),
-    env: connectorEnvironment(found, payload),
+    ...(rawCwd !== undefined ? { cwd: rawCwd } : {}),
+    env: stripSyntheticRuntimeEnv(connectorEnvironment(found, payload), pluginName, target),
     headers: Object.fromEntries(headers.values()),
     oauth,
     oauthClientId: String(payload.oauthClientId || '').trim(),
     oauthCallbackPort: payload.oauthCallbackPort,
     oauthScope: payload.oauthScope || '',
-  }, target)
+  }
+}
+
+function connectorDefinition(pluginName, connectorName, payload = {}, pluginOwned = pluginName !== 'user-mcp') {
+  const rawTpl = connectorTemplateDefinition(pluginName, connectorName, payload, pluginOwned)
+  const target = pluginOwned ? installedDir(pluginName) : ''
+  const dataDir = pluginOwned ? pluginDataDir(pluginName) : ''
+  const resolved = substitutePluginRoot(rawTpl, target, dataDir)
+  if (resolved.transport === 'stdio') {
+    resolved.command = resolvePluginCommand(rawTpl.command, target, dataDir)
+    const resolvedCwd = resolvePluginCwd(rawTpl.cwd, target, dataDir, {
+      command: rawTpl.command,
+      args: rawTpl.args,
+    })
+    if (resolvedCwd) resolved.cwd = resolvedCwd
+    else delete resolved.cwd
+    if (pluginOwned) resolved.env = pluginRuntimeEnv(pluginName, target, resolved.env, true)
+  } else {
+    delete resolved.cwd
+  }
+  return resolved
 }
 
 function oauthConnectorRegistration(pluginName, connectorName, definition) {
@@ -1289,20 +1404,66 @@ function oauthConnectorRegistration(pluginName, connectorName, definition) {
   }
 }
 
+const ACTIVE_PLUGIN_PROBES = new Map()
+
+function trackPluginProbe(pluginName, connectorName, run) {
+  if (!pluginName) return run(undefined)
+  const controller = new AbortController()
+  let probes = ACTIVE_PLUGIN_PROBES.get(pluginName)
+  if (!probes) {
+    probes = new Set()
+    ACTIVE_PLUGIN_PROBES.set(pluginName, probes)
+  }
+  const entry = { connectorName, controller, settled: null }
+  entry.settled = (async () => run(controller.signal))().finally(() => {
+    probes.delete(entry)
+    if (probes.size === 0 && ACTIVE_PLUGIN_PROBES.get(pluginName) === probes) {
+      ACTIVE_PLUGIN_PROBES.delete(pluginName)
+    }
+  })
+  probes.add(entry)
+  return entry.settled
+}
+
+function cancelActivePluginProbes(pluginName, connectorName) {
+  const probes = ACTIVE_PLUGIN_PROBES.get(pluginName)
+  if (!probes || probes.size === 0) return []
+  const batch = []
+  for (const entry of probes) {
+    if (!connectorName || entry.connectorName === connectorName) {
+      entry.controller.abort()
+      batch.push(entry.settled)
+    }
+  }
+  return batch
+}
+
+async function abortPluginConnectorProbes(pluginName, connectorName) {
+  // Background warm-up probes spawn stdio processes whose cwd may be inside the
+  // plugin directory; abort and await process exit before removing or replacing it.
+  while (true) {
+    const batch = cancelActivePluginProbes(pluginName, connectorName)
+    if (batch.length === 0) break
+    await Promise.allSettled(batch)
+  }
+}
+
 async function probeConnectorDefinition(pluginName, connectorName, definition, timeout) {
-  if (definition.transport === 'stdio') {
-    return definition.command
-      ? queryStdioToolsList(definition.command, definition.args, definition.env)
-      : { tools: [], error: '未配置有效的 stdio 启动命令 (command)' }
-  }
-  if (!/^https?:\/\//i.test(definition.url || '')) return { tools: [], error: '缺少有效的服务 URL' }
-  if (isOAuthMode(definition.oauth)) {
-    const registration = oauthConnectorRegistration(pluginName, connectorName, definition)
-    return queryStdioToolsList(registration.command, registration.args, {
-      ...registration.env, UPH_MCP_INTERACTIVE: '0', UPH_MCP_VERIFY: '0',
-    })
-  }
-  return queryHttpToolsList(definition.url, definition.headers, timeout)
+  return trackPluginProbe(pluginName, connectorName, (signal) => {
+    if (definition.transport === 'stdio') {
+      return definition.command
+        ? queryStdioToolsList(definition.command, definition.args, definition.env, { cwd: definition.cwd, signal })
+        : { tools: [], error: '未配置有效的 stdio 启动命令 (command)' }
+    }
+    if (!/^https?:\/\//i.test(definition.url || '')) return { tools: [], error: '缺少有效的服务 URL' }
+    if (isOAuthMode(definition.oauth)) {
+      const registration = oauthConnectorRegistration(pluginName, connectorName, definition)
+      return queryStdioToolsList(registration.command, registration.args, {
+        ...registration.env, UPH_MCP_INTERACTIVE: '0', UPH_MCP_VERIFY: '0',
+      }, { signal })
+    }
+    return queryHttpToolsList(definition.url, definition.headers, timeout, signal)
+  })
 }
 
 export async function probeConnectorAuth(pluginName, connectorName, payload, { pluginOwned } = {}) {
@@ -1366,10 +1527,15 @@ export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOw
     const state = readMcpToolsState()
     const saved = state[key] ||= {}
     if (pluginOwned && !isOAuthMode(oauth)) {
-      if (rememberDefinition) saved.savedConnectorDefinition = definition
+      if (rememberDefinition) {
+        saved.savedConnectorDefinition = definition
+        saved.savedConnectorTemplate = connectorTemplateDefinition(pluginName, connectorName, payload, pluginOwned)
+      }
       saved.pluginConnectorOwned = true
+    } else {
+      delete saved.savedConnectorDefinition
+      delete saved.savedConnectorTemplate
     }
-    else delete saved.savedConnectorDefinition
     const remote = remoteConfigFromEntry(registration)
     if (remote) saved.savedOAuthRemoteConfig = remote
     else delete saved.savedOAuthRemoteConfig
@@ -1460,13 +1626,23 @@ const MCP_AUTH_TIMEOUT_MS = 8000
 const STDERR_TAIL_BYTES = 8192
 
 /** Use the same MCP transport as DSH, including Windows command shim resolution. */
-export async function queryStdioToolsList(cmd, args, extraEnv = {}) {
+export async function queryStdioToolsList(cmd, args, extraEnv = {}, options = {}) {
+  const externalSignal = options?.signal
+  if (externalSignal?.aborted) {
+    return { tools: [], error: 'MCP 探测已取消' }
+  }
   // Windows treats env names case-insensitively. Normalize before merging so
   // an explicit Path/PATH overrides both the parent and the SDK default.
   const env = process.platform === 'win32'
     ? Object.fromEntries([...Object.entries(process.env), ...Object.entries(extraEnv)].map(([key, value]) => [key.toUpperCase(), value]))
     : { ...process.env, ...extraEnv }
-  const transport = new StdioClientTransport({ command: cmd, args: Array.isArray(args) ? args : [], env, stderr: 'pipe' })
+  const transport = new StdioClientTransport({
+    command: cmd,
+    args: Array.isArray(args) ? args : [],
+    env,
+    ...(options?.cwd ? { cwd: options.cwd } : {}),
+    stderr: 'pipe',
+  })
   const client = new Client({ name: 'universal-plugin-hub', version: '1.0.0' })
   // The SDK starts cleanup itself if initialization fails. Wait for the same
   // close operation in finally before returning the probe result.
@@ -1478,24 +1654,32 @@ export async function queryStdioToolsList(cmd, args, extraEnv = {}) {
   transport.stderr?.setEncoding('utf8').on('data', (chunk) => {
     stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES)
   })
+  const onAbort = () => { void transport.close().catch(() => {}) }
+  externalSignal?.addEventListener('abort', onAbort, { once: true })
+  const combineSignal = (timeoutSignal) => (externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal)
 
   let phase = '启动'
   let timeout = MCP_STARTUP_TIMEOUT_MS
-  let signal = AbortSignal.timeout(timeout)
+  let timeoutSignal = AbortSignal.timeout(timeout)
+  let signal = combineSignal(timeoutSignal)
   try {
     await client.connect(transport, { timeout, signal })
     phase = '工具解析'
     timeout = MCP_TOOLS_TIMEOUT_MS
-    signal = AbortSignal.timeout(timeout)
+    timeoutSignal = AbortSignal.timeout(timeout)
+    signal = combineSignal(timeoutSignal)
     return { tools: await listMcpTools(client, { timeout, signal }), error: null }
   } catch (error) {
     const message = error?.message || String(error)
     const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ')
-    const reason = signal.aborted || error?.code === ErrorCode.RequestTimeout
-      ? `MCP ${phase}超时（${timeout / 1000} 秒）`
-      : phase === '启动' ? `无法启动 ${cmd}: ${message}` : message
+    const reason = externalSignal?.aborted
+      ? 'MCP 探测已取消'
+      : timeoutSignal.aborted || error?.code === ErrorCode.RequestTimeout
+        ? `MCP ${phase}超时（${timeout / 1000} 秒）`
+        : phase === '启动' ? `无法启动 ${cmd}: ${message}` : message
     return { tools: [], error: detail ? `${reason}：${detail}` : reason }
   } finally {
+    externalSignal?.removeEventListener('abort', onAbort)
     await transport.close()
   }
 }
@@ -1515,8 +1699,10 @@ async function listMcpTools(client, options) {
   } while (true)
 }
 
-async function queryHttpToolsList(url, headers, timeout = MCP_TOOLS_TIMEOUT_MS) {
-  const signal = AbortSignal.timeout(timeout)
+async function queryHttpToolsList(url, headers, timeout = MCP_TOOLS_TIMEOUT_MS, externalSignal) {
+  if (externalSignal?.aborted) return { tools: [], error: 'MCP 探测已取消' }
+  const timeoutSignal = AbortSignal.timeout(timeout)
+  const signal = externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal
   let transport
   try {
     transport = new StreamableHTTPClientTransport(new URL(url), {
@@ -1531,11 +1717,13 @@ async function queryHttpToolsList(url, headers, timeout = MCP_TOOLS_TIMEOUT_MS) 
     return { tools, error: null, status: 200 }
   } catch (error) {
     const status = Number.isInteger(error.code) && error.code >= 400 && error.code <= 599 ? error.code : undefined
-    const message = signal.aborted || error.code === ErrorCode.RequestTimeout
-      ? `连接或解析 MCP 工具超时（${timeout / 1000} 秒）`
-      : status === 401 || status === 403 ? `MCP 服务返回 HTTP ${status}，请检查 Headers 或 OAuth 授权`
-        : status ? `MCP 服务返回 HTTP ${status}`
-        : `连接或解析 MCP 工具失败：${error.message}`
+    const message = externalSignal?.aborted
+      ? 'MCP 探测已取消'
+      : timeoutSignal.aborted || error.code === ErrorCode.RequestTimeout
+        ? `连接或解析 MCP 工具超时（${timeout / 1000} 秒）`
+        : status === 401 || status === 403 ? `MCP 服务返回 HTTP ${status}，请检查 Headers 或 OAuth 授权`
+          : status ? `MCP 服务返回 HTTP ${status}`
+          : `连接或解析 MCP 工具失败：${error.message}`
     return { tools: [], error: message, status }
   } finally {
     if (transport?.sessionId && !signal.aborted) await transport.terminateSession().catch(() => {})
@@ -1731,8 +1919,10 @@ async function retryManagedDirOperation(operation, destination) {
     } catch (err) {
       // Windows can keep a deleted directory name reserved until the last
       // handle closes. Keep retries scoped to directory cleanup and creation.
-      if (process.platform !== 'win32' || attempt >= 5 || (destination && err.path !== destination) ||
-        ![undefined, 'lstat', 'unlink', 'mkdir'].includes(err.syscall) ||
+      const insideDestination = !destination || err.path === destination ||
+        (typeof err.path === 'string' && err.path.startsWith(destination + sep))
+      if (process.platform !== 'win32' || attempt >= 5 || !insideDestination ||
+        ![undefined, 'lstat', 'unlink', 'rmdir', 'rm', 'mkdir'].includes(err.syscall) ||
         !['EPERM', 'EACCES', 'EBUSY'].includes(err.code)) throw err
       await delay(50 * 2 ** attempt)
     }
@@ -1829,27 +2019,34 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
 
   // Reinstalling must not inherit the previous copy's registrations: skills it
   // no longer ships and MCP servers it dropped would otherwise stay visible.
+  await abortPluginConnectorProbes(pluginName)
   const prevConnectors = existsSync(target) ? getPluginConnectors(target).map((c) => c.name) : []
   if (existsSync(target)) await retryManagedDirOperation(() => removePluginSkillsFromDsh(pluginName))
 
   // Idempotent reinstall: clear the previous copy first.
   await replaceManagedDir(dir, target)
 
-  // Persist marketplace-declared LSP servers into the installed copy's
-  // manifest, so installedDetails / detail views can read them back even when
-  // the plugin directory itself is only a README placeholder (official LSP
-  // plugins declare `lspServers` in marketplace.json, not in the plugin tree).
-  if (row.lspServers && typeof row.lspServers === 'object' && !Array.isArray(row.lspServers)) {
+  // Persist marketplace-declared components into the installed copy's manifest
+  // when `strict: false` or when absent on disk, preserving any existing
+  // `.codex-plugin/plugin.json` / root `plugin.json` metadata.
+  const existingDiskManifest = readPluginManifest(target)
+  const keysToPersist = MARKETPLACE_COMPONENT_KEYS.filter((k) =>
+    row[k] !== undefined && (row.strict === false || !existingDiskManifest || existingDiskManifest[k] === undefined))
+  if (keysToPersist.length > 0) {
     const manifestDir = join(target, '.claude-plugin')
     mkdirSync(manifestDir, { recursive: true })
     const manifestPath = join(manifestDir, 'plugin.json')
-    let installedManifest = {}
+    let installedManifest = existingDiskManifest && typeof existingDiskManifest === 'object' ? { ...existingDiskManifest } : {}
     try {
-      if (existsSync(manifestPath)) installedManifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      if (existsSync(manifestPath)) installedManifest = { ...installedManifest, ...JSON.parse(readFileSync(manifestPath, 'utf8')) }
     } catch {
       // ignore malformed existing manifest
     }
-    installedManifest.lspServers = row.lspServers
+    if (!installedManifest.name) installedManifest.name = row.name
+    if (!installedManifest.version && row.version) installedManifest.version = row.version
+    if (!installedManifest.description && row.description) installedManifest.description = row.description
+    if (row.strict !== undefined) installedManifest.strict = row.strict
+    for (const k of keysToPersist) installedManifest[k] = row[k]
     writeFileSync(manifestPath, JSON.stringify(installedManifest, null, 2), 'utf8')
   }
 
@@ -1857,14 +2054,42 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
   const skillsDir = join(target, 'skills')
   mkdirSync(skillsDir, { recursive: true })
 
-  // Codex manifests may point at a skills collection outside the default skills/.
+  // Codex / Agent Plugins manifests may declare `skills: ["."]` or custom paths outside skills/.
+  const NON_SKILL_COPY_DIRS = new Set([
+    'skills', 'commands', 'agents', '.agents', '.claude-plugin', '.codex-plugin', '.well-known',
+    'hooks', 'prompts', 'mcp', 'lsp', 'scripts', 'server', 'node_modules', '.git', 'assets', 'docs',
+  ])
   const declaredSkills = readPluginManifest(target)?.skills
-  const skillPaths = typeof declaredSkills === 'string' ? [declaredSkills] : (Array.isArray(declaredSkills) ? declaredSkills.filter((p) => typeof p === 'string' && p.startsWith('./')) : [])
+  const skillPaths = typeof declaredSkills === 'string'
+    ? (isDotRelativePath(declaredSkills) ? [declaredSkills] : [])
+    : (Array.isArray(declaredSkills) ? declaredSkills.filter((p) => typeof p === 'string' && isDotRelativePath(p)) : [])
   for (const path of skillPaths) {
-    let root = pluginPath(target, path)
-    if (!existsSync(root) || resolve(root) === resolve(skillsDir)) continue
-    if (statSync(root).isFile()) root = dirname(root)
-    const dirs = existsSync(join(root, 'SKILL.md')) || existsSync(join(root, 'skill.md')) ? [root] : readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(root, e.name))
+    const root = resolvePluginSpecPath(target, path)
+    if (!root || !existsSync(root) || resolve(root) === resolve(skillsDir)) continue
+    if (statSync(root).isFile()) {
+      const base = basename(root)
+      if (/^skill\.md$/i.test(base)) {
+        const parent = dirname(root)
+        if (resolve(parent) !== resolve(target)) {
+          const dest = join(skillsDir, basename(parent))
+          if (resolve(dest) !== resolve(parent)) copyDir(parent, dest)
+        }
+      } else if (/\.md$/i.test(base) && !['README.md', 'CONTRIBUTING.md', 'LICENSE.md', 'CHANGELOG.md'].includes(base)) {
+        const skillName = base.replace(/\.md$/i, '')
+        const singleDir = join(skillsDir, skillName)
+        if (!existsSync(singleDir)) {
+          mkdirSync(singleDir, { recursive: true })
+          const rawContent = readFileSync(root, 'utf8')
+          writeFileSync(join(singleDir, 'SKILL.md'), ensureSkillFrontmatter(rawContent, skillName), 'utf8')
+        }
+      }
+      continue
+    }
+    const dirs = existsSync(join(root, 'SKILL.md')) || existsSync(join(root, 'skill.md'))
+      ? [root]
+      : readdirSync(root, { withFileTypes: true })
+          .filter((e) => e.isDirectory() && !NON_SKILL_COPY_DIRS.has(e.name) && !e.name.startsWith('.'))
+          .map((e) => join(root, e.name))
     for (const dir of dirs) {
       if (resolve(dir) === resolve(target)) continue // handled as a root skill below
       if (!existsSync(join(dir, 'SKILL.md')) && !existsSync(join(dir, 'skill.md'))) continue
@@ -1873,22 +2098,25 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
     }
   }
 
-  // 1. If the plugin uses commands/ (Claude Code slash commands), mirror them into skills/
-  const commandsDir = join(target, 'commands')
-  if (existsSync(commandsDir)) {
-    for (const entry of readdirSync(commandsDir, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith('.md')) {
-        const cmdName = entry.name.replace(/\.md$/, '')
-        const cmdSkillDir = join(skillsDir, cmdName)
+  // 1. Mirror commands/ (nested subdirs, manifest string/array/object paths & inline commands) into skills/
+  const { entries: commandEntries } = resolvePluginCommandEntries(target, readPluginManifest(target))
+  for (const cmd of commandEntries) {
+    const cmdSkillDir = join(skillsDir, cmd.name)
+    if (existsSync(cmdSkillDir)) continue
+    if (cmd.filePath) {
+      if (/^skill\.md$/i.test(basename(cmd.filePath))) {
         mkdirSync(cmdSkillDir, { recursive: true })
-        const rawContent = readFileSync(join(commandsDir, entry.name), 'utf8')
-        const formatted = ensureSkillFrontmatter(rawContent, cmdName)
+        copyDir(dirname(cmd.filePath), cmdSkillDir)
+      } else {
+        mkdirSync(cmdSkillDir, { recursive: true })
+        const rawContent = readFileSync(cmd.filePath, 'utf8')
+        const formatted = ensureSkillFrontmatter(rawContent, cmd.name, cmd.description)
         writeFileSync(join(cmdSkillDir, 'SKILL.md'), formatted, 'utf8')
-      } else if (entry.isDirectory()) {
-        const subSkillDir = join(skillsDir, entry.name)
-        mkdirSync(subSkillDir, { recursive: true })
-        copyDir(join(commandsDir, entry.name), subSkillDir)
       }
+    } else if (typeof cmd.content === 'string') {
+      mkdirSync(cmdSkillDir, { recursive: true })
+      const formatted = ensureSkillFrontmatter(cmd.content, cmd.name, cmd.description)
+      writeFileSync(join(cmdSkillDir, 'SKILL.md'), formatted, 'utf8')
     }
   }
 
@@ -1938,7 +2166,7 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
   const convertErrors = []
 
   for (const agent of agents) {
-    const text = readAgentYaml(target, agent.file)
+    const text = agent.raw || readAgentYaml(target, agent.file)
     const parsed = parseAgentDefinition(pluginName, agent.file, text)
     if (parsed?.error) {
       convertErrors.push(parsed.error)
@@ -1968,7 +2196,8 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
     subagentsHub = compileSubagentsHubSkill(pluginName, row.displayName || pluginName, validAgents, skillsDir)
   }
 
-  // Ensure all SKILL.md in skills/ have valid frontmatter with name:
+  // Ensure all SKILL.md in skills/ have valid frontmatter with name: and expanded runtime vars
+  const dataDir = pluginDataDir(pluginName)
   for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
       const skillFile = join(skillsDir, entry.name, 'SKILL.md')
@@ -1976,7 +2205,7 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
       if (!existsSync(skillFile) && existsSync(altSkillFile)) copyFileSync(altSkillFile, skillFile)
       if (existsSync(skillFile)) {
         const raw = readFileSync(skillFile, 'utf8')
-        const fixed = ensureSkillFrontmatter(raw, entry.name)
+        const fixed = expandPluginVars(ensureSkillFrontmatter(raw, entry.name), target, dataDir)
         if (fixed !== raw) {
           writeFileSync(skillFile, fixed, 'utf8')
         }
@@ -2066,6 +2295,8 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
 function readAgentYaml(target, file) {
   const candidates = [
     join(target, 'agents', file),
+    join(target, '.agents', file),
+    join(target, '.claude-plugin', 'agents', file),
     join(target, file),
     join(target, '.well-known', file),
   ]
@@ -2100,6 +2331,7 @@ export async function uninstallPlugin(pluginName) {
     await stopping
     stopping = stopVerifications()
   }
+  await abortPluginConnectorProbes(pluginName)
   const state = readState()
   const target = installedDir(pluginName)
   removePluginSkillsFromDsh(pluginName)
@@ -2143,8 +2375,12 @@ export async function uninstallPlugin(pluginName) {
   if (existsSync(target)) {
     unregisterPluginLsp(pluginName)
     unregisterPluginHooks(pluginName)
+  } else {
+    unregisterPluginHooks(pluginName)
   }
-  removeManagedDir(target)
+  await abortPluginConnectorProbes(pluginName)
+  await retryManagedDirOperation(() => removeManagedDir(target), target)
+  if (!sharedNamespace) await retryManagedDirOperation(() => removeManagedDir(pluginDataDir(pluginName)), pluginDataDir(pluginName))
 
   // Clean any legacy preset directories left by prior versions
   cleanupLegacyPresets(pluginName)
@@ -2191,6 +2427,7 @@ export async function togglePlugin(pluginName, enabled) {
     }
     await registerPluginHooks(pluginName)
   } else {
+    await abortPluginConnectorProbes(pluginName)
     removePluginSkillsFromDsh(pluginName)
     for (const c of pluginConnectors) {
       toggleConnector(pluginName, c.name, false)
@@ -2446,57 +2683,84 @@ export function installedDetails() {
       const toolState = () => (toolsState ??= readMcpToolsState())[`${rec.name}::${c.name}`]
       const authenticated = connectorAuthenticated(c, savedEntry)
       const connected = connectorActive(savedEntry, () => authenticated, toolState)
-      const savedConfig = savedEntry?.config || toolState()?.savedConnectorDefinition || {}
-      const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? toolState()?.savedOAuthRemoteConfig : null)
-      const storedDefinition = toolState()?.savedConnectorDefinition
-      const savedHeaders = remote ? remote.headers : (savedConfig.headers ?? storedDefinition?.headers ?? c.headers)
-      const savedEnv = remote ? {} : (savedConfig.env ?? storedDefinition?.env ?? c.env)
-      const savedUrl = remote ? remote.url : (savedConfig.url ?? c.url)
-      const savedArgs = remote ? [] : (savedConfig.args ?? storedDefinition?.args ?? c.args)
-      const savedTransport = remote ? 'http' : connectorTransport(savedConfig.transport || savedConfig.type, savedUrl, savedConfig.command || c.command)
-      const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, savedUrl, remote.oauth) : null
+      const toolStateObj = toolState()
+      const storedTemplate = toolStateObj?.savedConnectorTemplate
+      const storedDefinition = toolStateObj?.savedConnectorDefinition
+      const savedConfig = savedEntry?.config || storedDefinition || {}
+      const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? toolStateObj?.savedOAuthRemoteConfig : null)
+      const editableUrl = remote ? remote.url : (storedTemplate?.url ?? storedDefinition?.url ?? c.url ?? savedConfig.url ?? null)
+      const editableCmd = remote ? null : (storedTemplate?.command ?? storedDefinition?.command ?? c.command ?? savedConfig.command ?? null)
+      const editableArgs = remote ? [] : (storedTemplate?.args ?? storedDefinition?.args ?? c.args ?? savedConfig.args ?? [])
+      const hasStoredTplCwd = !!(storedTemplate && 'cwd' in storedTemplate)
+      const hasStoredDefCwd = !!(storedDefinition && 'cwd' in storedDefinition)
+      const rawCwd = hasStoredTplCwd
+        ? storedTemplate.cwd
+        : (hasStoredDefCwd ? storedDefinition.cwd : c.cwd)
+      const editableCwd = remote ? null : (rawCwd ?? null)
+      const editableEnv = remote ? {} : stripSyntheticRuntimeEnv(
+        storedTemplate?.env ?? storedDefinition?.env ?? c.env ?? savedConfig.env ?? {},
+        rec.name,
+        target,
+      )
+      const dataDir = pluginDataDir(rec.name)
+      const expandedManifestHeaders = expandPluginVars(c.headers || {}, target, dataDir)
+      const sortHeaders = (obj) => JSON.stringify(Object.entries(obj || {}).sort(([a], [b]) => a.localeCompare(b)))
+      const hasCustomPatchHeaders = Boolean(
+        savedConfig.headers
+        && Object.keys(savedConfig.headers).length > 0
+        && sortHeaders(savedConfig.headers) !== sortHeaders(expandedManifestHeaders),
+      )
+      const editableHeaders = remote
+        ? remote.headers
+        : (storedTemplate?.headers ?? storedDefinition?.headers ?? (hasCustomPatchHeaders ? savedConfig.headers : undefined) ?? c.headers ?? {})
+      const savedTransport = remote ? 'http' : connectorTransport(
+        storedTemplate?.transport || storedTemplate?.type || savedConfig.transport || savedConfig.type,
+        editableUrl,
+        editableCmd,
+      )
+      const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, editableUrl, remote.oauth) : null
+      const oauthAuthenticated = isOAuthConnectorAuthenticated(rec.name, c.name, remote, toolsState)
+      const disp = resolveConnectorDisplay({
+        url: editableUrl,
+        command: editableCmd,
+        args: editableArgs,
+        ...(rawCwd !== undefined ? { cwd: rawCwd } : {}),
+      }, target, dataDir)
 
       return {
         ...c,
         type: savedTransport,
-        command: remote ? null : (savedConfig.command ?? c.command),
-        url: savedUrl,
-        headers: savedHeaders,
-        env: savedEnv,
-        args: savedArgs,
+        command: editableCmd,
+        url: editableUrl,
+        ...(editableCwd !== null ? { cwd: editableCwd } : {}),
+        headers: editableHeaders,
+        env: editableEnv,
+        args: editableArgs,
+        ...disp,
         oauth: remote?.oauth || savedConfig.oauth || c.oauth || 'none',
         oauthClientId: savedClient?.clientId || '',
         oauthHasClientSecret: savedClient?.hasClientSecret || false,
         oauthCallbackPort: remote?.oauthCallbackPort || '',
         oauthScope: remote?.oauthScope || '',
-        configured: !!(savedEntry || storedDefinition || remote),
+        configured: !!(savedEntry || storedDefinition || storedTemplate || remote),
         needsAuth,
         authenticated,
+        oauthAuthenticated,
         enabled: !!savedEntry,
         connected,
       }
     }) : []
-    let lspServers = listLspServers(targetManifest)
-    // Auto-activate: if an LSP server's binary is now on PATH but the entry
-    // hasn't been written to cordis.patch.yml yet (e.g. the user installed the
-    // binary after the plugin — registration was previously skipped because the
-    // command was missing), register it on the spot. Registration is idempotent
-    // and only writes the patch; it does not require a manual "Update" click.
-    // DSH's HMR watches this patch file and re-applies the plugin tree within
-    // ~1s, so the newly registered server becomes truly active immediately —
-    // no DSH restart needed (verified against @deepseek-ai/dsh-app-boot's
-    // `watchUserPatches`, which registers cordis.patch.yml with Cordis HMR).
+    let lspServers = installed ? listLspServers(target, targetManifest) : []
+    // Auto-activate: if an LSP server's binary is now on PATH or relative inside
+    // pluginRoot, register it on the spot (honoring explicit removals).
     if (lspServers.length > 0) {
+      const dataDir = pluginDataDir(rec.name)
       const autoRegistered = lspServers.filter((s) => {
         if (isLspActive(rec.name, s.name)) return false
-        // Honor an explicit removal: if we already auto-activated this server
-        // once but it is no longer in the patch, the user (or a manual patch
-        // edit) removed it deliberately — do not silently re-add it.
         if (autoActivatedLspServers.has(`${rec.name}::${s.name}`)) return false
-        // Host packages must actually be in DSH's node_modules — otherwise
-        // auto-registering would write a patch entry that DSH can't load.
-        return !!s.command
-          && resolveCommandPath(s.command)
+        const resolvedLspCmd = s.command ? resolvePluginCommand(s.command, target, dataDir) : null
+        return !!resolvedLspCmd
+          && resolveCommandPath(resolvedLspCmd, process.env, { cwd: target })
           && Object.keys(s.extensionToLanguage || {}).length > 0
       })
       if (autoRegistered.length > 0) {
@@ -2506,16 +2770,14 @@ export function installedDetails() {
             if (r.ok) autoActivatedLspServers.add(`${rec.name}::${s.name}`)
           } catch {}
         }
-        lspServers = listLspServers(target)
+        lspServers = listLspServers(target, targetManifest)
       }
     }
+    const lspDataDir = pluginDataDir(rec.name)
     lspServers = lspServers.map((s) => {
       const active = isLspActive(rec.name, s.name)
-      // For inactive servers, surface *why*: a missing command is the only
-      // reason registration fails that the UI can help the user resolve
-      // (install the binary, then hit Update). Other reasons (missing
-      // extensionToLanguage) are manifest bugs and don't need this hint.
-      const missingCommand = !active && !!s.command && !resolveCommandPath(s.command)
+      const resolvedLspCmd = s.command ? resolvePluginCommand(s.command, target, lspDataDir) : null
+      const missingCommand = !active && !!resolvedLspCmd && !resolveCommandPath(resolvedLspCmd, process.env, { cwd: target })
       return { ...s, active, missingCommand }
     })
     // Author: the state record is written at install time, so installs made

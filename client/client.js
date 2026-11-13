@@ -25,10 +25,50 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return transport === "http" || transport === "sse" || transport === "streamable-http" || transport === "streamableHttp";
 	}
 
+	function hasUnresolvedVarPlaceholder(value) {
+		if (typeof value !== "string") return false;
+		const stripped = value
+			.replace(/\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}|\$(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\b/g, "")
+			.replace(/\$\{(?:CLAUDE_PLUGIN_DATA|PLUGIN_DATA)\}|\$(?:CLAUDE_PLUGIN_DATA|PLUGIN_DATA)\b/g, "");
+		return /\$\{[^}]+\}/.test(stripped);
+	}
+
+	function isLikelySecretHeader(key, value) {
+		const k = String(key || "").trim().toLowerCase();
+		const v = String(value ?? "").trim();
+		if (k === "authorization" || k === "proxy-authorization" || k === "x-api-key" || k === "api-key" || /token|secret|password|auth|credential/i.test(k)) {
+			return true;
+		}
+		return /^Bearer\s/i.test(v);
+	}
+
+	function isLikelySecretEnv(key, value) {
+		const k = String(key || "").trim();
+		const v = String(value ?? "").trim();
+		const isPluginVarTemplate = !!(v && !hasUnresolvedVarPlaceholder(v) && /\$\{(?:CLAUDE_)?PLUGIN_(?:ROOT|DATA)\}|\$(?:CLAUDE_)?PLUGIN_(?:ROOT|DATA)\b/.test(v));
+		const keySensitive = /token|secret|password|passwd|pwd|api[_-]?key|access[_-]?key|private[_-]?key|(?:^|[_-])auth(?:[_-]?(?:token|key|secret|header))?(?:$|[_-])|credential|bearer|cookie|session/i.test(k);
+		const valueSensitive = /^(?:sk-|ghp_|gho_|github_pat_|xox[baprs]-|AIza|AKIA|Bearer\s)/i.test(v);
+		return !isPluginVarTemplate && (keySensitive || valueSensitive);
+	}
+
 	function cleanMcpErrorText(err) {
 		if (!err) return "操作失败";
 		const msg = String(err.message || err).replace(/^Error:\s*/i, "").trim();
 		return msg.length > 50 ? msg.slice(0, 48) + "…" : msg;
+	}
+
+	function needsOAuthLogin(form, baseline, fallbackName) {
+		if (!form || form.transport !== "http" || !form.oauth || form.oauth === "none") return false;
+		if (!baseline?.oauthAuthenticated) return true;
+		const fName = String(form.name ?? fallbackName ?? "").trim();
+		const bName = String(baseline.name ?? fallbackName ?? "").trim();
+		return fName !== bName
+			|| String(form.url || "").trim() !== String(baseline.url || "").trim()
+			|| (form.oauth || "none") !== (baseline.oauth || "none")
+			|| String(form.oauthClientId || "") !== String(baseline.oauthClientId || "")
+			|| String(form.oauthClientSecret || "").length > 0
+			|| String(form.oauthCallbackPort ?? "") !== String(baseline.oauthCallbackPort ?? "")
+			|| String(form.oauthScope || "") !== String(baseline.oauthScope || "");
 	}
 
 	// A persisted change and a live one are different outcomes. The write answers
@@ -158,7 +198,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (notify) callbacks.current.onCancel?.();
 		}, [userMcp, verifyPath]);
 		const cancel = useCallback(() => cancelPending(true), [cancelPending]);
-		const formFingerprint = JSON.stringify(form, (key, value) => ["testing", "saving", "status", "statusMessage", "lastResult", "oauthSessionId", "diagHover"].includes(key) ? undefined : value);
+		const formFingerprint = JSON.stringify(form, (key, value) => ["testing", "saving", "status", "statusMessage", "lastResult", "oauthSessionId", "diagHover", "oauthBaseline"].includes(key) ? undefined : value);
 		useEffect(() => {
 			if (pendingRef.current || startingRef.current) void cancelPending(false);
 		}, [formFingerprint, cancelPending]);
@@ -1884,6 +1924,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	max-width: 100%;
 	border-radius: var(--dsw-radius-lg, 20px);
 	padding: 22px 24px 20px 24px;
+	background-clip: padding-box;
 	/* The preview grows with the detected list, and the confirm buttons must not
 	   be pushed out of the viewport by a long one: cap the box and scroll it,
 	   then keep the action row pinned to the bottom edge. */
@@ -1893,6 +1934,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overscroll-behavior: contain;
 	scrollbar-width: thin;
 	scrollbar-color: var(--cpm-scroll-thumb) transparent;
+	transition:
+		border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+		box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.cpm-source-dialog-box.is-dragging {
+	background: #ebf3ff;
+	border-color: rgba(37, 99, 235, 0.22);
+	box-shadow:
+		0 0 0 4px rgba(37, 99, 235, 0.14),
+		0 24px 56px -12px rgba(15, 23, 42, 0.22),
+		0 8px 20px -6px rgba(15, 23, 42, 0.1);
 }
 .cpm-source-dialog-box .cpm-dialog-actions .cpm-btn {
 	min-block-size: 34px;
@@ -1917,6 +1969,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		0 28px 64px -8px rgba(0, 0, 0, 0.72),
 		0 0 0 1px rgba(255, 255, 255, 0.04),
 		inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+.cpm-dark .cpm-source-dialog-box.is-dragging {
+	background: #172133;
+	border-color: rgba(96, 165, 250, 0.26);
+	box-shadow:
+		0 0 0 4px rgba(59, 130, 246, 0.2),
+		0 28px 64px -8px rgba(0, 0, 0, 0.72),
+		0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 	.cpm-upload-dialog {
 		display: grid;
@@ -1966,6 +2026,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 1px 3px rgba(15, 23, 42, 0.04);
 		transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.2s ease, transform 0.12s cubic-bezier(0.2, 0.9, 0.3, 1);
 	}
+	.cpm-upload-dialog .cpm-dropzone > * { pointer-events: none; }
+	.cpm-upload-dialog.is-dragging > :not(.cpm-source-drag-overlay) { pointer-events: none; }
 	.cpm-dark .cpm-upload-dialog .cpm-dropzone {
 		border-color: rgba(255, 255, 255, 0.24);
 		background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.025) 100%);
@@ -2170,41 +2232,79 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-source-drag-overlay {
 	position: absolute;
 	inset: 0;
-	border-radius: inherit;
-	background: rgba(248, 250, 255, 0.94);
-	backdrop-filter: blur(12px) saturate(160%);
-	-webkit-backdrop-filter: blur(12px) saturate(160%);
+	box-sizing: border-box;
+	border-radius: calc(var(--dsw-radius-lg, 20px) - 1px);
+	border: 2px dashed rgba(37, 99, 235, 0.68);
+	background: linear-gradient(180deg, #eff6ff 0%, #e7f0ff 100%);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.9),
+		inset 0 0 32px rgba(37, 99, 235, 0.06);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	z-index: 20;
+	pointer-events: none;
+	opacity: 0;
+	visibility: hidden;
+	transition:
+		opacity 160ms cubic-bezier(0.22, 1, 0.36, 1),
+		visibility 0s linear 160ms;
+}
+.cpm-source-drag-overlay.is-visible {
+	opacity: 1;
+	visibility: visible;
+	transition:
+		opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+		visibility 0s linear 0s;
+}
+.cpm-dark .cpm-source-drag-overlay {
+	border-color: rgba(96, 165, 250, 0.74);
+	background: linear-gradient(180deg, #1b253a 0%, #151f31 100%);
+	box-shadow:
+		inset 0 1px 0 rgba(147, 197, 253, 0.16),
+		inset 0 0 32px rgba(59, 130, 246, 0.12);
+}
+.cpm-source-drag-overlay > * {
+	pointer-events: none;
+}
+.cpm-source-drag-content {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 10px;
-	padding: 24px;
-	z-index: 20;
-	pointer-events: none;
-	animation: cpm-dialog-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+	gap: 8px;
+	/* Optical bottom counterbalance so the icon and title sit above geometric vertical center. */
+	padding-bottom: calc(8px + 1.0875rem);
+	text-align: center;
+	opacity: 0;
+	transform: scale(0.96);
+	transition:
+		opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+		transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.cpm-dark .cpm-source-drag-overlay {
-	background: rgba(34, 34, 38, 0.94);
-}
-.cpm-source-drag-overlay::before {
-	content: "";
-	position: absolute;
-	inset: 10px;
-	border: 2px dashed var(--cpm-accent);
-	border-radius: 13px;
-	background: rgba(37, 99, 235, 0.045);
-	pointer-events: none;
-}
-.cpm-dark .cpm-source-drag-overlay::before {
-	background: rgba(59, 130, 246, 0.09);
+.cpm-source-drag-overlay.is-visible .cpm-source-drag-content {
+	opacity: 1;
+	transform: scale(1);
 }
 .cpm-source-drag-overlay .cpm-dropzone-icon {
-	position: relative;
 	color: var(--cpm-accent);
+	margin-bottom: 2px;
+	transform: translateY(3px) scale(0.92);
+	transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.cpm-source-drag-overlay.is-visible .cpm-dropzone-icon {
+	transform: translateY(0) scale(1);
 }
 .cpm-dark .cpm-source-drag-overlay .cpm-dropzone-icon {
 	color: #93c5fd;
+}
+.cpm-source-drag-title {
+	font-size: 0.9375rem;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	line-height: 1.4;
+	color: var(--cpm-text);
 }
 .cpm-local-preview-card {
 	display: flex;
@@ -4328,7 +4428,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 @media (prefers-reduced-motion: reduce) {
 	.cpm-dialog { animation-duration: 0.08s; }
-	.cpm-dialog-box, .cpm-source-drag-overlay { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
+	.cpm-dialog-box { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
+	.cpm-source-dialog-box { transition: border-color 100ms ease, box-shadow 100ms ease; }
+	.cpm-source-drag-overlay {
+		transition: opacity 100ms ease, visibility 0s linear 100ms;
+	}
+	.cpm-source-drag-overlay.is-visible {
+		transition: opacity 100ms ease, visibility 0s linear 0s;
+	}
+	.cpm-source-drag-content,
+	.cpm-source-drag-overlay .cpm-dropzone-icon {
+		transform: none;
+		transition: opacity 100ms ease;
+	}
 	.cpm-btn, .cpm-dropzone, .cpm-dropzone-icon, .cpm-radio-card, .cpm-custom-radio {
 		transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 	}
@@ -4350,10 +4462,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		background: rgba(0, 0, 0, 0.68);
 	}
 	.cpm-source-drag-overlay {
-		backdrop-filter: none;
-		-webkit-backdrop-filter: none;
 		background: var(--cpm-modal-bg);
-		opacity: 1;
+		border-color: var(--cpm-accent);
+		box-shadow: none;
 	}
 	.cpm-dialog-box, .cpm-source-dialog-box { border-color: var(--cpm-text-sub); }
 	.cpm-upload-dialog .cpm-dropzone { border-color: var(--cpm-text-sub); }
@@ -4363,6 +4474,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		border: 1px solid CanvasText;
 		box-shadow: none;
 	}
+	.cpm-source-drag-overlay {
+		background: Canvas;
+		color: CanvasText;
+		border: 2px dashed Highlight;
+		box-shadow: none;
+	}
+	.cpm-source-drag-overlay .cpm-dropzone-icon { color: Highlight; }
 	.cpm-upload-dialog .cpm-dropzone {
 		border: 2px dashed ButtonBorder;
 		background: ButtonFace;
@@ -8920,6 +9038,40 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return () => window.removeEventListener("keydown", onKey, true);
 		}, [busy]);
 
+		useEffect(() => {
+			if (phase !== "upload") return;
+			if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+			const preventPageDrop = (e) => {
+				e.preventDefault();
+				try { if (e.dataTransfer) e.dataTransfer.dropEffect = "none"; } catch {}
+				if (e.type === "drop") setIsDragging(false);
+			};
+			window.addEventListener("dragover", preventPageDrop);
+			window.addEventListener("drop", preventPageDrop);
+			return () => {
+				window.removeEventListener("dragover", preventPageDrop);
+				window.removeEventListener("drop", preventPageDrop);
+			};
+		}, [phase]);
+
+		useEffect(() => {
+			if (!isDragging) return;
+			if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+			const clearDrag = () => setIsDragging(false);
+			window.addEventListener("dragend", clearDrag);
+			window.addEventListener("drop", clearDrag);
+			window.addEventListener("blur", clearDrag);
+			return () => {
+				window.removeEventListener("dragend", clearDrag);
+				window.removeEventListener("drop", clearDrag);
+				window.removeEventListener("blur", clearDrag);
+			};
+		}, [isDragging]);
+
+		useEffect(() => {
+			if ((phase !== "upload" || busy) && isDragging) setIsDragging(false);
+		}, [phase, busy, isDragging]);
+
 		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.(zip|tgz|tar\.gz)$/i.test(String(str || "").trim().replace(/^["']|["']$/g, ""));
 
 		// The name the user picked, shown verbatim so the preview says which file
@@ -9499,13 +9651,49 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				role: "dialog",
 				"aria-modal": "true",
 				"aria-labelledby": "cpm-dialog-title",
-					className: "cpm-dialog-box cpm-source-dialog-box" + (phase === "upload" ? " cpm-upload-dialog" : "") + (isDragging ? " is-dragging" : ""),
+				className: "cpm-dialog-box cpm-source-dialog-box" + (phase === "upload" ? " cpm-upload-dialog" : "") + (isDragging ? " is-dragging" : ""),
 				style: { position: "relative" },
 				onClick: (e) => e.stopPropagation(),
-				onDragOver: (e) => { e.preventDefault(); if (!busyRef.current) setIsDragging(true); },
-				onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDragging(false); },
+				onDragEnter: (e) => {
+					e.preventDefault();
+					e.stopPropagation?.();
+					if (phase === "upload" && !busyRef.current && !isDragging) setIsDragging(true);
+				},
+				onDragOver: (e) => {
+					e.preventDefault();
+					e.stopPropagation?.();
+					try { if (e.dataTransfer) e.dataTransfer.dropEffect = phase === "upload" && !busyRef.current ? "copy" : "none"; } catch {}
+					if (phase === "upload" && !busyRef.current && !isDragging) setIsDragging(true);
+				},
+				onDragLeave: (e) => {
+					const target = e.currentTarget;
+					if (target && e.relatedTarget && typeof target.contains === "function" && target.contains(e.relatedTarget)) {
+						return;
+					}
+					// Chromium on Windows occasionally fires spurious dragleave(relatedTarget=null)
+					// over nested drag ghosts while the pointer stays inside the dialog bounds.
+					if (
+						e.relatedTarget == null
+						&& target
+						&& typeof target.getBoundingClientRect === "function"
+						&& typeof e.clientX === "number"
+						&& typeof e.clientY === "number"
+						&& (e.clientX !== 0 || e.clientY !== 0)
+					) {
+						const rect = target.getBoundingClientRect();
+						if (
+							rect && rect.width > 0 && rect.height > 0
+							&& e.clientX > rect.left && e.clientX < rect.right
+							&& e.clientY > rect.top && e.clientY < rect.bottom
+						) {
+							return;
+						}
+					}
+					setIsDragging(false);
+				},
 				onDrop: (e) => {
 					e.preventDefault();
+					e.stopPropagation?.();
 					setIsDragging(false);
 					if (phase !== "upload" || busyRef.current) return;
 					const file = e.dataTransfer?.files?.[0];
@@ -9521,10 +9709,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 				},
 			},
-				isDragging && phase === "upload" && h("div", { className: "cpm-source-drag-overlay" },
-					h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
-					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14, position: "relative" } }, "释放以解析插件 / Skills"),
-					h("div", { className: "cpm-dropzone-sub", style: { position: "relative" } }, "支持 Claude / Codex 插件、市场、Skills 和 SKILL.md")
+				phase === "upload" && h("div", {
+					className: "cpm-source-drag-overlay" + (isDragging ? " is-visible" : ""),
+					"aria-hidden": isDragging ? undefined : "true",
+				},
+					h("div", { className: "cpm-source-drag-content" },
+						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
+						h("div", { className: "cpm-source-drag-title" }, "释放以解析插件 / Skills"),
+					),
 				),
 				phase === "upload" && [
 					h("div", { className: "cpm-upload-header", key: "header" },
@@ -9950,8 +10142,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			oauthScope: initial.oauthScope || "",
 			command: initial.command || "",
 			args: Array.isArray(initial.args) ? JSON.stringify(initial.args) : (initial.args || ""),
-			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => ({ _id: `hi_${i}`, key: k, value: String(v), isSecret: true })),
-			envList: Object.entries(initial.env || {}).map(([k, v], i) => ({ _id: `ei_${i}`, key: k, value: String(v), isSecret: true })),
+			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => ({ _id: `hi_${i}`, key: k, value: String(v), isSecret: isLikelySecretHeader(k, v) })),
+			envList: Object.entries(initial.env || {}).map(([k, v], i) => ({ _id: `ei_${i}`, key: k, value: String(v), isSecret: isLikelySecretEnv(k, v) })),
 		} : { name: "", transport: "stdio", url: "", oauth: "none", oauthClientId: "", oauthClientSecret: "", oauthHasClientSecret: false, oauthCallbackPort: "", oauthScope: "", command: "", args: "", headersList: [], envList: [] });
 		const [testing, setTesting] = useState(false);
 		const [saving, setSaving] = useState(false);
@@ -10318,7 +10510,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("button", {
 									type: "button",
 									className: "cpm-mcp-add-btn",
-									onClick: () => upd({ envList: [...form.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: true }] }),
+									onClick: () => upd({ envList: [...form.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: false }] }),
 								}, h(IconPlus, { size: 12 }), "Add"),
 							),
 						),
@@ -10346,7 +10538,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
 						onClick: test,
 					}, testing ? "测试中…" : (oauthFlow.pending ? "等待授权…" : (
-						form.transport === "http" && form.oauth !== "none" ? "登录并连接" : "测试连接"
+						needsOAuthLogin(form, initial, form.name) ? "登录并连接" : "测试连接"
 					))),
 					h("button", {
 						className: "cpm-btn cpm-btn-primary",
@@ -11021,7 +11213,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 			return {
 				transport: authDialog.transport, url: authDialog.url, headers,
-				command: authDialog.transport === "stdio" ? authDialog.command : undefined,
+				command: authDialog.transport === "stdio" ? (authDialog.command != null ? String(authDialog.command).trim() : undefined) : undefined,
 				oauth: authDialog.oauth, oauthClientId: authDialog.oauthClientId,
 				oauthClientSecret: authDialog.oauthClientSecret,
 				oauthCallbackPort: authDialog.oauthCallbackPort, oauthScope: authDialog.oauthScope,
@@ -11041,7 +11233,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			form: authDialog,
 			verifyPath: `/plugins/${encodeURIComponent(record?.name || "")}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`,
 			onFinished: async (res) => {
-				setAuthDialog((prev) => prev ? { ...prev, testing: false, status: res.ok ? "success" : "error", statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"), lastResult: res } : null);
+				setAuthDialog((prev) => prev ? {
+					...prev,
+					testing: false,
+					status: res.ok ? "success" : "error",
+					statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"),
+					lastResult: res,
+					oauthBaseline: res.ok && prev.transport === "http" && prev.oauth !== "none"
+						? {
+							name: prev.connectorName,
+							url: prev.url,
+							oauth: prev.oauth,
+							oauthClientId: prev.oauthClientId,
+							oauthCallbackPort: prev.oauthCallbackPort,
+							oauthScope: prev.oauthScope,
+							oauthAuthenticated: true,
+						}
+						: prev.oauthBaseline,
+				} : null);
 				// A successful sign-in is also the moment the connector becomes
 				// usable, so register it right away. Leaving that to the Save
 				// button is what made a completed sign-in reopen as `None`.
@@ -11395,27 +11604,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const visibleLspServers = filterItems(lspServers, (ls) => typeof ls === "string" ? ls : `${ls.name || ""} ${ls.command || ""}`);
 		const visibleConnectors = filterItems(connectors, (c) => {
 			if (typeof c === "string") return c;
-			return `${c.name || ""} ${c.type || ""} ${c.url || ""} ${c.command || ""} ${(c.args || []).join(" ")}`;
+			return `${c.name || ""} ${c.type || ""} ${c.displayUrl || c.url || ""} ${c.displayCommand || c.command || ""} ${((c.displayArgs || c.args) || []).join(" ")}`;
 		});
 		const openAuthDialog = (connectorName, connObj) => {
 			const existingHeaders = (connObj && typeof connObj === "object" && connObj.headers) ? connObj.headers : {};
 			const headerEntries = Object.entries(existingHeaders)
-				.filter(([_, v]) => typeof v === "string" && !v.includes("${") && v.trim().length > 0)
+				.filter(([_, v]) => typeof v === "string" && !hasUnresolvedVarPlaceholder(v) && v.trim().length > 0)
 				.map(([k, v], i) => ({
 					_id: `h_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
 					key: (k === "Authorization" || k === "authorization") ? "" : k,
 					value: v != null ? String(v) : "",
-					isSecret: true,
+					isSecret: isLikelySecretHeader(k, v),
 				}));
 
 			const existingEnv = (connObj && typeof connObj === "object" && connObj.env) ? connObj.env : {};
 			const envEntries = Object.entries(existingEnv)
-				.filter(([_, v]) => typeof v === "string" && !v.includes("${") && v.trim().length > 0)
+				.filter(([_, v]) => typeof v === "string" && !hasUnresolvedVarPlaceholder(v) && v.trim().length > 0)
 				.map(([k, v], i) => ({
 					_id: `e_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
 					key: k,
 					value: v != null ? String(v) : "",
-					isSecret: true,
+					isSecret: isLikelySecretEnv(k, v),
 				}));
 
 			const isHttpOnly = !!(connObj && (connObj.url || isRemoteTransport(connObj.type)) && !connObj.command);
@@ -11433,21 +11642,36 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 			}
 
+			const initUrl = (connObj && connObj.url) || (connectorName === "notion" ? "https://mcp.notion.com/mcp" : (connectorName === "github" ? "https://api.githubcopilot.com/mcp/" : ""));
+			const initOAuth = (connObj && connObj.oauth) || "none";
+			const initClientId = (connObj && connObj.oauthClientId) || "";
+			const initCallbackPort = (connObj && connObj.oauthCallbackPort) || "";
+			const initScope = (connObj && connObj.oauthScope) || "";
+
 			setAuthDialog({
 				connectorName,
 				transport: initialTransport,
 				allowedTransports,
-				url: (connObj && connObj.url) || (connectorName === "notion" ? "https://mcp.notion.com/mcp" : (connectorName === "github" ? "https://api.githubcopilot.com/mcp/" : "")),
-				command: connObj?.command,
+				url: initUrl,
+				command: (connObj && connObj.command) || "",
 				headersList: headerEntries,
 				args: rawArgs,
 				envList: envEntries,
-				oauth: (connObj && connObj.oauth) || "none",
-				oauthClientId: (connObj && connObj.oauthClientId) || "",
+				oauth: initOAuth,
+				oauthClientId: initClientId,
 				oauthClientSecret: "",
 				oauthHasClientSecret: (connObj && connObj.oauthHasClientSecret) === true,
-				oauthCallbackPort: (connObj && connObj.oauthCallbackPort) || "",
-				oauthScope: (connObj && connObj.oauthScope) || "",
+				oauthCallbackPort: initCallbackPort,
+				oauthScope: initScope,
+				oauthBaseline: {
+					name: connectorName,
+					url: initUrl,
+					oauth: initOAuth,
+					oauthClientId: initClientId,
+					oauthCallbackPort: initCallbackPort,
+					oauthScope: initScope,
+					oauthAuthenticated: (connObj && connObj.oauthAuthenticated) === true,
+				},
 				testing: false,
 				saving: false,
 				status: "untested",
@@ -11760,7 +11984,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const isConnected = typeof c === "object" ? (c.connected === true) : false;
 					const isEnabled = typeof c === "object" ? (c.enabled === true) : isConnected;
 					const transport = typeof c === "object" ? (c.type || (c.url ? "HTTP" : "stdio")) : "MCP";
-					const endpoint = typeof c === "object" ? (c.url || (c.command ? `${c.command} ${(c.args || []).join(" ")}` : "")) : "";
+					const dispUrl = typeof c === "object" ? (c.displayUrl || c.url) : "";
+					const dispCmd = typeof c === "object" ? (c.displayCommand || c.command) : "";
+					const dispArgs = typeof c === "object" ? (c.displayArgs || c.args || []) : [];
+					const endpoint = typeof c === "object" ? (dispUrl || (dispCmd ? `${dispCmd} ${dispArgs.join(" ")}`.trim() : "")) : "";
 					const isRemote = transport !== "stdio";
 					const isPendingVerify = isRemote ? !isConnected : (needsAuth && !isAuthenticated);
 					const isExpanded = !!expandedConnectors[cName];
@@ -11947,6 +12174,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							),
 						),
 
+						authDialog.transport === "stdio" && h("div", { className: "cpm-mcp-row" },
+							h("div", { className: "cpm-mcp-label" }, "Command"),
+							h("div", { className: "cpm-mcp-control" },
+								h("input", {
+									className: "cpm-mcp-input",
+									placeholder: "node / npx / python ...",
+									value: authDialog.command || "",
+									onChange: (e) => setAuthDialog({ ...authDialog, command: e.target.value, status: "untested" }),
+								}),
+							),
+						),
+
 						authDialog.transport === "stdio" && (() => {
 							const argsError = getArgsJsonError(authDialog.args);
 							return h("div", { className: "cpm-mcp-row" },
@@ -12029,7 +12268,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										onClick: () => {
 											setAuthDialog({
 												...authDialog,
-												envList: [...authDialog.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: true }],
+												envList: [...authDialog.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: false }],
 											});
 										},
 									}, h(IconPlus, { size: 12 }), "Add"),
@@ -12114,7 +12353,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												),
 												h("div", { className: "cpm-mcp-diag-endpoint" },
 													authDialog.transport === "stdio"
-														? `Local stdio: ${authDialog.args ? authDialog.args : "process active"}`
+														? `Local stdio: ${[authDialog.command, authDialog.args].filter(Boolean).join(" ") || "process active"}`
 														: `HTTP ${authDialog.url || "endpoint"} → tools/list`
 												),
 											),
@@ -12140,7 +12379,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 												h("div", { className: "cpm-mcp-diag-endpoint" },
 													h("div", { className: "cpm-mcp-diag-k", style: { marginBottom: 3 } }, "FAILED REQUEST"),
 													authDialog.transport === "stdio"
-														? `stdio command failed: ${authDialog.args || "default execution"}`
+														? `stdio command failed: ${[authDialog.command, authDialog.args].filter(Boolean).join(" ") || "default execution"}`
 														: `POST ${authDialog.url || "endpoint"} → tools/list`
 												),
 											),
@@ -12155,10 +12394,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								className: "cpm-btn cpm-btn-secondary",
 								disabled: authDialog.testing || authDialog.saving || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
 								onClick: runAuthTest,
-							}, authDialog.testing ? (authDialog.oauth !== "none" ? "等待授权…" : "测试中…") : (
-								authDialog.transport === "stdio" ? "测试连接" : (
-										(authDialog.oauth && authDialog.oauth !== "none") ? "登录并连接" : "测试连接"
-								)
+							}, authDialog.testing ? (oauthFlow.pending ? "等待授权…" : "测试中…") : (
+								needsOAuthLogin(authDialog, authDialog.oauthBaseline, authDialog.connectorName) ? "登录并连接" : "测试连接"
 							)),
 
 							h("button", {
