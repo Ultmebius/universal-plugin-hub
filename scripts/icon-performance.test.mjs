@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:http'
+import { execFileSync, spawn } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
 import { PNG } from 'pngjs'
 import { buildPluginIcons, getOrFetchIcon } from '../src/icons.js'
@@ -557,6 +558,87 @@ test('HTTP caching (ETag / 304 / Cache-Control), O(1) /plugin-icon, LRU caches, 
       assert.equal(statsAfterBig.size, 1, '>256KB local icon must not be added to localIconMemory')
       assert.equal(statsAfterBig.bytes, svgA.length, '>256KB local icon must not increase localIconMemoryBytes')
       assert.ok(statsAfterBig.bytes <= statsAfterBig.maxTotalBytes)
+    })
+
+    await t.test('GET /plugins/:sourceId/:name materializes uncached external plugin without ReferenceError and refreshes /plugin-icon index', async () => {
+      const gitServeRoot = join(root, 'git-serve')
+      const workRepo = join(root, 'ext-work')
+      const bareRepo = join(gitServeRoot, 'ext-repo.git')
+      mkdirSync(gitServeRoot, { recursive: true })
+      write(join(workRepo, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'ext-plugin', description: 'Remote materialized' }))
+      write(join(workRepo, 'assets', 'ext.svg'), svgA)
+      execFileSync('git', ['init', '-b', 'main'], { cwd: workRepo, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.test'], { cwd: workRepo, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: workRepo, stdio: 'ignore' })
+      execFileSync('git', ['add', '.'], { cwd: workRepo, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: workRepo, stdio: 'ignore' })
+      execFileSync('git', ['clone', '--bare', workRepo, bareRepo], { stdio: 'ignore' })
+
+      const gitExec = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim()
+      const backendBin = join(gitExec, process.platform === 'win32' ? 'git-http-backend.exe' : 'git-http-backend')
+      const gitServer = createServer((gReq, gRes) => {
+        const u = new URL(gReq.url, 'http://127.0.0.1')
+        const child = spawn(backendBin, [], {
+          env: {
+            ...process.env,
+            GIT_PROJECT_ROOT: gitServeRoot,
+            GIT_HTTP_EXPORT_ALL: '1',
+            PATH_INFO: u.pathname,
+            QUERY_STRING: u.search.slice(1),
+            REQUEST_METHOD: gReq.method,
+            CONTENT_TYPE: gReq.headers['content-type'] || '',
+          },
+        })
+        gReq.pipe(child.stdin)
+        const chunks = []
+        child.stdout.on('data', (c) => chunks.push(c))
+        child.stdout.on('end', () => {
+          const out = Buffer.concat(chunks)
+          let sep = out.indexOf('\r\n\r\n'), skip = 4
+          if (sep < 0) { sep = out.indexOf('\n\n'); skip = 2 }
+          const rawHdrs = sep >= 0 ? out.subarray(0, sep).toString('utf8') : ''
+          const body = sep >= 0 ? out.subarray(sep + skip) : out
+          let status = 200
+          const headers = {}
+          for (const line of rawHdrs.split(/\r?\n/)) {
+            const idx = line.indexOf(':')
+            if (idx <= 0) continue
+            const k = line.slice(0, idx).trim()
+            const v = line.slice(idx + 1).trim()
+            if (k.toLowerCase() === 'status') status = Number.parseInt(v, 10) || 200
+            else headers[k] = v
+          }
+          gRes.writeHead(status, headers)
+          gRes.end(body)
+        })
+      })
+      await new Promise((resolve) => gitServer.listen(0, '127.0.0.1', resolve))
+      try {
+        const gitUrl = `http://127.0.0.1:${gitServer.address().port}/ext-repo.git`
+        const mktDir = sourceCacheDir('ext-market')
+        write(join(mktDir, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+          plugins: [{ name: 'ext-plugin', source: { source: 'url', url: gitUrl } }],
+        }))
+        invalidateMarketplaceCache('ext-market')
+
+        // Before materialization, /plugin-icon is 404 (and primes PLUGIN_DIR_INDEX_CACHE)
+        const iconUrl = `/universal-plugin-hub/api/plugin-icon?sourceId=ext-market&name=ext-plugin&path=${encodeURIComponent('./assets/ext.svg')}`
+        assert.equal((await request(iconUrl)).status, 404)
+
+        // Requesting detail runs materializePlugin + cache invalidation without throwing ReferenceError
+        const detailRes = await request('/universal-plugin-hub/api/plugins/ext-market/ext-plugin')
+        assert.equal(detailRes.status, 200, `expected 200 on external detail fetch, got ${detailRes.status}: ${detailRes.body}`)
+        const payload = JSON.parse(String(detailRes.body))
+        assert.equal(payload.plugin.name, 'ext-plugin')
+        assert.equal(payload.plugin.detail.description, 'Remote materialized')
+
+        // Cache invalidation inside detail handler exposes the materialized icon immediately
+        const afterIcon = await request(iconUrl)
+        assert.equal(afterIcon.status, 200)
+        assert.deepEqual(afterIcon.body, svgA)
+      } finally {
+        await new Promise((resolve) => gitServer.close(resolve))
+      }
     })
   } finally {
     globalThis.fetch = oldFetch
