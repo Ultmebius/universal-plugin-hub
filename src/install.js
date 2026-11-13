@@ -20,7 +20,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
-import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir } from './store.js'
+import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir, trashRoot, isSameOrInsidePath } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
@@ -81,6 +81,8 @@ export function readCordisPatch() {
   }
 }
 
+let PATCH_TMP_SEQ = 0
+
 export function writeCordisPatch(patch) {
   const file = cordisPatchPath()
   // A tolerant read can return [] for a DSH-specific or damaged document.
@@ -88,7 +90,8 @@ export function writeCordisPatch(patch) {
   loadCordisPatch(file)
   mkdirSync(dirname(file), { recursive: true })
   const content = yaml.dump(patch, { indent: 2, lineWidth: -1 })
-  const tmp = join(dirname(file), `.cordis.patch.${process.pid}.${Date.now().toString(36)}.tmp`)
+  const seq = (PATCH_TMP_SEQ = (PATCH_TMP_SEQ + 1) & 0xffffff).toString(36)
+  const tmp = join(dirname(file), `.cordis.patch.${process.pid}.${Date.now().toString(36)}.${seq}.tmp`)
   writeFileSync(tmp, content, 'utf8')
   renameSync(tmp, file)
 }
@@ -387,7 +390,25 @@ export function unregisterConnector(pluginName, connectorName, { keepDefinition 
   cancelActivePluginProbes(pluginName, connectorName)
   const patch = readCordisPatch()
   const id = getConnectorId(pluginName, connectorName)
-  const config = getConnectorEntry(pluginName, connectorName)?.config
+  let existingEntry = null
+  let changed = false
+  for (const item of patch) {
+    if (item && Array.isArray(item.insert)) {
+      const nextInsert = []
+      for (const entry of item.insert) {
+        if (entry && entry.id === id) {
+          if (!existingEntry) existingEntry = entry
+          changed = true
+        } else if (entry) {
+          nextInsert.push(entry)
+        } else {
+          changed = true
+        }
+      }
+      if (nextInsert.length !== item.insert.length) item.insert = nextInsert
+    }
+  }
+  const config = existingEntry?.config
   const remote = remoteConfigFromEntry(config)
   if (remote || (keepDefinition && config)) {
     const state = readMcpToolsState()
@@ -418,14 +439,10 @@ export function unregisterConnector(pluginName, connectorName, { keepDefinition 
     }
   }
 
-  for (const item of patch) {
-    if (item && Array.isArray(item.insert)) {
-      item.insert = item.insert.filter((entry) => entry && entry.id !== id)
-    }
-  }
-
   const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
-  writeCordisPatch(cleaned)
+  if (changed || cleaned.length !== patch.length) {
+    writeCordisPatch(cleaned)
+  }
   return { ok: true, connected: false }
 }
 
@@ -1180,10 +1197,10 @@ export function unregisterPluginLsp(pluginName) {
         }
       }
     }
+    const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
+    writeCordisPatch(cleaned)
   }
 
-  const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
-  writeCordisPatch(cleaned)
   return { ok: true, active: false }
 }
 
@@ -1249,13 +1266,18 @@ export async function registerPluginHooks(pluginName) {
 export function unregisterPluginHooks(pluginName) {
   const patch = readCordisPatch()
   const id = getHookBridgeId(pluginName)
+  let changed = false
   for (const item of patch) {
     if (item && Array.isArray(item.insert)) {
+      const before = item.insert.length
       item.insert = item.insert.filter((entry) => entry && entry.id !== id)
+      if (item.insert.length !== before) changed = true
     }
   }
   const cleaned = patch.filter((item) => !item || !Array.isArray(item.insert) || item.insert.length > 0)
-  writeCordisPatch(cleaned)
+  if (changed || cleaned.length !== patch.length) {
+    writeCordisPatch(cleaned)
+  }
   try {
     rmSync(compiledHooksPath(pluginName), { force: true })
   } catch {}
@@ -1470,7 +1492,7 @@ function trackPluginProbe(pluginName, connectorName, run) {
   return entry.settled
 }
 
-function cancelActivePluginProbes(pluginName, connectorName) {
+export function cancelActivePluginProbes(pluginName, connectorName) {
   const probes = ACTIVE_PLUGIN_PROBES.get(pluginName)
   if (!probes || probes.size === 0) return []
   const batch = []
@@ -1856,8 +1878,8 @@ function cacheConnectorTools(key, tools) {
   MEMORY_TOOLS_CACHE.set(key, { tools })
 }
 
-function warmInstalledConnectorTools(pluginName, connectors, record) {
-  const canEnable = () => readState().plugins.some(item =>
+function warmInstalledConnectorTools(pluginName, connectors, record, epoch = currentPluginEpoch(pluginName)) {
+  const canEnable = () => currentPluginEpoch(pluginName) === epoch && readState().plugins.some(item =>
     item.name === pluginName && item.sourceId === record.sourceId && item.installedAt === record.installedAt && item.enabled !== false)
   for (const connector of connectors) {
     const entry = getConnectorEntry(pluginName, connector.name)
@@ -1920,19 +1942,33 @@ export async function syncPluginSkillsToDsh(pluginName, shouldSync = () => true,
   const dshSkills = dshSkillsDir()
   mkdirSync(dshSkills, { recursive: true })
 
-  const synced = []
+  const keepExisting = path => !shouldSync() || isUploadedSkillTarget(path)
+  const candidates = []
   for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     const srcSkillDir = join(pluginSkillsDir, entry.name)
     if (!existsSync(join(srcSkillDir, 'SKILL.md'))) continue
-    const destSkillDir = join(dshSkills, entry.name)
-    // Direct uploads own their native paths, including during a retry.
-    const keepExisting = path => !shouldSync() || isUploadedSkillTarget(path)
-    if (await replaceManagedDir(srcSkillDir, destSkillDir, keepExisting, repairOnly)) {
-      synced.push(entry.name)
-    }
-    if (repairOnly) await yieldToHost()
+    candidates.push({ name: entry.name, srcSkillDir, destSkillDir: join(dshSkills, entry.name) })
   }
+
+  const synced = []
+  if (repairOnly) {
+    for (const item of candidates) {
+      if (await replaceManagedDir(item.srcSkillDir, item.destSkillDir, keepExisting, true, { allowTrash: true })) {
+        synced.push(item.name)
+      }
+      await yieldToHost()
+    }
+    return synced
+  }
+
+  const settled = await Promise.allSettled(candidates.map(async (item) => {
+    if (await replaceManagedDir(item.srcSkillDir, item.destSkillDir, keepExisting, false, { allowTrash: true })) {
+      synced.push(item.name)
+    }
+  }))
+  const rejected = settled.find((item) => item.status === 'rejected')
+  if (rejected) throw rejected.reason
   return synced
 }
 
@@ -1957,6 +1993,51 @@ function hasMatchingSkillCopy(source, destination) {
   }
 }
 
+const PLUGIN_LOCKS = new Map()
+const SOURCE_LOCKS = new Map()
+const PLUGIN_EPOCHS = new Map()
+
+function currentPluginEpoch(pluginName) {
+  return PLUGIN_EPOCHS.get(pluginName) || 0
+}
+
+function bumpPluginEpoch(pluginName) {
+  const next = currentPluginEpoch(pluginName) + 1
+  PLUGIN_EPOCHS.set(pluginName, next)
+  return next
+}
+
+async function acquireKeyedLock(locks, key, fn) {
+  if (!key) return fn()
+  const prior = locks.get(key)
+  let release
+  const current = new Promise((resolve) => { release = resolve })
+  locks.set(key, current)
+  try {
+    if (prior) await prior
+    return await fn()
+  } finally {
+    if (locks.get(key) === current) locks.delete(key)
+    release()
+  }
+}
+
+/**
+ * Serialize lifecycle operations on the same plugin while running immediately
+ * when the lock is idle so startup repair reaches its first fs attempt synchronously.
+ */
+export function withPluginLock(pluginName, fn) {
+  return acquireKeyedLock(PLUGIN_LOCKS, pluginName, fn)
+}
+
+/**
+ * Serialize source-level mutations (clone, refresh, uninstall-source, install/update).
+ * Always acquire after withPluginLock when both locks are required.
+ */
+export function withSourceLock(sourceId, fn) {
+  return acquireKeyedLock(SOURCE_LOCKS, sourceId, fn)
+}
+
 async function retryManagedDirOperation(operation, destination) {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -1964,21 +2045,24 @@ async function retryManagedDirOperation(operation, destination) {
     } catch (err) {
       // Windows can keep a deleted directory name reserved until the last
       // handle closes. Keep retries scoped to directory cleanup and creation.
-      const insideDestination = !destination || err.path === destination ||
-        (typeof err.path === 'string' && err.path.startsWith(destination + sep))
+      const insideDestination = !destination || !err.path || isSameOrInsidePath(err.path, destination)
       if (process.platform !== 'win32' || attempt >= 5 || !insideDestination ||
-        ![undefined, 'lstat', 'unlink', 'rmdir', 'rm', 'mkdir'].includes(err.syscall) ||
-        !['EPERM', 'EACCES', 'EBUSY'].includes(err.code)) throw err
+        ![undefined, 'lstat', 'stat', 'scandir', 'unlink', 'rmdir', 'rm', 'mkdir', 'rename'].includes(err.syscall) ||
+        !['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(err.code)) throw err
       await delay(50 * 2 ** attempt)
     }
   }
 }
 
-function replaceManagedDir(from, to, keepExisting, repairOnly = false) {
+export async function removeManagedDirAsync(dir, { allowTrash = false } = {}) {
+  return retryManagedDirOperation(() => removeManagedDir(dir, { allowTrash }), dir)
+}
+
+function replaceManagedDir(from, to, keepExisting, repairOnly = false, { allowTrash = false } = {}) {
   return retryManagedDirOperation(() => {
     if (keepExisting?.(to)) return false
     if (repairOnly && hasMatchingSkillCopy(from, to)) return true
-    removeManagedDir(to)
+    removeManagedDir(to, { allowTrash })
     copyDir(from, to)
     return true
   }, to)
@@ -1987,26 +2071,63 @@ function replaceManagedDir(from, to, keepExisting, repairOnly = false) {
 /**
  * Remove a plugin's skills from $DSH_HOME/skills upon uninstall or disabling.
  */
-export function removePluginSkillsFromDsh(pluginName) {
+function pathMayExist(targetPath) {
+  try {
+    if (lstatSync(targetPath, { throwIfNoEntry: false })) return true
+    return existsSync(targetPath)
+  } catch {
+    return true
+  }
+}
+
+function skillOwnedByOtherEnabledPlugin(pluginName, skillName, plugins = readState().plugins) {
+  for (const rec of plugins || []) {
+    if (!rec || rec.name === pluginName || rec.enabled === false) continue
+    const otherSkillDir = join(installedDir(rec.name), 'skills', skillName)
+    if (existsSync(join(otherSkillDir, 'SKILL.md')) || existsSync(join(otherSkillDir, 'skill.md'))) {
+      return true
+    }
+  }
+  return false
+}
+
+export async function removePluginSkillsFromDsh(pluginName, { allowQuarantine = true, preserveOtherEnabled = true } = {}) {
   const target = installedDir(pluginName)
   const pluginSkillsDir = join(target, 'skills')
   const dshSkills = dshSkillsDir()
-  if (!existsSync(dshSkills)) return
+  if (!existsSync(dshSkills)) return []
 
-  // 1. If installed copy exists, remove matching skill directories
+  const otherEnabledPlugins = preserveOtherEnabled
+    ? (readState().plugins || []).filter((rec) => rec && rec.name !== pluginName && rec.enabled !== false)
+    : []
+  const targets = []
   if (existsSync(pluginSkillsDir)) {
     for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        const destSkillDir = join(dshSkills, entry.name)
-        if (isUploadedSkillTarget(destSkillDir)) continue
-        removeManagedDir(destSkillDir)
-      }
+      if (!entry.isDirectory()) continue
+      const destSkillDir = join(dshSkills, entry.name)
+      if (isUploadedSkillTarget(destSkillDir)) continue
+      if (preserveOtherEnabled && skillOwnedByOtherEnabledPlugin(pluginName, entry.name, otherEnabledPlugins)) continue
+      if (pathMayExist(destSkillDir)) targets.push({ name: entry.name, dest: destSkillDir })
     }
   }
 
   // Older installs may have exposed the compiled subagent hub separately.
   const subagentHubDir = join(dshSkills, `${pluginName}-agents`)
-  if (!isUploadedSkillTarget(subagentHubDir)) removeManagedDir(subagentHubDir)
+  if (!isUploadedSkillTarget(subagentHubDir) && pathMayExist(subagentHubDir)) {
+    targets.push({ name: `${pluginName}-agents`, dest: subagentHubDir })
+  }
+
+  const removed = []
+  const settled = await Promise.allSettled(targets.map(async ({ name, dest }) => {
+    await removeManagedDirAsync(dest, { allowTrash: allowQuarantine })
+    removed.push(name)
+  }))
+  const rejected = settled.find((item) => item.status === 'rejected')
+  if (rejected) {
+    rejected.reason.removedSkills = removed
+    throw rejected.reason
+  }
+  return removed
 }
 
 /**
@@ -2020,11 +2141,13 @@ export async function syncAllInstalledSkillsToDsh() {
 
   const results = {}
   for (const plugin of state.plugins || []) {
-    const stillEnabled = () => readState().plugins.some(current =>
-      current.name === plugin.name && current.installedAt === plugin.installedAt && current.enabled !== false)
-    if (plugin.enabled !== false) {
-      results[plugin.name] = await syncPluginSkillsToDsh(plugin.name, stillEnabled, { repairOnly: true })
-    }
+    if (plugin.enabled === false) continue
+    results[plugin.name] = await withPluginLock(plugin.name, async () => {
+      const stillEnabled = () => readState().plugins.some(current =>
+        current.name === plugin.name && current.installedAt === plugin.installedAt && current.enabled !== false)
+      if (!stillEnabled()) return []
+      return syncPluginSkillsToDsh(plugin.name, stillEnabled, { repairOnly: true })
+    })
   }
   return results
 }
@@ -2039,14 +2162,20 @@ export async function installPlugin(options) {
   const { pluginName } = options
   if (marketplaceInstalls.has(pluginName)) throw new Error(`插件 ${pluginName} 正在安装`)
   marketplaceInstalls.add(pluginName)
+  bumpPluginEpoch(pluginName)
+  cancelActivePluginProbes(pluginName)
   try {
-    return await installMarketplacePlugin(options)
+    return await withPluginLock(pluginName, () => installMarketplacePluginUnlocked(options))
   } finally {
     marketplaceInstalls.delete(pluginName)
   }
 }
 
-async function installMarketplacePlugin({ sourceId, pluginName, refresh = false }) {
+async function installMarketplacePluginUnlocked(options) {
+  return withSourceLock(options.sourceId, () => installMarketplacePluginFromSourceLocked(options))
+}
+
+async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, refresh = false, initialEnabled = true }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
@@ -2066,7 +2195,7 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
   // no longer ships and MCP servers it dropped would otherwise stay visible.
   await abortPluginConnectorProbes(pluginName)
   const prevConnectors = existsSync(target) ? getPluginConnectors(target).map((c) => c.name) : []
-  if (existsSync(target)) await retryManagedDirOperation(() => removePluginSkillsFromDsh(pluginName))
+  if (existsSync(target)) await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true })
 
   // Idempotent reinstall: clear the previous copy first.
   await replaceManagedDir(dir, target)
@@ -2266,8 +2395,8 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
   const connectors = listConnectors(target)
   const hooks = listHooks(target)
 
-  // Sync skills and subagent delegates to DSH native skills directory.
-  if (existsSync(skillsDir)) {
+  // Sync skills and subagent delegates to DSH native skills directory when enabled.
+  if (initialEnabled && existsSync(skillsDir)) {
     await syncPluginSkillsToDsh(pluginName)
   }
 
@@ -2277,24 +2406,31 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
     if (!pluginConnectors.some((c) => c.name === name)) unregisterConnector(pluginName, name)
   }
 
-  // Auto-register LSP servers declared by the plugin. The host packages
-  // (dsh-lsp / dsh-lsp-stdio / dsh-tool-lsp) were pre-provisioned by the
-  // hub's `apply()` at DSH startup — this step is a single, race-free
-  // patch write. `lspErrors` still surface other failures (the user-installed
-  // language server binary not on PATH, missing extensionToLanguage, etc.).
-  // Drop the previous version's server entries; the loop re-adds the ones this
-  // version still declares, so removed servers stop loading.
-  unregisterPluginLsp(pluginName)
   const lspServers = listLspServers(target)
   const lspErrors = []
-  for (const r of registerPluginLsp(pluginName)) {
-    if (!r.ok && r.error) lspErrors.push(r.error)
-  }
+  unregisterPluginLsp(pluginName)
+  if (initialEnabled) {
+    // Auto-register LSP servers declared by the plugin. The host packages
+    // (dsh-lsp / dsh-lsp-stdio / dsh-tool-lsp) were pre-provisioned by the
+    // hub's `apply()` at DSH startup — this step is a single, race-free
+    // patch write. `lspErrors` still surface other failures (the user-installed
+    // language server binary not on PATH, missing extensionToLanguage, etc.).
+    // Drop the previous version's server entries; the loop re-adds the ones this
+    // version still declares, so removed servers stop loading.
+    for (const r of registerPluginLsp(pluginName)) {
+      if (!r.ok && r.error) lspErrors.push(r.error)
+    }
 
-  // Register the plugin's Claude/Codex hooks into DSH via the hooks bridge.
-  // The bridge package was pre-provisioned by the hub's `apply()`; this is a
-  // single patch write.
-  await registerPluginHooks(pluginName)
+    // Register the plugin's Claude/Codex hooks into DSH via the hooks bridge.
+    // The bridge package was pre-provisioned by the hub's `apply()`; this is a
+    // single patch write.
+    await registerPluginHooks(pluginName)
+  } else {
+    for (const c of pluginConnectors) {
+      toggleConnector(pluginName, c.name, false)
+    }
+    unregisterPluginHooks(pluginName)
+  }
 
   const record = {
     id: `${sourceId}/${pluginName}`,
@@ -2303,7 +2439,7 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
     displayName: row.displayName || pluginName,
     description: row.description || '',
     author: row.author ?? null,
-    enabled: true,
+    enabled: initialEnabled,
     installedAt: Date.now(),
     skillCount: skills.length,
     agentCount: agents.length,
@@ -2319,7 +2455,9 @@ async function installMarketplacePlugin({ sourceId, pluginName, refresh = false 
   writeState(latest)
   invalidateParserCaches()
 
-  warmInstalledConnectorTools(pluginName, pluginConnectors, record)
+  if (initialEnabled) {
+    warmInstalledConnectorTools(pluginName, pluginConnectors, record)
+  }
 
   return {
     ok: true,
@@ -2362,6 +2500,12 @@ function readInstalledVersion(target) {
 
 /** Uninstall: remove copy, unregister scan dir, clean legacy presets and connectors. */
 export async function uninstallPlugin(pluginName) {
+  bumpPluginEpoch(pluginName)
+  cancelActivePluginProbes(pluginName)
+  return withPluginLock(pluginName, () => uninstallPluginUnlocked(pluginName))
+}
+
+async function uninstallPluginUnlocked(pluginName) {
   const sharedNamespace = pluginName === 'user-mcp'
   const standaloneIds = () => new Set([
     ...(readState().userMcps || []).map(mcp => mcp.name),
@@ -2377,9 +2521,8 @@ export async function uninstallPlugin(pluginName) {
     stopping = stopVerifications()
   }
   await abortPluginConnectorProbes(pluginName)
-  const state = readState()
   const target = installedDir(pluginName)
-  removePluginSkillsFromDsh(pluginName)
+  await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true })
   const prefix = `${pluginName}::`
   const priorToolsState = readMcpToolsState()
   const declared = new Map((existsSync(target) ? getPluginConnectors(target) : []).map(c => [c.name, c.url]))
@@ -2417,15 +2560,11 @@ export async function uninstallPlugin(pluginName) {
       }
     }
   }
-  if (existsSync(target)) {
-    unregisterPluginLsp(pluginName)
-    unregisterPluginHooks(pluginName)
-  } else {
-    unregisterPluginHooks(pluginName)
-  }
+  unregisterPluginLsp(pluginName)
+  unregisterPluginHooks(pluginName)
   await abortPluginConnectorProbes(pluginName)
-  await retryManagedDirOperation(() => removeManagedDir(target), target)
-  if (!sharedNamespace) await retryManagedDirOperation(() => removeManagedDir(pluginDataDir(pluginName)), pluginDataDir(pluginName))
+  await removeManagedDirAsync(target, { allowTrash: false })
+  if (!sharedNamespace) await removeManagedDirAsync(pluginDataDir(pluginName), { allowTrash: false })
 
   // Clean any legacy preset directories left by prior versions
   cleanupLegacyPresets(pluginName)
@@ -2445,52 +2584,116 @@ export async function uninstallPlugin(pluginName) {
     writeMcpToolsState(mcpToolsState, { required: true })
   }
 
-  state.plugins = state.plugins.filter((p) => p.name !== pluginName)
-  writeState(state)
+  // Re-read state after awaits so concurrent mutations to other plugins are preserved.
+  const latestState = readState()
+  latestState.plugins = latestState.plugins.filter((p) => p.name !== pluginName)
+  writeState(latestState)
   invalidateParserCaches()
   return { ok: true }
 }
 
 /** Toggle a plugin's skills scanning and connectors on/off. */
 export async function togglePlugin(pluginName, enabled) {
+  const epoch = bumpPluginEpoch(pluginName)
+  cancelActivePluginProbes(pluginName)
+  return withPluginLock(pluginName, () => togglePluginUnlocked(pluginName, enabled, epoch))
+}
+
+async function togglePluginUnlocked(pluginName, enabled, epoch) {
   const state = readState()
   const rec = state.plugins.find((p) => p.name === pluginName)
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
   const target = installedDir(pluginName)
   const skillsDir = join(target, 'skills')
-  const skills = listSkills(target)
-  const skillNames = skills.map((s) => s.command || s.name || pluginName)
   const pluginConnectors = getPluginConnectors(target)
   const lspErrors = []
+  const sameInstall = (item) => item.name === pluginName && item.sourceId === rec.sourceId && item.installedAt === rec.installedAt
+  const stillCurrent = () => currentPluginEpoch(pluginName) === epoch
+  const rollbackEnable = async () => {
+    try { unregisterPluginHooks(pluginName) } catch {}
+    try { unregisterPluginLsp(pluginName) } catch {}
+    await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true }).catch(() => {})
+  }
 
   if (enabled) {
-    if (existsSync(skillsDir)) {
-      await syncPluginSkillsToDsh(pluginName)
+    try {
+      if (existsSync(skillsDir)) {
+        await syncPluginSkillsToDsh(pluginName, () => stillCurrent() && readState().plugins.some(sameInstall))
+      }
+      if (!stillCurrent()) {
+        if (rec.enabled === false) await rollbackEnable()
+        return { ok: false, error: '插件状态已变更，请刷新后重试' }
+      }
+      for (const r of registerPluginLsp(pluginName)) {
+        if (!r.ok && r.error) lspErrors.push(r.error)
+      }
+      await registerPluginHooks(pluginName)
+    } catch (err) {
+      if (rec.enabled === false) await rollbackEnable()
+      throw err
     }
-    for (const r of registerPluginLsp(pluginName)) {
-      if (!r.ok && r.error) lspErrors.push(r.error)
-    }
-    await registerPluginHooks(pluginName)
   } else {
-    await abortPluginConnectorProbes(pluginName)
-    removePluginSkillsFromDsh(pluginName)
-    for (const c of pluginConnectors) {
-      toggleConnector(pluginName, c.name, false)
+    cancelActivePluginProbes(pluginName)
+    try {
+      await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true })
+      for (const c of pluginConnectors) {
+        toggleConnector(pluginName, c.name, false)
+      }
+      unregisterPluginLsp(pluginName)
+      unregisterPluginHooks(pluginName)
+    } catch (err) {
+      if (rec.enabled !== false && existsSync(skillsDir)) {
+        await syncPluginSkillsToDsh(
+          pluginName,
+          () => stillCurrent() && readState().plugins.some(item => sameInstall(item) && item.enabled !== false),
+          { repairOnly: true },
+        ).catch(() => {})
+      }
+      throw err
     }
-    unregisterPluginLsp(pluginName)
-    unregisterPluginHooks(pluginName)
   }
   const latest = readState()
-  const sameInstall = (item) => item.name === pluginName && item.sourceId === rec.sourceId && item.installedAt === rec.installedAt
   if (!latest.plugins.some(sameInstall)) return { ok: false, error: '插件已变更，请刷新后重试' }
+  if (enabled && !stillCurrent()) {
+    if (rec.enabled === false) await rollbackEnable()
+    return { ok: false, error: '插件状态已变更，请刷新后重试' }
+  }
   writeState({ ...latest, plugins: latest.plugins.map(item => sameInstall(item) ? { ...item, enabled } : item) })
-  if (enabled) {
-    const canEnable = () => readState().plugins.some(item => sameInstall(item) && item.enabled !== false)
-    await Promise.all(pluginConnectors.map(async (c) => {
-      if (!getConnectorEntry(pluginName, c.name) && (savedConnectorDefinition(pluginName, c.name) || !connectorRequiresAuth(c))) {
-        await enableConnector(pluginName, c.name, undefined, { pluginOwned: true, canEnable })
+  if (enabled && pluginConnectors.length > 0) {
+    const canEnable = () => stillCurrent() && readState().plugins.some(item => sameInstall(item) && item.enabled !== false)
+    if (canEnable()) {
+      const toolsState = readMcpToolsState()
+      for (const c of pluginConnectors) {
+        if (!canEnable()) break
+        if (getConnectorEntry(pluginName, c.name)) continue
+        const savedState = toolsState[`${pluginName}::${c.name}`]
+        const savedDef = savedState?.savedConnectorTemplate || savedState?.savedConnectorDefinition || savedState?.savedOAuthRemoteConfig || null
+        if (!savedDef && connectorRequiresAuth(c)) continue
+        const input = savedDef || {}
+        const def = connectorDefinition(pluginName, c.name, input, true)
+        const isStdio = def.transport === 'stdio'
+        const fingerprint = !isStdio ? remoteConfigFingerprint(remoteConfigFromEntry(def) || def) : null
+        const oauthOk = !isStdio && isOAuthMode(def.oauth)
+          ? isOAuthConnectorAuthenticated(pluginName, c.name, { ...def, credentialKey: oauthCredentialKey(pluginName, c.name, def.url, def.oauth) }, toolsState)
+          : true
+        const verifiedBefore = savedState?.cachedToolsResolved === true && (
+          isStdio
+            ? Boolean(savedState?.savedConnectorDefinition || savedState?.savedConnectorTemplate)
+            : (savedState?.verifiedRemoteConfig === fingerprint && oauthOk)
+        )
+        const rememberDefinition = Boolean(savedDef)
+        if (verifiedBefore) {
+          saveConnectorAuth(pluginName, c.name, input, {
+            pluginOwned: true,
+            rememberDefinition,
+            probe: { ok: true, tools: savedState.cachedTools || [], definition: def },
+          })
+        } else {
+          // Probe unverified connectors asynchronously so plugin switches return immediately.
+          void enableConnector(pluginName, c.name, undefined, { pluginOwned: true, rememberDefinition, canEnable }).catch(() => {})
+        }
       }
-    }))
+    }
   }
   return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined }
 }
@@ -2500,33 +2703,46 @@ export async function togglePlugin(pluginName, enabled) {
  * reinstall the plugin copy and re-run conversions.
  */
 export async function updatePlugin(pluginName) {
-  const state = readState()
-  const rec = state.plugins.find((p) => p.name === pluginName)
-  if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
-  if (rec.sourceId === 'local' && !readMarketplace('local').some(row => row.name === pluginName)) {
-    throw new Error('本地插件的原始来源不可用，请重新导入后再更新')
-  }
-  const source = state.sources.find((s) => s.id === rec.sourceId)
-  if (source && typeof source.url === 'string') {
-    const cacheDir = sourceCacheDir(rec.sourceId)
-    if (existsSync(join(cacheDir, '.git'))) {
-      await pullSource(rec.sourceId)
-    }
-  }
+  bumpPluginEpoch(pluginName)
+  cancelActivePluginProbes(pluginName)
+  return withPluginLock(pluginName, async () => {
+    const initialRec = readState().plugins.find((p) => p.name === pluginName)
+    if (!initialRec) throw new Error(`plugin not installed: ${pluginName}`)
+    return withSourceLock(initialRec.sourceId, async () => {
+      const state = readState()
+      const rec = state.plugins.find((p) => p.name === pluginName)
+      if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
+      if (rec.sourceId === 'local' && !readMarketplace('local').some(row => row.name === pluginName)) {
+        throw new Error('本地插件的原始来源不可用，请重新导入后再更新')
+      }
+      const source = state.sources.find((s) => s.id === rec.sourceId)
+      if (source && typeof source.url === 'string') {
+        const cacheDir = sourceCacheDir(rec.sourceId)
+        if (existsSync(join(cacheDir, '.git'))) {
+          await pullSource(rec.sourceId)
+        }
+      }
 
-  // Clear memory cache so fresh MCP tool lists can be queried
-  for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
-    if (k.startsWith(`${pluginName}::`)) {
-      MEMORY_TOOLS_CACHE.delete(k)
-    }
-  }
+      // Clear memory cache so fresh MCP tool lists can be queried
+      for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
+        if (k.startsWith(`${pluginName}::`)) {
+          MEMORY_TOOLS_CACHE.delete(k)
+        }
+      }
 
-  // The marketplace rows are cached for 30s; without this the install below
-  // re-reads the pre-pull catalog and installs the old revision.
-  invalidateMarketplaceCache(rec.sourceId)
+      // The marketplace rows are cached for 30s; without this the install below
+      // re-reads the pre-pull catalog and installs the old revision.
+      invalidateMarketplaceCache(rec.sourceId)
 
-  // Freshly materialized install (re-copies, re-registers, re-converts).
-  return installPlugin({ sourceId: rec.sourceId, pluginName, refresh: true })
+      // Freshly materialized install (re-copies, re-registers, re-converts).
+      return installMarketplacePluginFromSourceLocked({
+        sourceId: rec.sourceId,
+        pluginName,
+        refresh: true,
+        initialEnabled: rec.enabled !== false,
+      })
+    })
+  })
 }
 
 /**
@@ -2543,17 +2759,24 @@ export async function refreshInstalledPluginsFromSource(sourceId, pluginNames) {
   )
   const refreshed = []
   for (const rec of targets) {
-    for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
-      if (k.startsWith(`${rec.name}::`)) MEMORY_TOOLS_CACHE.delete(k)
-    }
-    invalidateMarketplaceCache(sourceId)
-    invalidateParserCaches()
-    const wasDisabled = rec.enabled === false
-    await installPlugin({ sourceId, pluginName: rec.name, refresh: true })
-    if (wasDisabled) {
-      await togglePlugin(rec.name, false)
-    }
-    refreshed.push(rec.name)
+    bumpPluginEpoch(rec.name)
+    cancelActivePluginProbes(rec.name)
+    await withPluginLock(rec.name, async () => {
+      const current = readState().plugins.find((p) => p && p.name === rec.name && p.sourceId === sourceId)
+      if (!current) return
+      for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
+        if (k.startsWith(`${current.name}::`)) MEMORY_TOOLS_CACHE.delete(k)
+      }
+      invalidateMarketplaceCache(sourceId)
+      invalidateParserCaches()
+      await installMarketplacePluginUnlocked({
+        sourceId,
+        pluginName: current.name,
+        refresh: true,
+        initialEnabled: current.enabled !== false,
+      })
+      refreshed.push(current.name)
+    })
   }
   return refreshed
 }
@@ -2686,11 +2909,8 @@ export function installedDetails() {
   return state.plugins.map((rec) => {
     const target = installedDir(rec.name)
     const installed = existsSync(target)
-    if (installed) {
+    if (installed && !PLUGIN_LOCKS.has(rec.name)) {
       const skillsDir = join(target, 'skills')
-      if (!existsSync(skillsDir)) {
-        try { mkdirSync(skillsDir, { recursive: true }) } catch {}
-      }
       try {
         for (const entry of readdirSync(target, { withFileTypes: true })) {
           if (

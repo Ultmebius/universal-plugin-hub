@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
-  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, removeManagedDir, sourceCacheDir, safeRmDir,
+  readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, sourceCacheDir, safeRmDir,
 } from './store.js'
 import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from './market.js'
 import { readMarketplace, pluginDetail, invalidateMarketplaceCache, resolveMarketplacePluginDir } from './parser.js'
@@ -17,12 +17,18 @@ import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered, toolCallIconGroups,
   toggleConnector, isConnectorActive, isOAuthConnectorAuthenticated, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
+  withPluginLock, withSourceLock, removeManagedDirAsync, cancelActivePluginProbes,
 } from './install.js'
 import { inspectLocalPlugin, importLocalPlugin, importLocalSkills, importLocalMarketplace, saveUploadedZip, saveUploadedStream, MAX_UPLOAD_BYTES } from './local.js'
 import { uninstallUploadedSkill, uploadedSkillRecord } from './skill-uploads.js'
 import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
 import { remoteConfigFromEntry } from './oauth-config.js'
 import { scheduledResult } from './runtime.js'
+
+function scheduledIfOk(result, applyProfile, ids) {
+  if (!result || result.ok === false) return result
+  return scheduledResult(result, applyProfile, ids)
+}
 
 const API_PREFIX = '/universal-plugin-hub/api'
 const STAGED_UPLOADS = new Map()
@@ -291,17 +297,20 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       requireSameOrigin(req)
       const body = await readJsonBody(req)
       const sourceId = safeSegment(body.sourceId || 'anthropic', 'source id')
-      // Clone first if the source has never been fetched (fresh install), so a
-      // first-launch refresh does not fail with "尚未克隆".
-      await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
-      await pullSource(sourceId)
-      invalidateMarketplaceCache(sourceId)
-      invalidateLocalIconCache(sourceId)
-      let plugins = readMarketplace(sourceId)
-      if (sourceId === 'local') {
-        const names = new Set(plugins.map(p => p.name))
-        plugins = [...plugins, ...installedDetails().filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name)) && !names.has(p.name)).map(p => ({ ...p, sourceMissing: true }))]
-      }
+      const plugins = await withSourceLock(sourceId, async () => {
+        // Clone first if the source has never been fetched (fresh install), so a
+        // first-launch refresh does not fail with "尚未克隆".
+        await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
+        await pullSource(sourceId)
+        invalidateMarketplaceCache(sourceId)
+        invalidateLocalIconCache(sourceId)
+        let rows = readMarketplace(sourceId)
+        if (sourceId === 'local') {
+          const names = new Set(rows.map(r => r.name))
+          rows = [...rows, ...installedDetails().filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name)) && !names.has(p.name)).map(p => ({ ...p, sourceMissing: true }))]
+        }
+        return rows
+      })
       return sendJson(res, 200, { ok: true, plugins })
     }
 
@@ -318,17 +327,18 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const id = slugify(parsed ? `${parsed.owner}-${parsed.repo}` : url)
       if (!id) throw new Error('无法从该地址识别仓库')
 
-      // Check duplicates BEFORE cloning
-      const state = readState()
-      const duplicate = findDuplicateSource(state, id, url)
-      if (duplicate) {
-        throw new Error(`该插件源已存在（${duplicate.name}）`)
-      }
-      
-      // Validate by cloning into the cache
-      await ensureSourceCloned(id, url)
-      const rows = readMarketplace(id)
-      const count = Array.isArray(rows) ? rows.length : 0
+      const count = await withSourceLock(id, async () => {
+        // Check duplicates BEFORE cloning
+        const state = readState()
+        const duplicate = findDuplicateSource(state, id, url)
+        if (duplicate) {
+          throw new Error(`该插件源已存在（${duplicate.name}）`)
+        }
+        // Validate by cloning into the cache
+        await ensureSourceCloned(id, url)
+        const rows = readMarketplace(id)
+        return Array.isArray(rows) ? rows.length : 0
+      })
 
       const repoLabel = parsed ? `${parsed.owner}/${parsed.repo}` : (url.replace(/^https?:\/\//i, '').replace(/\.git$/i, ''))
 
@@ -462,28 +472,30 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const id = slugify(parsed ? `${parsed.owner}-${parsed.repo}` : url)
       if (!id) throw new Error('无法从该地址识别仓库')
 
-      const state = readState()
-      const duplicate = findDuplicateSource(state, id, url)
-      if (duplicate) {
-        throw new Error(`该插件源已存在（${duplicate.name}）`)
+      const validateUnique = (state) => {
+        const duplicate = findDuplicateSource(state, id, url)
+        if (duplicate) {
+          throw new Error(`该插件源已存在（${duplicate.name}）`)
+        }
+        if (state.sources.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
+          throw new Error(`已存在同名的插件源「${name}」，请换一个名称`)
+        }
       }
 
-      // Check name duplication (e.g. user naming two sources with the same label)
-      if (state.sources.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
-        throw new Error(`已存在同名的插件源「${name}」，请换一个名称`)
-      }
-      
-      await ensureSourceCloned(id, url)
-      const rows = readMarketplace(id)
-      const count = Array.isArray(rows) ? rows.length : 0
+      return sendJson(res, 200, await withSourceLock(id, async () => {
+        validateUnique(readState())
+        await ensureSourceCloned(id, url)
+        const rows = readMarketplace(id)
+        const count = Array.isArray(rows) ? rows.length : 0
 
-      state.sources.push({ id, name, url, addedAt: Date.now() })
-      writeState(state)
-      return sendJson(res, 200, {
-        ok: true,
-        source: state.sources[state.sources.length - 1],
-        pluginCount: count,
-      })
+        // Re-read state after awaiting clone so concurrent mutations (e.g. plugin toggles) are preserved.
+        const latestState = readState()
+        validateUnique(latestState)
+        const source = { id, name, url, addedAt: Date.now() }
+        latestState.sources.push(source)
+        writeState(latestState)
+        return { ok: true, source, pluginCount: count }
+      }))
     }
 
     if (method === 'POST' && path === '/sources/reorder') {
@@ -517,21 +529,24 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     if (method === 'DELETE' && path.startsWith('/sources/')) {
       requireSameOrigin(req)
       const sourceId = safeSegment(path.slice('/sources/'.length), 'source id')
-      const state = readState()
-      const source = state.sources.find((s) => s.id === sourceId)
-      if (!source) throw new Error('插件源不存在')
-      if (source.builtin) throw new Error('内置源不可删除')
-      const used = state.plugins.some((p) => p.sourceId === sourceId)
-      if (used) throw new Error('该源下仍有已安装插件，请先卸载')
-      // The remote checkout pool is shared by marketplaces. Only remove this
-      // source's own clone or uploaded marketplace copy.
-      if (sourceId === 'local') cleanupAllStagedUploads()
-      if (sourceId !== 'remote') removeManagedDir(sourceCacheDir(sourceId))
-      state.sources = state.sources.filter((s) => s.id !== sourceId)
-      if (Array.isArray(state.tabOrder)) state.tabOrder = state.tabOrder.filter((id) => id !== sourceId)
-      writeState(state)
-      invalidateMarketplaceCache(sourceId)
-      invalidateLocalIconCache(sourceId)
+      await withSourceLock(sourceId, async () => {
+        const state = readState()
+        const source = state.sources.find((s) => s.id === sourceId)
+        if (!source) throw new Error('插件源不存在')
+        if (source.builtin) throw new Error('内置源不可删除')
+        const used = state.plugins.some((p) => p.sourceId === sourceId)
+        if (used) throw new Error('该源下仍有已安装插件，请先卸载')
+        // The remote checkout pool is shared by marketplaces. Only remove this
+        // source's own clone or uploaded marketplace copy.
+        if (sourceId === 'local') cleanupAllStagedUploads()
+        if (sourceId !== 'remote') await removeManagedDirAsync(sourceCacheDir(sourceId), { allowTrash: false })
+        const latestState = readState()
+        latestState.sources = latestState.sources.filter((s) => s.id !== sourceId)
+        if (Array.isArray(latestState.tabOrder)) latestState.tabOrder = latestState.tabOrder.filter((id) => id !== sourceId)
+        writeState(latestState)
+        invalidateMarketplaceCache(sourceId)
+        invalidateLocalIconCache(sourceId)
+      })
       return sendJson(res, 200, { ok: true })
     }
 
@@ -777,14 +792,17 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
-      const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
-      if (!canEnable() && body.enabled !== false) return sendJson(res, 200, { ok: false, error: '请先启用所属插件' })
-      const result = body.enabled !== false
-        ? await enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, canEnable })
-        : toggleConnector(pluginName, connectorName, false)
-      // A rejected toggle registered nothing: do not schedule a reconcile.
-      if (!result || !result.ok) return sendJson(res, 200, result)
-      return sendJson(res, 200, scheduledResult(result, applyProfile, body.enabled !== false ? [getConnectorId(pluginName, connectorName)] : []))
+      cancelActivePluginProbes(pluginName, connectorName)
+      const outcome = await withPluginLock(pluginName, async () => {
+        const pluginRec = readState().plugins.find(plugin => plugin.name === pluginName)
+        if (!pluginRec) return { ok: false, error: '插件未安装或已卸载' }
+        const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
+        if (!canEnable() && body.enabled !== false) return { ok: false, error: '请先启用所属插件' }
+        return body.enabled !== false
+          ? await enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, canEnable })
+          : toggleConnector(pluginName, connectorName, false)
+      })
+      return sendJson(res, 200, scheduledIfOk(outcome, applyProfile, body.enabled !== false ? [getConnectorId(pluginName, connectorName)] : []))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.includes('/connectors/') && path.endsWith('/verify')) {
@@ -806,13 +824,17 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(parts[0], 'plugin name')
       const connectorName = safeSegment(parts[2], 'connector name')
       const body = await readJsonBody(req)
-      if (!readState().plugins.some(plugin => plugin.name === pluginName)) {
-        return sendJson(res, 404, { ok: false, error: '插件未安装或已卸载' })
-      }
-      const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
-      if (!canEnable()) return sendJson(res, 200, { ok: false, error: '请先启用所属插件' })
-      const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable })
-      return sendJson(res, 200, scheduledResult(result, applyProfile, [getConnectorId(pluginName, connectorName)]))
+      cancelActivePluginProbes(pluginName, connectorName)
+      const outcome = await withPluginLock(pluginName, async () => {
+        if (!readState().plugins.some(plugin => plugin.name === pluginName)) {
+          return { status: 404, body: { ok: false, error: '插件未安装或已卸载' } }
+        }
+        const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
+        if (!canEnable()) return { status: 200, body: { ok: false, error: '请先启用所属插件' } }
+        const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable })
+        return { status: 200, body: scheduledIfOk(result, applyProfile, [getConnectorId(pluginName, connectorName)]) }
+      })
+      return sendJson(res, outcome.status, outcome.body)
     }
 
     // ── plugin detail ────────────────────────────────────────────────────
@@ -890,14 +912,14 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       })
       invalidateMarketplaceCache(sourceId)
       invalidateLocalIconCache(sourceId)
-      return sendJson(res, 200, scheduledResult(result, applyProfile))
+      return sendJson(res, 200, scheduledIfOk(result, applyProfile))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/toggle')) {
       requireSameOrigin(req)
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/toggle'.length), 'plugin name')
       const body = await readJsonBody(req)
-      return sendJson(res, 200, scheduledResult(await togglePlugin(pluginName, body.enabled === true), applyProfile))
+      return sendJson(res, 200, scheduledIfOk(await togglePlugin(pluginName, body.enabled === true), applyProfile))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/update')) {
@@ -906,7 +928,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const result = await updatePlugin(pluginName)
       invalidateMarketplaceCache()
       invalidateLocalIconCache()
-      return sendJson(res, 200, scheduledResult(result, applyProfile))
+      return sendJson(res, 200, scheduledIfOk(result, applyProfile))
     }
 
     if (method === 'POST' && path === '/restart') {
@@ -950,7 +972,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const result = await uninstallPlugin(pluginName)
       invalidateMarketplaceCache()
       invalidateLocalIconCache()
-      return sendJson(res, 200, scheduledResult(result, applyProfile))
+      return sendJson(res, 200, scheduledIfOk(result, applyProfile))
     }
 
     return sendJson(res, 404, { error: 'not found' })

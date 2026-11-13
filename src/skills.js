@@ -431,7 +431,14 @@ export function createSkillsManager(root) {
     const after = await status(item)
     const desired = enabled ? item.invocation : { modelInvocable: false, userInvocable: false }
     if (!after.available || !after.invocations.every(policy => policy.modelInvocable === desired.modelInvocable && policy.userInvocable === desired.userInvocable)) {
-      state.disabledLocalSkills = previous; writeState(state); invalidateAll()
+      const current = readState()
+      const restored = { ...(current.disabledLocalSkills || {}) }
+      for (const location of item.locations) {
+        if (Object.prototype.hasOwnProperty.call(previous, location.id)) restored[location.id] = previous[location.id]
+        else delete restored[location.id]
+      }
+      current.disabledLocalSkills = restored
+      writeState(current); invalidateAll()
       catalogChanged?.()
       throw new Error(after.message || 'DSH 未确认开关状态，已恢复原状态')
     }

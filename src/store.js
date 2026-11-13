@@ -7,54 +7,137 @@
  *   installed/<name>/   — installed plugin copies
  */
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, lstatSync, rmSync, unlinkSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, lstatSync, rmSync, rmdirSync, unlinkSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 
+let TRASH_SEQ = 0
+let TRASH_SWEEP_TIMER = null
+const PENDING_TRASH_PATHS = new Set()
+let STATE_TMP_SEQ = 0
+
+function canonicalComparePath(p) {
+  const resolved = resolve(p)
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+export function isSameOrInsidePath(child, parent) {
+  if (!child || !parent) return false
+  const c = canonicalComparePath(child)
+  const p = canonicalComparePath(parent)
+  if (c === p) return true
+  const rel = relative(p, c)
+  return rel !== '' && !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)
+}
+
+function scheduleTrashSweep(trashed) {
+  if (trashed) PENDING_TRASH_PATHS.add(trashed)
+  if (TRASH_SWEEP_TIMER) return
+  TRASH_SWEEP_TIMER = setTimeout(() => {
+    TRASH_SWEEP_TIMER = null
+    try { sweepTrash() } catch {}
+  }, 5000)
+  TRASH_SWEEP_TIMER.unref?.()
+}
+
+function unlinkReparsePointsSync(dir) {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const child = join(dir, entry.name)
+    if (entry.isSymbolicLink()) {
+      try { unlinkSync(child) } catch { try { rmdirSync(child) } catch {} }
+    } else if (entry.isDirectory()) {
+      unlinkReparsePointsSync(child)
+    }
+  }
+}
+
 /** Robust directory deletion handling Windows readonly/locked files. */
-export function safeRmDir(dir, { allowTrash = true } = {}) {
+export function safeRmDir(dir, { allowTrash = true, quarantineRoot = trashRoot() } = {}) {
   if (!dir) return
   // A dangling junction is invisible to existsSync. Unlink junctions directly
   // so the Windows directory fallbacks never operate on their targets.
   let entry
-  try { entry = lstatSync(dir, { throwIfNoEntry: false }) } catch {}
+  let lstatErr = null
+  try { entry = lstatSync(dir, { throwIfNoEntry: false }) } catch (err) { lstatErr = err }
   if (entry?.isSymbolicLink()) {
-    unlinkSync(dir)
+    try {
+      unlinkSync(dir)
+    } catch {
+      try { rmdirSync(dir) } catch {
+        try { rmSync(dir, { recursive: true, force: true }) } catch {}
+      }
+    }
     return
   }
-  if (!entry && !existsSync(dir)) return
+  if (!entry && !lstatErr && !existsSync(dir)) return
+  if (entry && !entry.isDirectory()) {
+    try {
+      rmSync(dir, { force: true })
+      return
+    } catch {}
+  }
   try {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    rmSync(dir, { recursive: true, force: true })
     return
   } catch (err) {
+    if (allowTrash && quarantineRoot && !isSameOrInsidePath(dir, quarantineRoot) && !isSameOrInsidePath(quarantineRoot, dir)) {
+      try {
+        mkdirSync(quarantineRoot, { recursive: true })
+        const seq = (TRASH_SEQ = (TRASH_SEQ + 1) & 0xffffff).toString(36)
+        const trashed = join(quarantineRoot, `${basename(dir) || 'dir'}-${process.pid}-${Date.now().toString(36)}-${seq}`)
+        renameSync(dir, trashed)
+        scheduleTrashSweep(trashed)
+        return
+      } catch {}
+    }
     if (process.platform === 'win32') {
-      try {
-        execFileSync('cmd.exe', ['/c', `attrib -r -s -h "${dir}\\*" /s /d`], { stdio: 'ignore', windowsHide: true })
-        rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
-        return
-      } catch {}
-      try {
-        execFileSync('cmd.exe', ['/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
-        if (!existsSync(dir)) return
-      } catch {}
-      if (!allowTrash) return
-      try {
-        const trash = `${dir}.trash-${Date.now()}`
-        renameSync(dir, trash)
+      // Never let attrib.exe or rd traverse into a junction target outside `dir`.
+      unlinkReparsePointsSync(dir)
+      const isPermErr = err?.code === 'EPERM' || err?.code === 'EACCES'
+      if (isPermErr) {
         try {
-          execFileSync('cmd.exe', ['/c', `rd /s /q "${trash}"`], { stdio: 'ignore', windowsHide: true })
+          execFileSync('attrib.exe', ['-r', '-s', '-h', dir], { stdio: 'ignore', windowsHide: true })
         } catch {}
-        return
-      } catch {}
+        try {
+          execFileSync('attrib.exe', ['-r', '-s', '-h', join(dir, '*'), '/s', '/d'], { stdio: 'ignore', windowsHide: true })
+          rmSync(dir, { recursive: true, force: true })
+          return
+        } catch {}
+      }
+      if (err?.code !== 'EBUSY') {
+        try {
+          execFileSync('cmd.exe', ['/d', '/s', '/c', `rd /s /q "${dir}"`], { stdio: 'ignore', windowsHide: true })
+          let remaining = null
+          try { remaining = lstatSync(dir, { throwIfNoEntry: false }) } catch { remaining = true }
+          if (!remaining) return
+        } catch {}
+      }
     }
   }
 }
 
 /** Remove managed files before forgetting the record needed to retry cleanup. */
-export function removeManagedDir(dir) {
-  safeRmDir(dir, { allowTrash: false })
-  if (lstatSync(dir, { throwIfNoEntry: false })) {
-    throw Object.assign(new Error(`无法清理目录：${dir}`), { code: 'EBUSY', path: dir })
+export function removeManagedDir(dir, { allowTrash = false } = {}) {
+  safeRmDir(dir, { allowTrash })
+  let remaining = null
+  let lstatErr = null
+  try {
+    remaining = lstatSync(dir, { throwIfNoEntry: false })
+  } catch (err) {
+    lstatErr = err
+  }
+  if (remaining || lstatErr) {
+    throw Object.assign(new Error(`无法清理目录：${dir}`), {
+      code: lstatErr?.code || 'EBUSY',
+      syscall: lstatErr?.syscall || 'rmdir',
+      path: dir,
+    })
   }
 }
 
@@ -102,6 +185,51 @@ export function uploadedSkillsDir() {
   return join(marketRoot(), 'uploaded')
 }
 
+export function trashRoot() {
+  return join(marketRoot(), '.trash')
+}
+
+export function sweepTrash() {
+  for (const trashed of Array.from(PENDING_TRASH_PATHS)) {
+    try { safeRmDir(trashed, { allowTrash: false }) } catch {}
+    try {
+      if (!lstatSync(trashed, { throwIfNoEntry: false })) {
+        PENDING_TRASH_PATHS.delete(trashed)
+        const parent = dirname(trashed)
+        try { if (readdirSync(parent).length === 0) rmdirSync(parent) } catch {}
+      }
+    } catch {}
+  }
+  const root = trashRoot()
+  if (existsSync(root)) {
+    try {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        try { safeRmDir(join(root, entry.name), { allowTrash: false }) } catch {}
+      }
+      if (readdirSync(root).length === 0) {
+        try { rmdirSync(root) } catch {}
+      }
+    } catch {}
+  }
+  const legacyParents = [
+    dshSkillsDir(),
+    join(marketRoot(), 'installed'),
+    join(marketRoot(), 'market'),
+    join(marketRoot(), 'plugin-data'),
+    uploadedSkillsDir(),
+  ]
+  for (const parent of legacyParents) {
+    if (!existsSync(parent)) continue
+    try {
+      for (const entry of readdirSync(parent, { withFileTypes: true })) {
+        if (/\.trash-\d+$/.test(entry.name)) {
+          try { safeRmDir(join(parent, entry.name), { allowTrash: false }) } catch {}
+        }
+      }
+    } catch {}
+  }
+}
+
 /** Default state: the built-in Anthropic source. */
 export function defaultState() {
   return {
@@ -125,12 +253,12 @@ export function readState() {
   if (!existsSync(path)) {
     const fresh = defaultState()
     writeState(fresh)
-    return fresh
+    return structuredClone(fresh)
   }
   try {
     const stat = statSync(path)
     if (STATE_CACHE && STATE_CACHE_MTIME === stat.mtimeMs) {
-      return STATE_CACHE
+      return structuredClone(STATE_CACHE)
     }
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
     const base = defaultState()
@@ -142,7 +270,7 @@ export function readState() {
     }
     STATE_CACHE = merged
     STATE_CACHE_MTIME = stat.mtimeMs
-    return merged
+    return structuredClone(merged)
   } catch {
     return defaultState()
   }
@@ -151,10 +279,12 @@ export function readState() {
 export function writeState(state) {
   const file = statePath()
   mkdirSync(dirname(file), { recursive: true })
-  const tmp = join(dirname(file), `.state.${process.pid}.${Date.now().toString(36)}.tmp`)
-  writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8')
+  const seq = (STATE_TMP_SEQ = (STATE_TMP_SEQ + 1) & 0xffffff).toString(36)
+  const tmp = join(dirname(file), `.state.${process.pid}.${Date.now().toString(36)}.${seq}.tmp`)
+  const snapshot = structuredClone(state)
+  writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf8')
   renameSync(tmp, file)
-  STATE_CACHE = state
+  STATE_CACHE = snapshot
   try {
     STATE_CACHE_MTIME = statSync(file).mtimeMs
   } catch {

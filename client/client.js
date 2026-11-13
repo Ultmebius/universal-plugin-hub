@@ -7253,10 +7253,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [globalToolData, loadGlobalTools, showToast]);
 
 		const [pendingMcpToggles, setPendingMcpToggles] = useState({});
+		const [optimisticMcp, setOptimisticMcp] = useState({});
 		const renderMcpServerRow = (opts) => {
 			const { owner, name, transport, connected, canEdit, record, first, conn, plugin: ownerPlugin } = opts;
 			const key = `${owner}::${name}`;
-			const enabled = canEdit ? connected : conn?.enabled === true;
+			const serverEnabled = canEdit ? connected : conn?.enabled === true;
+			const enabled = Object.prototype.hasOwnProperty.call(optimisticMcp, key) ? optimisticMcp[key] : serverEnabled;
 			const toggling = pendingMcpToggles[key] === true;
 			const isExpanded = !!globalExpanded[key];
 			const info = globalToolData[key];
@@ -7265,22 +7267,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 			const onToggleServer = async () => {
 				if (toggling) return;
+				const nextEnabled = !serverEnabled;
+				setOptimisticMcp(prev => ({ ...prev, [key]: nextEnabled }));
 				setPendingMcpToggles(prev => ({ ...prev, [key]: true }));
 				try {
 					const url = canEdit
 						? "/mcps/toggle"
 						: `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(name)}/toggle`;
-					const payload = canEdit ? { name, enabled: !enabled } : { enabled: !enabled };
+					const payload = canEdit ? { name, enabled: nextEnabled } : { enabled: nextEnabled };
 					const res = await api(url, { method: "POST", body: JSON.stringify(payload) });
 					if (res && res.ok === false) {
+						setOptimisticMcp(prev => { const n = { ...prev }; delete n[key]; return n; });
 						showToast("操作失败", res.error || "请稍后重试", { restart: false });
 						return;
 					}
 					if (canEdit) await refreshMcps();
 					else await refreshState();
 				} catch (err) {
+					setOptimisticMcp(prev => { const n = { ...prev }; delete n[key]; return n; });
 					showToast("操作失败", cleanError(err), { restart: false });
 				} finally {
+					setOptimisticMcp(prev => { const n = { ...prev }; delete n[key]; return n; });
 					setPendingMcpToggles(prev => ({ ...prev, [key]: false }));
 				}
 			};
@@ -8516,6 +8523,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const removePlugin = async (pluginName) => {
 			try {
 				const result = await api("/plugins/" + encodeURIComponent(pluginName), { method: "DELETE" });
+				if (result?.ok === false) {
+					await refreshState();
+					showToast("卸载失败", result.error || "卸载未能完成，请稍后重试", { restart: false });
+					return;
+				}
 				void showApplicationToast(showToast, result, "已卸载插件", "插件副本与技能注册已实时移除并生效。");
 				setView({ type: "browse", sourceId: activeSourceId });
 				await refreshState();
@@ -8604,11 +8616,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const toggleSkill = async (skill, enabled) => {
 			if (skillBusy) return;
 			setSkillBusy(skill.id);
+			const prevSkills = rows?.["skills-local"];
+			if (Array.isArray(prevSkills)) {
+				setRows(prev => ({ ...(prev || {}), "skills-local": prevSkills.map(s => s && s.id === skill.id ? { ...s, enabled } : s) }));
+			}
 			try {
 					const body = await api("/skills/toggle", { method: "POST", body: JSON.stringify({ id: skill.id, enabled }) });
 				setRows(prev => ({ ...(prev || {}), "skills-local": body.skills || [] }));
 					showToast(enabled ? "Skill 已开启" : "Skill 已关闭", skill.name, { restart: false });
-			} catch (e) { showToast("操作失败", e.message, { restart: false }); }
+			} catch (e) {
+				if (Array.isArray(prevSkills)) {
+					setRows(prev => ({ ...(prev || {}), "skills-local": prevSkills }));
+				}
+				showToast("操作失败", e.message, { restart: false });
+			}
 			finally { setSkillBusy(null); }
 		};
 
@@ -8872,11 +8893,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				onRemove: () => removePlugin(currentDetailPlugin.name),
 				onManage: () => openManage(state.plugins.find((r) => r.name === currentDetailPlugin.name), { type: "detail", sourceId: activeSourceId, plugin: currentDetailPlugin }),
 				onTogglePlugin: async (enabled) => {
-					await api("/plugins/" + encodeURIComponent(currentDetailPlugin.name) + "/toggle", {
+					const res = await api("/plugins/" + encodeURIComponent(currentDetailPlugin.name) + "/toggle", {
 						method: "POST",
 						body: JSON.stringify({ enabled }),
 					});
 					await refreshState();
+					return res;
 				},
 				showToast,
 			}),
@@ -10972,13 +10994,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [busy, setBusy] = useState(false);
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [toggling, setToggling] = useState(false);
+		const [optimisticEnabled, setOptimisticEnabled] = useState(null);
 			const { detailRef, maskClass: detailMaskClass, updateMask: updateDetailMask } = useDetailScrollMask(plugin?.name, containerRef, plugin, scrollState);
+		useEffect(() => { setOptimisticEnabled(null); }, [plugin?.name]);
 
 		if (!plugin) return null;
 		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
 
 		const installed = !!plugin.installed;
-		const isEnabled = (pluginRecord?.enabled !== false && plugin?.enabled !== false);
+		const serverEnabled = (pluginRecord?.enabled !== false && plugin?.enabled !== false);
+		const isEnabled = optimisticEnabled !== null ? optimisticEnabled : serverEnabled;
 		const skills = (plugin.detail && Array.isArray(plugin.detail.skills) && plugin.detail.skills.length > 0)
 			? plugin.detail.skills
 			: (Array.isArray(plugin.skills) && plugin.skills.length > 0
@@ -11011,19 +11036,34 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				: (pluginRecord && Array.isArray(pluginRecord.lspServers) ? pluginRecord.lspServers : []));
 
 		const handleToggle = async () => {
-			if (toggling) return;
-			const nextState = !isEnabled;
+			if (toggling || busy) return;
+			const nextState = !serverEnabled;
+			setOptimisticEnabled(nextState);
 			setToggling(true);
 			try {
+				let result = null;
 				if (onTogglePlugin) {
-					await onTogglePlugin(nextState);
+					result = await onTogglePlugin(nextState);
+				}
+				if (result?.ok === false) {
+					setOptimisticEnabled(null);
+					if (showToast) {
+						showToast("操作失败", result.error || "插件状态已变更，请刷新后重试", { restart: false });
+					}
+					return;
 				}
 				if (showToast) {
-					showToast(nextState ? "插件已启用" : "插件已禁用", `${plugin.displayName || plugin.name} 已${nextState ? "开启" : "暂停"}。`, { restart: false });
+					if (typeof showApplicationToast === "function") {
+						void showApplicationToast(showToast, result, nextState ? "插件已启用" : "插件已禁用", `${plugin.displayName || plugin.name} 已${nextState ? "开启" : "暂停"}。`);
+					} else {
+						showToast(nextState ? "插件已启用" : "插件已禁用", `${plugin.displayName || plugin.name} 已${nextState ? "开启" : "暂停"}。`, { restart: false });
+					}
 				}
 			} catch (e) {
+				setOptimisticEnabled(null);
 				if (showToast) showToast("操作失败", e.message, { restart: false });
 			} finally {
+				setOptimisticEnabled(null);
 				setToggling(false);
 			}
 		};
@@ -11064,18 +11104,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("button", {
 							className: "cpm-btn cpm-btn-primary",
 							disabled: busy,
-							onClick: async () => { setBusy(true); await onInstall(); setBusy(false); },
+							onClick: async () => { setBusy(true); try { await onInstall(); } finally { setBusy(false); } },
 						}, busy ? "安装中…" : "Install"),
 					installed && [
 						h("button", {
 							key: "r",
 							className: "cpm-btn cpm-btn-danger",
-							disabled: busy,
+							disabled: busy || toggling,
 							onClick: () => setConfirmRemove(true),
 						}, "Remove"),
 						h("button", {
 							key: "m",
 							className: "cpm-btn cpm-btn-primary",
+							disabled: busy || toggling,
 							onClick: onManage,
 						}, "Manage"),
 						h("button", {
@@ -11177,21 +11218,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}),
 			),
 
-			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemove(false)) },
+			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => { if (!busy) setConfirmRemove(false); }) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
 					h("div", { className: "cpm-dialog-title" }, `卸载 ${plugin.displayName || plugin.name}？`),
 					h("div", { className: "cpm-field", style: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" } }, "将删除插件副本、技能与子代理注册及 MCP 配置。"),
 					h("div", { className: "cpm-dialog-actions" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => setConfirmRemove(false) }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", disabled: busy, onClick: () => { if (!busy) setConfirmRemove(false); } }, "取消"),
 						h("button", {
 							className: "cpm-btn cpm-btn-primary",
 							style: { background: "#ef4444", borderColor: "#ef4444", color: "#ffffff" },
 							disabled: busy,
 							onClick: async () => {
-								setConfirmRemove(false);
+								if (busy) return;
 								setBusy(true);
-								await onRemove();
-								setBusy(false);
+								try {
+									await onRemove();
+								} finally {
+									setBusy(false);
+									setConfirmRemove(false);
+								}
 							},
 						}, busy ? "卸载中…" : "卸载"),
 					),
@@ -11410,9 +11455,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [updating, setUpdating] = useState(false);
 		const [toggling, setToggling] = useState(false);
 		const [togglingConn, setTogglingConn] = useState(null);
+		const [optimisticEnabled, setOptimisticEnabled] = useState(null);
+		const [optimisticConn, setOptimisticConn] = useState({});
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [authDialog, setAuthDialog] = useState(null);
 		const [expandedConnectors, setExpandedConnectors] = useState({});
+		useEffect(() => { setOptimisticEnabled(null); setOptimisticConn({}); }, [record?.name]);
 		const [connectorToolsData, setConnectorToolsData] = useState(() => {
 			// Zero-latency instant seed from memory/localStorage cache
 			const initial = {};
@@ -11845,48 +11893,75 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					? marketPlugin.lspServers
 					: (record.lspServers || []);
 
+		const serverEnabled = record.enabled !== false;
+		const pluginEnabled = optimisticEnabled !== null ? optimisticEnabled : serverEnabled;
+
 		const toggle = async () => {
+			if (toggling || updating || busy || togglingConn) return;
+			const next = !serverEnabled;
+			setOptimisticEnabled(next);
 			setToggling(true);
 			try {
-				const result = await api(`/plugins/${record.name}/toggle`, {
+				const result = await api(`/plugins/${encodeURIComponent(record.name)}/toggle`, {
 					method: "POST",
-					body: JSON.stringify({ enabled: !record.enabled }),
+					body: JSON.stringify({ enabled: next }),
 				});
+				if (result?.ok === false) {
+					setOptimisticEnabled(null);
+					await refreshState();
+					showToast("操作失败", result.error || "插件状态已变更，请刷新后重试", { restart: false });
+					return;
+				}
 				await refreshState();
-				void showApplicationToast(showToast, result, record.enabled ? "已禁用插件" : "已启用插件", "插件状态已实时更新并生效。");
+				void showApplicationToast(showToast, result, next ? "已启用插件" : "已禁用插件", "插件状态已实时更新并生效。");
 			} catch (e) {
+				setOptimisticEnabled(null);
 				showToast("操作失败", e.message, { restart: false });
 			} finally {
+				setOptimisticEnabled(null);
 				setToggling(false);
 			}
 		};
 
 		const toggleConn = async (connectorName, currentConnected) => {
+			if (toggling || updating || busy || togglingConn) return;
+			const nextConnected = !currentConnected;
+			setOptimisticConn((prev) => ({ ...prev, [connectorName]: nextConnected }));
 			setTogglingConn(connectorName);
 			try {
-				const result = await api(`/plugins/${record.name}/connectors/${connectorName}/toggle`, {
+				const result = await api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(connectorName)}/toggle`, {
 					method: "POST",
-					body: JSON.stringify({ enabled: !currentConnected }),
+					body: JSON.stringify({ enabled: nextConnected }),
 				});
-					if (result?.ok === false) {
-						showToast("操作失败", result.error || "请检查 MCP 配置后重试", { restart: false });
-						return;
-					}
+				if (result?.ok === false) {
+					setOptimisticConn((prev) => { const n = { ...prev }; delete n[connectorName]; return n; });
+					await refreshState();
+					showToast("操作失败", result.error || "请检查 MCP 配置后重试", { restart: false });
+					return;
+				}
 				await refreshState();
-				void showApplicationToast(showToast, result, !currentConnected ? "已连接 Connector" : "已断开 Connector", `MCP 服务 ${connectorName} 配置已实时更新。`);
+				void showApplicationToast(showToast, result, nextConnected ? "已连接 Connector" : "已断开 Connector", `MCP 服务 ${connectorName} 配置已实时更新。`);
 			} catch (e) {
+				setOptimisticConn((prev) => { const n = { ...prev }; delete n[connectorName]; return n; });
 				showToast("操作失败", e.message, { restart: false });
 			} finally {
+				setOptimisticConn((prev) => { const n = { ...prev }; delete n[connectorName]; return n; });
 				setTogglingConn(null);
 			}
 		};
 
 		const update = async () => {
+			if (toggling || updating || busy || togglingConn) return;
 			setUpdating(true);
 			try {
-				const result = await api(`/plugins/${record.name}/update`, { method: "POST" });
+				const result = await api(`/plugins/${encodeURIComponent(record.name)}/update`, { method: "POST" });
+				if (result?.ok === false) {
+					await refreshState();
+					showToast("更新失败", result.error || "更新未能完成，请刷新后重试", { restart: false });
+					return;
+				}
 				await refreshState();
-				void showApplicationToast(showToast, result, "更新完成", `${result.skills.length} 个技能已实时重新就绪并生效。`);
+				void showApplicationToast(showToast, result, "更新完成", `${(result.skills || []).length} 个技能已实时重新就绪并生效。`);
 			} catch (e) {
 				showToast("更新失败", e.message, { restart: false });
 			} finally {
@@ -11895,9 +11970,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		const remove = async () => {
+			if (toggling || updating || busy || togglingConn) return;
 			setBusy(true);
 			try {
-				const result = await api(`/plugins/${record.name}`, { method: "DELETE" });
+				const result = await api(`/plugins/${encodeURIComponent(record.name)}`, { method: "DELETE" });
+				if (result?.ok === false) {
+					await refreshState();
+					showToast("卸载失败", result.error || "卸载未能完成，请稍后重试", { restart: false });
+					return;
+				}
 				for (const k of Object.keys(GLOBAL_MCP_TOOLS_CACHE)) {
 					if (k.startsWith(`${record.name}::`)) {
 						delete GLOBAL_MCP_TOOLS_CACHE[k];
@@ -11913,6 +11994,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast("卸载失败", e.message, { restart: false });
 			} finally {
 				setBusy(false);
+				setConfirmRemove(false);
 			}
 		};
 
@@ -12039,12 +12121,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const onKey = (e) => {
 				if (e.key === "Escape") {
 					if (authDialog) closeAuthDialog();
-					if (confirmRemove) setConfirmRemove(false);
+					if (confirmRemove && !busy) setConfirmRemove(false);
 				}
 			};
 			window.addEventListener("keydown", onKey);
 			return () => window.removeEventListener("keydown", onKey);
-		}, [authDialog, confirmRemove]);
+		}, [authDialog, confirmRemove, busy]);
 
 		return h(React.Fragment, null,
 			h("div", {
@@ -12077,19 +12159,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 				h("button", {
 					className: "cpm-btn cpm-btn-secondary",
-					disabled: updating || toggling || busy || !hasUpdate,
+					disabled: busy || updating || toggling || Boolean(togglingConn) || !hasUpdate,
 					"data-cpm-tip": updating ? "正在更新…" : (hasUpdate ? `可更新至 v${latestVersion}` : `当前已是最新版本 (v${installedVersion})`),
-					onClick: hasUpdate && !updating ? update : undefined,
+					onClick: () => { if (hasUpdate && !(busy || updating || toggling || togglingConn)) update(); },
 				}, updating ? "Updating…" : "Update"),
 				h("button", {
 					type: "button", className: "cpm-btn cpm-btn-danger",
-					disabled: busy || updating || toggling,
+					disabled: busy || updating || toggling || Boolean(togglingConn),
 					onClick: () => setConfirmRemove(true),
 				}, "Remove"),
 				h("button", {
-					className: "cpm-toggle" + (record.enabled ? " on" : ""),
-					onClick: toggling ? undefined : toggle,
-					disabled: toggling || updating || busy,
+					className: "cpm-toggle" + (pluginEnabled ? " on" : ""),
+					onClick: (busy || updating || toggling || togglingConn) ? undefined : toggle,
+					disabled: busy || updating || toggling || Boolean(togglingConn),
 				}),
 			),
 
@@ -12323,7 +12405,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const needsAuth = typeof c === "object" ? (c.needsAuth === true) : false;
 					const isAuthenticated = typeof c === "object" ? (c.authenticated === true) : true;
 					const isConnected = typeof c === "object" ? (c.connected === true) : false;
-					const isEnabled = typeof c === "object" ? (c.enabled === true) : isConnected;
+					const serverConnEnabled = typeof c === "object" ? (c.enabled === true) : isConnected;
+					const isEnabled = Object.prototype.hasOwnProperty.call(optimisticConn, cName) ? optimisticConn[cName] : serverConnEnabled;
 					const transport = typeof c === "object" ? (c.type || (c.url ? "HTTP" : "stdio")) : "MCP";
 					const dispUrl = typeof c === "object" ? (c.displayUrl || c.url) : "";
 					const dispCmd = typeof c === "object" ? (c.displayCommand || c.command) : "";
@@ -12379,12 +12462,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								h("button", {
 									className: "cpm-icon-btn",
 									style: { width: 28, height: 28, padding: 0, borderRadius: 6 },
+									disabled: busy || updating || toggling || Boolean(togglingConn),
 									onClick: () => openAuthDialog(cName, c),
 								}, h(IconSettings, { size: 14 })),
 								h("button", {
 									className: "cpm-toggle" + (isEnabled ? " on" : ""),
 									"aria-label": isEnabled ? "停用" : "启用",
-									disabled: togglingConn === cName || busy,
+									disabled: busy || updating || toggling || Boolean(togglingConn),
 									onClick: () => {
 										if (!isEnabled && !c.configured && ((isRemote && !isConnected) || (needsAuth && !isAuthenticated))) {
 											openAuthDialog(cName, c);
@@ -12605,12 +12689,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 			),
 
-			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemove(false)) },
+			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => { if (!busy) setConfirmRemove(false); }) },
 				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
 					h("div", { className: "cpm-dialog-title" }, `卸载 ${record.displayName || record.name}？`),
 					h("div", { className: "cpm-field", style: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" } }, "将删除插件副本、技能与子代理注册及 MCP 配置。"),
 					h("div", { className: "cpm-dialog-actions" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => setConfirmRemove(false) }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", disabled: busy, onClick: () => { if (!busy) setConfirmRemove(false); } }, "取消"),
 						h("button", { className: "cpm-btn cpm-btn-primary", style: { background: "#ef4444", borderColor: "#ef4444", color: "#ffffff" }, disabled: busy, onClick: remove }, busy ? "卸载中…" : "卸载"),
 					),
 				),

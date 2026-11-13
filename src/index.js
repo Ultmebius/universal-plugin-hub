@@ -10,6 +10,7 @@ import { mountRoutes } from './routes.js'
 import { cancelAllOAuthVerifications } from './oauth.js'
 import { syncAllInstalledSkillsToDsh, installProfilePackages, findDshMainNodeModules, toolCallIconGroups, LSP_HOST_PACKAGES, HOOK_HOST_PACKAGES } from './install.js'
 import { createSkillsManager } from './skills.js'
+import { sweepTrash } from './store.js'
 import { restoreUploadedSkills } from './skill-uploads.js'
 import { removeDuplicateLocalMarketTabs } from './local.js'
 import { createProfileApplicator } from './runtime.js'
@@ -33,6 +34,7 @@ export function apply(ctx) {
 
     // Ensure all installed plugin skills are immediately synced to $DSH_HOME/skills
     try {
+      sweepTrash()
       restoreUploadedSkills()
 
       // Earlier versions created one tab per uploaded marketplace and named it
