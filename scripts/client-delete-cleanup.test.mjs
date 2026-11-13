@@ -511,7 +511,8 @@ test('source delete cleans sourceFilters, browseSortSnapshots, checkedCatalogs, 
     assert.equal(hub.sessionStore.checkedCatalogs.has('custom-a'), false)
     assert.equal(Object.prototype.hasOwnProperty.call(hub.sessionStore.scrollTops || {}, 'custom-a'), false)
 
-    // Tab and cached state/tabOrder must be updated immediately even though refreshState failed
+    // Tab, filter, and cached state/tabOrder must be updated immediately even though refreshState failed
+    assert.equal(hub.sessionStore.filter, 'all', 'deleting filtered active source resets filter to "all" when fallback has no saved filter')
     assert.equal(hub.findTab('Custom A'), undefined, 'deleted source tab must vanish immediately even if refreshState fails')
     assert.equal(hub.sessionStore.state.sources.some((s) => s.id === 'custom-a'), false)
     assert.deepEqual(hub.sessionStore.state.tabOrder, ['anthropic', 'skills-local'])
@@ -519,6 +520,73 @@ test('source delete cleans sourceFilters, browseSortSnapshots, checkedCatalogs, 
     const cachedState = JSON.parse(hub.localStorage.getItem('cpm_cached_state_v1'))
     assert.equal(cachedState.sources.some((s) => s.id === 'custom-a'), false)
     assert.deepEqual(cachedState.tabOrder, ['anthropic', 'skills-local'])
+  } finally {
+    await hub.unmount()
+  }
+})
+
+test('in-flight loadMarket for deleted source cannot repopulate rows or STORAGE_KEY_ROWS, and fallback restores saved target filter', async () => {
+  let holdCustomAMarket = false
+  let resolveMarketFetch
+  const hub = mountHub({
+    initialSources: [
+      { id: 'anthropic', name: 'Anthropic', builtin: true },
+      { id: 'custom-a', name: 'Custom A' },
+    ],
+    initialPlugins: [
+      { id: 'anthropic/p1', name: 'p1', sourceId: 'anthropic' },
+    ],
+    initialRows: {
+      anthropic: [{ name: 'p1', id: 'anthropic/p1' }],
+    },
+    onFetch: ({ url, method }) => {
+      if (method === 'GET' && url === '/market?sourceId=custom-a') {
+        if (!holdCustomAMarket) {
+          return { ok: false, status: 500, json: async () => ({ error: 'not cached yet' }) }
+        }
+        return new Promise((resolve) => {
+          resolveMarketFetch = resolve
+        })
+      }
+      if (method === 'POST' && url === '/market/refresh') {
+        return { ok: false, status: 500, json: async () => ({ error: 'skip boot refresh' }) }
+      }
+    },
+  })
+
+  try {
+    const renderer = await hub.render()
+    // Save 'installed' filter on anthropic before switching to custom-a
+    const filterBtn = renderer.root.find((n) => n.type === 'button' && String(n.props?.className || '').includes('cpm-filter'))
+    await act(async () => { filterBtn.props.onClick() })
+    const installedMenuItem = renderer.root.findAll((n) => n.props?.className === 'cpm-menu-item').find((n) => textOf(n).includes('已安装'))
+    await act(async () => { installedMenuItem.props.onClick() })
+    await hub.flush()
+    assert.equal(hub.sessionStore.sourceFilters.anthropic, 'installed')
+    assert.equal(Object.prototype.hasOwnProperty.call(hub.sessionStore.rows || {}, 'custom-a'), false)
+
+    // Switch to Custom A -> switches filter to 'all' and starts in-flight loadMarket('custom-a')
+    holdCustomAMarket = true
+    await hub.clickTab('Custom A')
+    assert.ok(resolveMarketFetch, 'loadMarket("custom-a") fetch must be in flight')
+    assert.equal(hub.sessionStore.filter, 'all')
+
+    // Delete Custom A BEFORE loadMarket('custom-a') resolves
+    await hub.deleteSourceViaUi('Custom A')
+    assert.equal(hub.sessionStore.activeSourceId, 'anthropic')
+    assert.equal(hub.sessionStore.filter, 'installed', 'deleting active source restores saved filter of fallback tab')
+
+    // Now resolve the stale pre-delete loadMarket('custom-a') request
+    resolveMarketFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ plugins: [{ name: 'late-plugin', id: 'custom-a/late-plugin' }] }),
+    })
+    await hub.flush()
+
+    assert.equal(Object.prototype.hasOwnProperty.call(hub.sessionStore.rows || {}, 'custom-a'), false, 'stale loadMarket must NOT repopulate SESSION_STORE.rows')
+    const cachedRows = JSON.parse(hub.localStorage.getItem('cpm_cached_rows_v1') || '{}')
+    assert.equal(Object.prototype.hasOwnProperty.call(cachedRows, 'custom-a'), false, 'stale loadMarket must NOT repopulate cpm_cached_rows_v1')
   } finally {
     await hub.unmount()
   }
