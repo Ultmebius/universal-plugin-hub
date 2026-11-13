@@ -36,6 +36,10 @@ export function oauthRuntimeConfig(config) {
   }
 }
 
+export function bridgeRuntimeEnv(env = {}, versions = process.versions) {
+  return versions?.electron ? { ...env, ELECTRON_RUN_AS_NODE: '1' } : { ...env }
+}
+
 export function remoteConfigFromEntry(config = {}) {
   const remote = decodeOAuthConfig(config.env?.UPH_MCP_REMOTE_CONFIG)
   if (!remote) return null

@@ -6308,14 +6308,71 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			setActiveTooltip(null);
 		}, []);
 
+		const stateSeqRef = useRef(0);
+		const pendingWatchersRef = useRef(new Map());
+		const pendingTokensRef = useRef(new Map());
+		const mountedRef = useRef(true);
+		useEffect(() => {
+			mountedRef.current = true;
+			return () => {
+				mountedRef.current = false;
+				for (const timer of pendingWatchersRef.current.values()) clearTimeout(timer);
+				pendingWatchersRef.current.clear();
+				pendingTokensRef.current.clear();
+			};
+		}, []);
+
 		const refreshState = useCallback(async () => {
+			const seq = ++stateSeqRef.current;
 			try {
 				const res = await api("/state");
-				setState(res);
+				if (mountedRef.current && seq === stateSeqRef.current) setState(res);
+				return res;
 			} catch (e) {
 				showToast("加载状态失败", e.message, { restart: false });
+				return null;
 			}
 		}, [showToast]);
+
+		const patchPluginInState = useCallback((updatedPlugin, pendingConnectors) => {
+			if (!updatedPlugin || !updatedPlugin.name) return;
+			const pluginName = updatedPlugin.name;
+			const prevTimer = pendingWatchersRef.current.get(pluginName);
+			if (prevTimer) {
+				clearTimeout(prevTimer);
+				pendingWatchersRef.current.delete(pluginName);
+			}
+			const token = (pendingTokensRef.current.get(pluginName) || 0) + 1;
+			pendingTokensRef.current.set(pluginName, token);
+			stateSeqRef.current += 1;
+			setState((prev) => ({
+				...prev,
+				plugins: Array.isArray(prev.plugins)
+					? prev.plugins.map((p) => (p.name === pluginName ? updatedPlugin : p))
+					: prev.plugins,
+			}));
+			const pendingList = Array.isArray(pendingConnectors) ? pendingConnectors.filter(Boolean) : [];
+			if (pendingList.length === 0 || updatedPlugin.enabled === false) return;
+			const delays = [250, 700, 1500, 3000];
+			const scheduleStep = (step) => {
+				if (!mountedRef.current || step >= delays.length || pendingTokensRef.current.get(pluginName) !== token) return;
+				const timer = setTimeout(async () => {
+					pendingWatchersRef.current.delete(pluginName);
+					if (!mountedRef.current || pendingTokensRef.current.get(pluginName) !== token) return;
+					const latest = await refreshState();
+					if (!mountedRef.current || !latest || pendingTokensRef.current.get(pluginName) !== token) return;
+					const latestPlugin = (latest.plugins || []).find((p) => p.name === pluginName);
+					if (!latestPlugin || latestPlugin.enabled === false) return;
+					const stillPending = pendingList.some((cName) => {
+						const conn = (latestPlugin.connectors || []).find((c) => c.name === cName);
+						return conn && !conn.enabled && !conn.connected;
+					});
+					if (stillPending && step + 1 < delays.length) scheduleStep(step + 1);
+				}, delays[step]);
+				pendingWatchersRef.current.set(pluginName, timer);
+			};
+			scheduleStep(0);
+		}, [refreshState]);
 
 		useEffect(() => {
 			refreshState();
@@ -6388,6 +6445,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				state,
 				setState,
 				refreshState,
+				patchPluginInState,
 				showToast,
 				openManage,
 				onInstalled,
@@ -7080,6 +7138,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		state,
 		setState,
 		refreshState,
+		patchPluginInState,
 		showToast,
 		openManage: openManageView,
 		onInstalled,
@@ -7282,7 +7341,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						return;
 					}
 					if (canEdit) await refreshMcps();
-					else await refreshState();
+					else if (res?.plugin && patchPluginInState) {
+						patchPluginInState(res.plugin, res.pendingConnectors);
+						void refreshState();
+					} else {
+						await refreshState();
+					}
 				} catch (err) {
 					setOptimisticMcp(prev => { const n = { ...prev }; delete n[key]; return n; });
 					showToast("操作失败", cleanError(err), { restart: false });
@@ -8528,6 +8592,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("卸载失败", result.error || "卸载未能完成，请稍后重试", { restart: false });
 					return;
 				}
+				clearMcpToolsCache((k) => k.startsWith(`${pluginName}::`));
 				void showApplicationToast(showToast, result, "已卸载插件", "插件副本与技能注册已实时移除并生效。");
 				setView({ type: "browse", sourceId: activeSourceId });
 				await refreshState();
@@ -8897,14 +8962,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						method: "POST",
 						body: JSON.stringify({ enabled }),
 					});
-					await refreshState();
+					if (res?.ok !== false && res?.plugin && patchPluginInState) {
+						patchPluginInState(res.plugin, res.pendingConnectors);
+						void refreshState();
+					} else {
+						await refreshState();
+					}
 					return res;
 				},
 				showToast,
 			}),
 			!mcpsOpen && view.type === "manage" && h(ManagePage, {
 				key: view.pluginName || manageRecord?.name,
-				record: manageRecord || null, state, rows, isDark, refreshState, showToast,
+				record: manageRecord || null, state, rows, isDark, refreshState, patchPluginInState, showToast,
 				containerRef: detailContainerRef,
 				initialTab: view.initialTab, initialConnector: view.initialConnector,
 				scrollState: view,
@@ -10436,8 +10506,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			oauthScope: initial.oauthScope || "",
 			command: initial.command || "",
 			args: Array.isArray(initial.args) ? JSON.stringify(initial.args) : (initial.args || ""),
-			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => makeKvRow("header", `hi_${i}`, k, String(v))),
-			envList: Object.entries(initial.env || {}).map(([k, v], i) => makeKvRow("env", `ei_${i}`, k, String(v))),
+			headersList: Object.entries(initial.headers || {})
+				.filter(([, v]) => !hasUnresolvedVarPlaceholder(String(v ?? "")))
+				.map(([k, v], i) => makeKvRow("header", `hi_${i}`, k, String(v))),
+			envList: Object.entries(initial.env || {})
+				.filter(([, v]) => !hasUnresolvedVarPlaceholder(String(v ?? "")))
+				.map(([k, v], i) => makeKvRow("env", `ei_${i}`, k, String(v))),
 		} : { name: "", transport: "stdio", url: "", oauth: "none", oauthClientId: "", oauthClientSecret: "", oauthHasClientSecret: false, oauthCallbackPort: "", oauthScope: "", command: "", args: "", headersList: [], envList: [] });
 		const [oauthBaseline, setOauthBaseline] = useState(() => initial ? {
 			name: initial.name || "",
@@ -10657,7 +10731,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
 					return;
 				}
+				clearMcpToolsCache(owner ? `${owner}::${data.name}` : `user-mcp::${data.name}`);
 				if (initial && data.previousName) {
+					clearMcpToolsCache(`user-mcp::${data.previousName}`);
 					void showApplicationToast(showToast, res, "MCP 已重命名", `「${data.previousName}」已改名为「${data.name}」`);
 				} else {
 					void showApplicationToast(showToast, res, initial ? "MCP 已更新" : "MCP 已添加", `「${data.name}」已${initial ? "更新" : "注册为可用 MCP 服务"}`);
@@ -10674,11 +10750,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			setDeleting(true);
 			try {
 				const result = await api(`/mcps/${encodeURIComponent(initial.name)}`, { method: "DELETE" });
-				const cacheKey = `user-mcp::${initial.name}`;
-				if (GLOBAL_MCP_TOOLS_CACHE[cacheKey]) {
-					delete GLOBAL_MCP_TOOLS_CACHE[cacheKey];
-					try { localStorage.setItem("cpm_mcp_tools_cache_v1", JSON.stringify(GLOBAL_MCP_TOOLS_CACHE)); } catch {}
-				}
+				clearMcpToolsCache(`user-mcp::${initial.name}`);
 				setConfirmDelete(false);
 				void showApplicationToast(showToast, result, "MCP 已删除", `「${initial.name}」已从服务器列表移除`);
 				await onSaved();
@@ -11262,6 +11334,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		} catch {}
 	}
 
+	function clearMcpToolsCache(matcher) {
+		const matchFn = typeof matcher === "function" ? matcher : (k) => k === matcher;
+		let changed = false;
+		for (const k of Object.keys(GLOBAL_MCP_TOOLS_CACHE)) {
+			if (matchFn(k)) {
+				delete GLOBAL_MCP_TOOLS_CACHE[k];
+				changed = true;
+			}
+		}
+		if (changed) {
+			try { localStorage.setItem("cpm_mcp_tools_cache_v1", JSON.stringify(GLOBAL_MCP_TOOLS_CACHE)); } catch {}
+		}
+	}
+
 		function useAutoMcpTools(servers, loadTools) {
 			const attempted = useRef(new Map());
 			useEffect(() => {
@@ -11444,7 +11530,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return props.record ? h(ManagePageContent, props) : null;
 	}
 
-	function ManagePageContent({ record, state, rows, isDark, refreshState, showToast, onBack, onClose, initialTab, initialConnector, containerRef, scrollState }) {
+	function ManagePageContent({ record, state, rows, isDark, refreshState, patchPluginInState, showToast, onBack, onClose, initialTab, initialConnector, containerRef, scrollState }) {
 		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
 		const [tab, setTabRaw] = useState(scrollState?.manageTab || initialTab || "skills");
 		const setTab = (next) => { if (scrollState) scrollState.manageTab = next; setTabRaw(next); };
@@ -11550,11 +11636,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				args: parsedArgs, env: envMap,
 			};
 		};
-		const persistAuthDialog = (payload = buildAuthPayload()) =>
-			api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(authDialog.connectorName)}/auth`, {
+		const persistAuthDialog = async (payload = buildAuthPayload()) => {
+			const connName = authDialog.connectorName;
+			const res = await api(`/plugins/${encodeURIComponent(record.name)}/connectors/${encodeURIComponent(connName)}/auth`, {
 				method: "POST",
 				body: JSON.stringify(payload),
 			});
+			if (res?.ok !== false && connName) {
+				clearMcpToolsCache(`${record.name}::${connName}`);
+				if (res?.plugin && patchPluginInState) patchPluginInState(res.plugin, res.pendingConnectors);
+			}
+			return res;
+		};
 		const setAuthError = (message) => setAuthDialog((prev) => prev ? {
 			...prev, testing: false, status: "error", statusMessage: message,
 			lastResult: { ok: false, message, status: 500, server: prev.connectorName, transport: prev.transport, endpoint: prev.url, errorDetails: message },
@@ -11646,7 +11739,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							return;
 						}
 						await refreshState();
-						if (connName) await loadConnectorTools(connName);
+						if (connName) await loadConnectorTools(connName, true);
 						if (typeof showApplicationToast === "function") {
 							void showApplicationToast(showToast, saved, "配置成功", `已成功保存 ${connName} 认证信息并注册为可用 MCP 服务`);
 						}
@@ -11896,6 +11989,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const serverEnabled = record.enabled !== false;
 		const pluginEnabled = optimisticEnabled !== null ? optimisticEnabled : serverEnabled;
 
+		const applyToggleState = async (result) => {
+			if (result?.plugin && patchPluginInState) {
+				patchPluginInState(result.plugin, result.pendingConnectors);
+				void refreshState();
+			} else {
+				await refreshState();
+			}
+		};
+
 		const toggle = async () => {
 			if (toggling || updating || busy || togglingConn) return;
 			const next = !serverEnabled;
@@ -11912,7 +12014,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("操作失败", result.error || "插件状态已变更，请刷新后重试", { restart: false });
 					return;
 				}
-				await refreshState();
+				await applyToggleState(result);
 				void showApplicationToast(showToast, result, next ? "已启用插件" : "已禁用插件", "插件状态已实时更新并生效。");
 			} catch (e) {
 				setOptimisticEnabled(null);
@@ -11939,7 +12041,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("操作失败", result.error || "请检查 MCP 配置后重试", { restart: false });
 					return;
 				}
-				await refreshState();
+				await applyToggleState(result);
 				void showApplicationToast(showToast, result, nextConnected ? "已连接 Connector" : "已断开 Connector", `MCP 服务 ${connectorName} 配置已实时更新。`);
 			} catch (e) {
 				setOptimisticConn((prev) => { const n = { ...prev }; delete n[connectorName]; return n; });
@@ -11960,6 +12062,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("更新失败", result.error || "更新未能完成，请刷新后重试", { restart: false });
 					return;
 				}
+				clearMcpToolsCache((k) => k.startsWith(`${record.name}::`));
 				await refreshState();
 				void showApplicationToast(showToast, result, "更新完成", `${(result.skills || []).length} 个技能已实时重新就绪并生效。`);
 			} catch (e) {
@@ -11979,14 +12082,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					showToast("卸载失败", result.error || "卸载未能完成，请稍后重试", { restart: false });
 					return;
 				}
-				for (const k of Object.keys(GLOBAL_MCP_TOOLS_CACHE)) {
-					if (k.startsWith(`${record.name}::`)) {
-						delete GLOBAL_MCP_TOOLS_CACHE[k];
-					}
-				}
-				try {
-					localStorage.setItem("cpm_mcp_tools_cache_v1", JSON.stringify(GLOBAL_MCP_TOOLS_CACHE));
-				} catch {}
+				clearMcpToolsCache((k) => k.startsWith(`${record.name}::`));
 				await refreshState();
 				void showApplicationToast(showToast, result, "已卸载插件", "插件副本与技能注册已实时移除并生效。");
 				onClose();
@@ -12650,14 +12746,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								onClick: async () => {
 									setAuthDialog((prev) => prev ? { ...prev, saving: true } : null);
 									try {
+										const connName = authDialog.connectorName;
 										const res = await persistAuthDialog();
 										if (res && res.ok === false) {
 											showToast("保存失败", res.error || "配置校验未通过，请检查填写内容", { restart: false });
 											setAuthDialog((prev) => prev ? { ...prev, saving: false } : null);
 											return;
 										}
-										await refreshState();
-										void showApplicationToast(showToast, res, "配置成功", `已成功保存 ${authDialog.connectorName} 认证信息并注册为可用 MCP 服务`);
+										if (res?.plugin && patchPluginInState) {
+											void refreshState();
+										} else {
+											await refreshState();
+										}
+										void loadConnectorTools(connName, true);
+										void showApplicationToast(showToast, res, "配置成功", `已成功保存 ${connName} 认证信息并注册为可用 MCP 服务`);
 										closeAuthDialog();
 									} catch (err) {
 										const rawMsg = err?.message || err;

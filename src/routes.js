@@ -14,7 +14,7 @@ import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from '
 import { readMarketplace, pluginDetail, invalidateMarketplaceCache, resolveMarketplacePluginDir } from './parser.js'
 import { getOrFetchIcon, readLocalIconCached, invalidateLocalIconCache } from './icons.js'
 import {
-  installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered, toolCallIconGroups,
+  installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, installedPluginDetail, isScanDirRegistered, toolCallIconGroups,
   toggleConnector, isConnectorActive, isOAuthConnectorAuthenticated, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
   withPluginLock, withSourceLock, removeManagedDirAsync, cancelActivePluginProbes,
@@ -28,6 +28,10 @@ import { scheduledResult } from './runtime.js'
 function scheduledIfOk(result, applyProfile, ids) {
   if (!result || result.ok === false) return result
   return scheduledResult(result, applyProfile, ids)
+}
+
+function withPluginDetail(outcome, pluginName) {
+  return outcome && outcome.ok !== false ? { ...outcome, plugin: installedPluginDetail(pluginName) } : outcome
 }
 
 const API_PREFIX = '/universal-plugin-hub/api'
@@ -798,9 +802,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         if (!pluginRec) return { ok: false, error: '插件未安装或已卸载' }
         const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
         if (!canEnable() && body.enabled !== false) return { ok: false, error: '请先启用所属插件' }
-        return body.enabled !== false
-          ? await enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, canEnable })
-          : toggleConnector(pluginName, connectorName, false)
+        const result = await toggleConnector(pluginName, connectorName, body.enabled !== false, { canEnable })
+        return withPluginDetail(result, pluginName)
       })
       return sendJson(res, 200, scheduledIfOk(outcome, applyProfile, body.enabled !== false ? [getConnectorId(pluginName, connectorName)] : []))
     }
@@ -831,8 +834,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         }
         const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
         if (!canEnable()) return { status: 200, body: { ok: false, error: '请先启用所属插件' } }
-        const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable })
-        return { status: 200, body: scheduledIfOk(result, applyProfile, [getConnectorId(pluginName, connectorName)]) }
+        const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable, skipToolsListIfCached: false })
+        return { status: 200, body: scheduledIfOk(withPluginDetail(result, pluginName), applyProfile, [getConnectorId(pluginName, connectorName)]) }
       })
       return sendJson(res, outcome.status, outcome.body)
     }
@@ -919,7 +922,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       requireSameOrigin(req)
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/toggle'.length), 'plugin name')
       const body = await readJsonBody(req)
-      return sendJson(res, 200, scheduledIfOk(await togglePlugin(pluginName, body.enabled === true), applyProfile))
+      const result = await togglePlugin(pluginName, body.enabled === true, { onConnectorReady: (id) => applyProfile?.([id]) })
+      return sendJson(res, 200, scheduledIfOk(withPluginDetail(result, pluginName), applyProfile))
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/update')) {

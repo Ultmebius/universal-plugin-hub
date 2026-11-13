@@ -208,7 +208,6 @@ async function connectRemote() {
 async function proxyCapabilities(client, server) {
   const capabilities = client.getServerCapabilities() || {}
   if (capabilities.tools) {
-    const tools = await client.listTools()
     server.setRequestHandler(ListToolsRequestSchema, (request) => client.listTools(request.params))
     server.setRequestHandler(CallToolRequestSchema, (request) => client.callTool(request.params))
     client.setNotificationHandler(ToolListChangedNotificationSchema, () => server.sendToolListChanged())

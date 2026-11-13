@@ -110,18 +110,24 @@ export function openOAuthRecordWriter(key) {
 
 export function saveOAuthClientCredentials(key, client) {
   const record = readOAuthRecord(key)
-  const sameClient = record.customClient?.client_id === String(client.clientId || '').trim()
+  const nextClientId = String(client.clientId || '').trim()
+  const sameClient = record.customClient?.client_id === nextClientId
   const changedSecret = !!client.clientSecret && client.clientSecret !== record.customClient?.client_secret
   if (!sameClient || changedSecret) {
     delete record.tokens
     delete record.clientInformation
     delete record.discovery
   }
-  record.customClient = {
-    client_id: String(client.clientId || '').trim(),
-    token_endpoint_auth_method: (client.clientSecret || (sameClient && record.customClient?.client_secret)) ? 'client_secret_post' : 'none',
-    ...((client.clientSecret || (sameClient && record.customClient?.client_secret)) ? { client_secret: String(client.clientSecret || record.customClient?.client_secret) } : {}),
+  const nextSecret = client.clientSecret || (sameClient ? record.customClient?.client_secret : '')
+  const nextCustomClient = {
+    client_id: nextClientId,
+    token_endpoint_auth_method: nextSecret ? 'client_secret_post' : 'none',
+    ...(nextSecret ? { client_secret: String(nextSecret) } : {}),
   }
+  if (sameClient && !changedSecret && JSON.stringify(record.customClient) === JSON.stringify(nextCustomClient)) {
+    return
+  }
+  record.customClient = nextCustomClient
   writeOAuthRecord(key, record)
 }
 

@@ -24,11 +24,11 @@ import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, 
 import { materializePlugin, pullSource } from './market.js'
 import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
-import { isUploadedSkillTarget } from './skill-uploads.js'
+import { isUploadedSkillTarget, uploadedSkillTargetsSet } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
 import { beginOAuthVerification, completeOAuthVerification, cancelPluginOAuthVerifications, standaloneOAuthConnectorNames, saveCustomOAuthClient, readSavedOAuthClient } from './oauth.js'
-import { encodeOAuthConfig, isOAuthMode, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
-import { oauthStoreDir, readOAuthRecord, writeOAuthRecord, deleteOAuthRecord } from './oauth-store.js'
+import { bridgeRuntimeEnv, encodeOAuthConfig, isOAuthMode, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
+import { oauthStoreDir, readOAuthRecord, writeOAuthRecord, deleteOAuthRecord, openOAuthRecordWriter } from './oauth-store.js'
 
 const OAUTH_BRIDGE_PATH = fileURLToPath(new URL('./oauth-bridge.js', import.meta.url))
 
@@ -73,7 +73,10 @@ function loadCordisPatch(file) {
   return parsed
 }
 
-export function readCordisPatch() {
+let PATCH_TMP_SEQ = 0
+let ACTIVE_CORDIS_BATCH = null
+
+function readCordisPatchRaw() {
   try {
     return loadCordisPatch(cordisPatchPath())
   } catch {
@@ -81,9 +84,7 @@ export function readCordisPatch() {
   }
 }
 
-let PATCH_TMP_SEQ = 0
-
-export function writeCordisPatch(patch) {
+function writeCordisPatchRaw(patch) {
   const file = cordisPatchPath()
   // A tolerant read can return [] for a DSH-specific or damaged document.
   // Check the on-disk document before any mutation can replace it.
@@ -94,6 +95,42 @@ export function writeCordisPatch(patch) {
   const tmp = join(dirname(file), `.cordis.patch.${process.pid}.${Date.now().toString(36)}.${seq}.tmp`)
   writeFileSync(tmp, content, 'utf8')
   renameSync(tmp, file)
+}
+
+export function readCordisPatch() {
+  if (ACTIVE_CORDIS_BATCH) {
+    return (ACTIVE_CORDIS_BATCH.patch ??= readCordisPatchRaw())
+  }
+  return readCordisPatchRaw()
+}
+
+export function writeCordisPatch(patch) {
+  if (ACTIVE_CORDIS_BATCH) {
+    ACTIVE_CORDIS_BATCH.patch = patch
+    ACTIVE_CORDIS_BATCH.dirty = true
+    return
+  }
+  writeCordisPatchRaw(patch)
+}
+
+function withCordisPatchBatch(fn) {
+  if (ACTIVE_CORDIS_BATCH) return fn()
+  const batch = { patch: null, dirty: false }
+  ACTIVE_CORDIS_BATCH = batch
+  let completed = false
+  try {
+    const result = fn()
+    completed = true
+    return result
+  } finally {
+    ACTIVE_CORDIS_BATCH = null
+    if (batch.dirty && batch.patch !== null) {
+      if (completed) writeCordisPatchRaw(batch.patch)
+      else {
+        try { writeCordisPatchRaw(batch.patch) } catch {}
+      }
+    }
+  }
 }
 
 export function getConnectorId(pluginName, connectorName) {
@@ -217,6 +254,19 @@ function connectorAuthenticated(found, entry) {
 
 function isRemoteConnector(config = {}) {
   return isRemoteTransportName(config.transport) || isRemoteTransportName(config.type) || (!config.command && (!!config.url || !config.args?.length))
+}
+
+function stdioConfigFingerprint(definition = {}) {
+  const normalized = {
+    transport: 'stdio',
+    command: String(definition.command || '').trim(),
+    args: Array.isArray(definition.args) ? definition.args.map(String) : [],
+    ...(definition.cwd ? { cwd: String(definition.cwd) } : {}),
+    env: Object.fromEntries(
+      Object.entries(definition.env || {}).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  }
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
 }
 
 function remoteConfigFingerprint(config = {}) {
@@ -429,13 +479,29 @@ export function unregisterConnector(pluginName, connectorName, { keepDefinition 
         === canonicalConnectorSpec(connectorDefinition(pluginName, connectorName, manifestDefault, true), pluginName, pluginTarget),
     )
     if (remote || !matchesDefault) {
-      const saved = state[key] ||= {}
-      if (remote) saved.savedOAuthRemoteConfig = remote
-      else {
-        saved.savedConnectorDefinition = { ...saved.savedConnectorDefinition, ...cleanedConfig }
-        saved.pluginConnectorOwned = true
+      const prev = state[key]
+      const saved = (state[key] = prev ? { ...prev } : {})
+      let changedEntry = !prev
+      if (remote) {
+        if (JSON.stringify(saved.savedOAuthRemoteConfig) !== JSON.stringify(remote)) {
+          saved.savedOAuthRemoteConfig = remote
+          changedEntry = true
+        }
+      } else {
+        const nextDef = {
+          ...cleanedConfig,
+          transport: connectorTransport(cleanedConfig.transport, cleanedConfig.url, cleanedConfig.command),
+        }
+        if (JSON.stringify(saved.savedConnectorDefinition) !== JSON.stringify(nextDef)) {
+          saved.savedConnectorDefinition = nextDef
+          changedEntry = true
+        }
+        if (saved.pluginConnectorOwned !== true) {
+          saved.pluginConnectorOwned = true
+          changedEntry = true
+        }
       }
-      writeMcpToolsState(state, { required: keepDefinition })
+      if (changedEntry) writeMcpToolsState(state, { required: keepDefinition })
     }
   }
 
@@ -1297,28 +1363,34 @@ export function isLspActive(pluginName, serverName) {
  */
 const autoActivatedLspServers = new Set()
 
-export function toggleConnector(pluginName, connectorName, enabled) {
+export function toggleConnector(pluginName, connectorName, enabled, { canEnable } = {}) {
   if (!enabled) return unregisterConnector(pluginName, connectorName, { keepDefinition: true })
   const saved = readMcpToolsState()[`${pluginName}::${connectorName}`]
   const rememberDefinition = Boolean(
     saved?.savedConnectorDefinition || saved?.savedConnectorTemplate || saved?.savedOAuthRemoteConfig,
   )
-  return enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, rememberDefinition })
+  return enableConnector(pluginName, connectorName, undefined, { pluginOwned: true, rememberDefinition, canEnable })
 }
 
 function savedConnectorDefinition(pluginName, connectorName) {
   const entry = getConnectorEntry(pluginName, connectorName)
   const state = readMcpToolsState()[`${pluginName}::${connectorName}`]
   const saved = state?.savedConnectorDefinition
-  if (entry) return remoteConfigFromEntry(entry.config) || { ...saved, ...entry.config }
+  if (entry) {
+    return remoteConfigFromEntry(entry.config) || {
+      ...entry.config,
+      transport: connectorTransport(entry.config.transport, entry.config.url, entry.config.command),
+    }
+  }
   return state?.savedConnectorTemplate || saved || state?.savedOAuthRemoteConfig
 }
 
 function connectorEnvironment(found, payload) {
-  const base = Object.fromEntries(Object.entries(found?.env || {}).filter(([, value]) =>
+  if (payload?.env && typeof payload.env === 'object' && !Array.isArray(payload.env)) {
+    return { ...payload.env }
+  }
+  return Object.fromEntries(Object.entries(found?.env || {}).filter(([, value]) =>
     typeof value !== 'string' || !hasUnresolvedVarPlaceholder(value)))
-  const overrides = payload?.env || found?.env || {}
-  return { ...base, ...overrides }
 }
 
 function isOAuthExpiredError(err) {
@@ -1342,11 +1414,13 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload, { 
     payload = { ...payload, ...definition }
     try {
       if (pluginOwned) rememberPluginOAuthUrls(pluginName, connectorName, url)
-      setRemoteVerification(pluginName, connectorName, payload, false)
       saveCustomOAuthClient(pluginName, connectorName, payload)
-      const session = beginOAuthVerification(pluginName, connectorName, { ...payload, url }, {
+      let session
+      session = beginOAuthVerification(pluginName, connectorName, { ...payload, url }, {
         pluginOwned,
-        onFinished: (result) => setRemoteVerification(pluginName, connectorName, payload, result.ok === true),
+        onFinished: (result) => {
+          if (!session?.cancelled) setRemoteVerification(pluginName, connectorName, payload, result.ok === true)
+        },
       })
       const result = await Promise.race([
         completeOAuthVerification(session),
@@ -1409,10 +1483,11 @@ function connectorTemplateDefinition(pluginName, connectorName, payload = {}, pl
   const found = (pluginOwned && getPluginConnectors(target).find(c => c.name === connectorName)) || {}
   const transport = connectorTransport(payload.transport || payload.type || found.type, payload.url ?? found.url, payload.command ?? found.command)
   const headers = new Map()
-  for (const [key, value] of Object.entries(found.headers || {})) {
-    if (typeof value === 'string' && !hasUnresolvedVarPlaceholder(value)) headers.set(key.toLowerCase(), [key, value])
-  }
-  for (const [key, value] of Object.entries(payload.headers || {})) {
+  const headerSource = (payload?.headers && typeof payload.headers === 'object' && !Array.isArray(payload.headers))
+    ? payload.headers
+    : Object.fromEntries(Object.entries(found.headers || {}).filter(([, value]) =>
+      typeof value !== 'string' || !hasUnresolvedVarPlaceholder(value)))
+  for (const [key, value] of Object.entries(headerSource)) {
     headers.set(key.toLowerCase(), [key, value])
   }
   const token = (typeof payload === 'string' ? payload : payload.token)?.trim()
@@ -1467,7 +1542,7 @@ function oauthConnectorRegistration(pluginName, connectorName, definition) {
   })
   return {
     type: 'stdio', command: process.execPath, args: [OAUTH_BRIDGE_PATH],
-    env: { UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(remote), UPH_OAUTH_STORE_DIR: oauthStoreDir() },
+    env: bridgeRuntimeEnv({ UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(remote), UPH_OAUTH_STORE_DIR: oauthStoreDir() }),
   }
 }
 
@@ -1515,7 +1590,7 @@ async function abortPluginConnectorProbes(pluginName, connectorName) {
   }
 }
 
-async function probeConnectorDefinition(pluginName, connectorName, definition, timeout) {
+async function probeConnectorDefinition(pluginName, connectorName, definition, timeout, { skipToolsList = false } = {}) {
   return trackPluginProbe(pluginName, connectorName, (signal) => {
     if (definition.transport === 'stdio') {
       return definition.command
@@ -1524,26 +1599,23 @@ async function probeConnectorDefinition(pluginName, connectorName, definition, t
     }
     if (!/^https?:\/\//i.test(definition.url || '')) return { tools: [], error: '缺少有效的服务 URL' }
     if (isOAuthMode(definition.oauth)) {
-      const registration = oauthConnectorRegistration(pluginName, connectorName, definition)
-      return queryStdioToolsList(registration.command, registration.args, {
-        ...registration.env, UPH_MCP_INTERACTIVE: '0', UPH_MCP_VERIFY: '0',
-      }, { signal })
+      return queryOAuthHttpToolsList(pluginName, connectorName, definition, timeout, signal, { skipToolsList })
     }
-    return queryHttpToolsList(definition.url, definition.headers, timeout, signal)
+    return queryHttpToolsList(definition.url, definition.headers, timeout, signal, { skipToolsList })
   })
 }
 
-export async function probeConnectorAuth(pluginName, connectorName, payload, { pluginOwned } = {}) {
-  const definition = connectorDefinition(pluginName, connectorName, payload, pluginOwned)
+export async function probeConnectorAuth(pluginName, connectorName, payload, { pluginOwned, definition: prebuiltDefinition, skipToolsList = false } = {}) {
+  const definition = prebuiltDefinition || connectorDefinition(pluginName, connectorName, payload, pluginOwned)
   if (definition.oauth === 'custom' && definition.url) {
     const key = oauthCredentialKey(pluginName, connectorName, definition.url, 'custom')
     const client = readOAuthRecord(key)?.customClient
     if (!client || client.client_id !== definition.oauthClientId ||
-      (payload.oauthClientSecret && client.client_secret !== payload.oauthClientSecret)) {
+      (payload?.oauthClientSecret && client.client_secret !== payload.oauthClientSecret)) {
       return { ok: false, error: '请先点击「登录并连接」完成 OAuth 授权' }
     }
   }
-  const probe = await probeConnectorDefinition(pluginName, connectorName, definition, MCP_AUTH_TIMEOUT_MS)
+  const probe = await probeConnectorDefinition(pluginName, connectorName, definition, MCP_AUTH_TIMEOUT_MS, { skipToolsList })
   return { ...probe, definition, ok: !probe.error }
 }
 
@@ -1564,12 +1636,39 @@ export async function enableConnector(pluginName, connectorName, payload, option
   MCP_ACTIVATIONS.set(key, attempt)
   const input = payload ?? savedConnectorDefinition(pluginName, connectorName) ?? {}
   try {
-    const probe = await probeConnectorAuth(pluginName, connectorName, input, options)
+    const definition = connectorDefinition(pluginName, connectorName, input, options.pluginOwned)
+    const toolsState = readMcpToolsState()
+    const savedState = toolsState[key]
+    const hasCachedTools = savedState?.cachedToolsResolved === true
+      || (Array.isArray(savedState?.cachedTools) && savedState.cachedTools.length > 0)
+    const allowCachedShortcut = options.skipToolsListIfCached !== false && hasCachedTools
+
+    if (allowCachedShortcut && definition.transport === 'stdio') {
+      const stdioMatch = savedState?.verifiedStdioConfig === stdioConfigFingerprint(definition)
+      const hasCmd = Boolean(definition.command && resolveCommandPath(definition.command, process.env, definition.cwd ? { cwd: definition.cwd } : undefined))
+      if (stdioMatch && hasCmd) {
+        if (MCP_ACTIVATIONS.get(key) !== attempt || options.canEnable?.() === false) {
+          return { ok: false, error: 'MCP 配置或开关已变更，请刷新后重试' }
+        }
+        return saveConnectorAuth(pluginName, connectorName, input, {
+          ...options,
+          probe: { ok: true, tools: savedState.cachedTools || [], toolsSkipped: true, definition },
+        })
+      }
+    }
+
+    const skipToolsList = allowCachedShortcut
+      && definition.transport !== 'stdio'
+      && savedState?.verifiedRemoteConfig === remoteConfigFingerprint(definition)
+    const probe = await probeConnectorAuth(pluginName, connectorName, input, { ...options, definition, skipToolsList })
     if (!probe.ok) return { ok: false, error: probe.error }
     if (MCP_ACTIVATIONS.get(key) !== attempt || options.canEnable?.() === false) {
       return { ok: false, error: 'MCP 配置或开关已变更，请刷新后重试' }
     }
-    return saveConnectorAuth(pluginName, connectorName, input, { ...options, probe })
+    const finalProbe = probe.toolsSkipped
+      ? { ...probe, tools: savedState?.cachedTools || [] }
+      : probe
+    return saveConnectorAuth(pluginName, connectorName, input, { ...options, probe: finalProbe })
   } finally {
     if (MCP_ACTIVATIONS.get(key) === attempt) MCP_ACTIVATIONS.delete(key)
   }
@@ -1592,6 +1691,7 @@ export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOw
   if (result.ok) {
     const key = `${pluginName}::${connectorName}`
     const state = readMcpToolsState()
+    const prevEntryJson = state[key] ? JSON.stringify(state[key]) : null
     const saved = state[key] ||= {}
     if (pluginOwned && !isOAuthMode(oauth)) {
       if (rememberDefinition) {
@@ -1607,9 +1707,15 @@ export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOw
     if (remote) saved.savedOAuthRemoteConfig = remote
     else delete saved.savedOAuthRemoteConfig
     if (!isStdio) {
+      delete saved.verifiedStdioConfig
       const fingerprint = remoteConfigFingerprint(remote || definition)
       if (probe?.ok) saved.verifiedRemoteConfig = fingerprint
       else if (saved.verifiedRemoteConfig !== fingerprint) saved.verifiedRemoteConfig = null
+    } else {
+      delete saved.verifiedRemoteConfig
+      const stdioFingerprint = stdioConfigFingerprint(definition)
+      if (probe?.ok) saved.verifiedStdioConfig = stdioFingerprint
+      else if (saved.verifiedStdioConfig !== stdioFingerprint) saved.verifiedStdioConfig = null
     }
     if (probe?.ok) {
       saved.cachedTools = probe.tools
@@ -1618,7 +1724,7 @@ export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOw
       delete saved.cachedTools
       delete saved.cachedToolsResolved
     }
-    writeMcpToolsState(state)
+    if (JSON.stringify(saved) !== prevEntryJson) writeMcpToolsState(state)
     MEMORY_TOOLS_CACHE.delete(key)
     // A probe still running against the old configuration must not be reused.
     MCP_TOOLS_INFLIGHT.delete(key)
@@ -1628,13 +1734,45 @@ export function saveConnectorAuth(pluginName, connectorName, payload, { pluginOw
 
 /** MCP Tools Cache & State store */
 const MCP_TOOLS_STATE_PATH = () => join(dshHome(), '.mcp-tools-state.json')
+let MCP_TOOLS_STATE_CACHE = null
+
+function cloneMcpToolsEntry(v) {
+  return v && typeof v === 'object' ? structuredClone(v) : v
+}
+
+function cloneMcpToolsState(state) {
+  const out = {}
+  for (const [k, v] of Object.entries(state || {})) {
+    out[k] = cloneMcpToolsEntry(v)
+  }
+  return out
+}
 
 export function readMcpToolsState() {
   const file = MCP_TOOLS_STATE_PATH()
-  if (!existsSync(file)) return {}
+  let stat
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) || {}
+    stat = statSync(file)
   } catch {
+    MCP_TOOLS_STATE_CACHE = null
+    return {}
+  }
+  if (
+    MCP_TOOLS_STATE_CACHE
+    && MCP_TOOLS_STATE_CACHE.file === file
+    && MCP_TOOLS_STATE_CACHE.mtimeMs === stat.mtimeMs
+    && MCP_TOOLS_STATE_CACHE.ctimeMs === stat.ctimeMs
+    && MCP_TOOLS_STATE_CACHE.size === stat.size
+  ) {
+    return cloneMcpToolsState(MCP_TOOLS_STATE_CACHE.state)
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) || {}
+    const cached = cloneMcpToolsState(parsed)
+    MCP_TOOLS_STATE_CACHE = { file, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, size: stat.size, state: cached }
+    return cloneMcpToolsState(cached)
+  } catch {
+    MCP_TOOLS_STATE_CACHE = null
     return {}
   }
 }
@@ -1643,7 +1781,14 @@ export function writeMcpToolsState(state, { required = false } = {}) {
   try {
     const file = MCP_TOOLS_STATE_PATH()
     mkdirSync(dirname(file), { recursive: true })
-    writeFileSync(file, JSON.stringify(state, null, 2), 'utf8')
+    const nextState = cloneMcpToolsState(state)
+    writeFileSync(file, JSON.stringify(nextState), 'utf8')
+    try {
+      const stat = statSync(file)
+      MCP_TOOLS_STATE_CACHE = { file, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, size: stat.size, state: nextState }
+    } catch {
+      MCP_TOOLS_STATE_CACHE = null
+    }
   } catch (error) {
     if (required) throw error
   }
@@ -1766,35 +1911,145 @@ async function listMcpTools(client, options) {
   } while (true)
 }
 
-async function queryHttpToolsList(url, headers, timeout = MCP_TOOLS_TIMEOUT_MS, externalSignal) {
+async function connectHttpAndFetchTools(
+  url,
+  { headers, authProvider } = {},
+  timeout = MCP_TOOLS_TIMEOUT_MS,
+  externalSignal,
+  { skipToolsList = false } = {},
+) {
   if (externalSignal?.aborted) return { tools: [], error: 'MCP 探测已取消' }
   const timeoutSignal = AbortSignal.timeout(timeout)
   const signal = externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal
   let transport
   try {
     transport = new StreamableHTTPClientTransport(new URL(url), {
-      requestInit: { headers },
+      requestInit: { headers: headers || {} },
+      ...(authProvider ? { authProvider } : {}),
       fetch: (input, init) => fetch(input, {
         ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
       }),
     })
     const client = new Client({ name: 'universal-plugin-hub', version: '1.0.0' })
     await client.connect(transport, { timeout, signal })
+    if (skipToolsList) return { tools: null, toolsSkipped: true, error: null, status: 200 }
     const tools = await listMcpTools(client, { timeout, signal })
     return { tools, error: null, status: 200 }
   } catch (error) {
-    const status = Number.isInteger(error.code) && error.code >= 400 && error.code <= 599 ? error.code : undefined
+    const status = Number.isInteger(error?.code) && error.code >= 400 && error.code <= 599 ? error.code : undefined
     const message = externalSignal?.aborted
       ? 'MCP 探测已取消'
-      : timeoutSignal.aborted || error.code === ErrorCode.RequestTimeout
+      : timeoutSignal.aborted || error?.code === ErrorCode.RequestTimeout || error?.name === 'TimeoutError'
         ? `连接或解析 MCP 工具超时（${timeout / 1000} 秒）`
-        : status === 401 || status === 403 ? `MCP 服务返回 HTTP ${status}，请检查 Headers 或 OAuth 授权`
-          : status ? `MCP 服务返回 HTTP ${status}`
-          : `连接或解析 MCP 工具失败：${error.message}`
+        : error?.oauthAuthRequired
+          ? error.message
+          : status === 401 || status === 403 ? `MCP 服务返回 HTTP ${status}，请检查 Headers 或 OAuth 授权`
+            : status ? `MCP 服务返回 HTTP ${status}`
+            : `连接或解析 MCP 工具失败：${error.message}`
     return { tools: [], error: message, status }
   } finally {
     if (transport?.sessionId && !signal.aborted) await transport.terminateSession().catch(() => {})
     await transport?.close().catch(() => {})
+  }
+}
+
+async function queryHttpToolsList(url, headers, timeout = MCP_TOOLS_TIMEOUT_MS, externalSignal, options = {}) {
+  return connectHttpAndFetchTools(url, { headers }, timeout, externalSignal, options)
+}
+
+function createNonInteractiveOAuthProvider(remote, recordState) {
+  const persist = (mutator) => {
+    const next = { ...recordState.record }
+    if (!mutator(next)) return
+    recordState.record = next
+    recordState.writer?.write(next)
+  }
+  const hasSecret = Boolean(recordState.record?.customClient?.client_secret)
+  const callback = recordState.record?.clientInformation?.redirect_uris?.[0]
+    || `http://localhost:${Number(remote.oauth?.callbackPort) || 0}/callback`
+  const clientMetadata = {
+    client_name: 'DeepSeek Harness',
+    client_uri: 'https://www.deepseek.com/harness/',
+    redirect_uris: [callback],
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: hasSecret ? 'client_secret_post' : 'none',
+    ...(remote.oauth?.scope ? { scope: remote.oauth.scope } : {}),
+  }
+  const authError = () => Object.assign(new Error('OAuth 授权已失效或尚未完成，请重新进行 OAuth 授权'), { oauthAuthRequired: true })
+  return {
+    get redirectUrl() { return callback },
+    get clientMetadata() { return clientMetadata },
+    clientInformation() {
+      const rec = recordState.record
+      if (remote.oauth?.mode === 'custom') {
+        const clientId = remote.oauth.clientId || rec?.customClient?.client_id
+        if (!clientId) return undefined
+        return rec?.clientInformation?.client_id === clientId
+          ? { ...rec.clientInformation, ...rec.customClient, client_id: clientId }
+          : { ...rec?.customClient, client_id: clientId }
+      }
+      return rec?.clientInformation
+    },
+    saveClientInformation(info) {
+      if (JSON.stringify(recordState.record?.clientInformation) === JSON.stringify(info)) return
+      persist((next) => { next.clientInformation = info; return true })
+    },
+    tokens() { return recordState.record?.tokens },
+    saveTokens(tokens) {
+      if (JSON.stringify(recordState.record?.tokens) === JSON.stringify(tokens)) return
+      persist((next) => { next.tokens = tokens; return true })
+    },
+    codeVerifier() { return recordState.record?.codeVerifier || '' },
+    saveCodeVerifier(codeVerifier) {
+      persist((next) => { next.codeVerifier = codeVerifier; return true })
+    },
+    discoveryState() { return recordState.record?.discovery },
+    saveDiscoveryState(discovery) {
+      if (JSON.stringify(recordState.record?.discovery) === JSON.stringify(discovery)) return
+      persist((next) => { next.discovery = discovery; return true })
+    },
+    invalidateCredentials(scope) {
+      persist((next) => {
+        let changed = false
+        if ((scope === 'all' || scope === 'tokens') && 'tokens' in next) { delete next.tokens; changed = true }
+        if ((scope === 'all' || scope === 'client') && 'clientInformation' in next) { delete next.clientInformation; changed = true }
+        if ((scope === 'all' || scope === 'client' || scope === 'discovery') && 'discovery' in next) { delete next.discovery; changed = true }
+        if ((scope === 'all' || scope === 'verifier') && 'codeVerifier' in next) { delete next.codeVerifier; changed = true }
+        return changed
+      })
+    },
+    redirectToAuthorization() {
+      throw authError()
+    },
+  }
+}
+
+async function queryOAuthHttpToolsList(pluginName, connectorName, definition, timeout = MCP_TOOLS_TIMEOUT_MS, externalSignal, options = {}) {
+  const { url, headers, oauth, oauthClientId, oauthCallbackPort, oauthScope } = definition
+  const remote = oauthRuntimeConfig({
+    url,
+    headers,
+    credentialKey: oauthCredentialKey(pluginName, connectorName, url, oauth),
+    oauth: { mode: oauth, clientId: oauthClientId, callbackPort: Number(oauthCallbackPort) || null, scope: oauthScope },
+  })
+  const writer = openOAuthRecordWriter(remote.credentialKey)
+  const initial = readOAuthRecord(remote.credentialKey)
+  if (!writer || (!initial?.tokens?.access_token && !initial?.tokens?.refresh_token)) {
+    writer?.close()
+    return { tools: [], error: 'OAuth 授权已失效或尚未完成，请重新进行 OAuth 授权', status: undefined }
+  }
+  const recordState = { record: { ...initial }, writer }
+  try {
+    return await connectHttpAndFetchTools(
+      remote.url,
+      { headers: remote.headers, authProvider: createNonInteractiveOAuthProvider(remote, recordState) },
+      timeout,
+      externalSignal,
+      options,
+    )
+  } finally {
+    writer.close()
   }
 }
 
@@ -1854,7 +2109,9 @@ async function discoverConnectorTools(pluginName, connectorName, forceFresh, isC
     }
     return { ok: true, tools: probe.tools, disabledTools }
   }
-  if (entry && definition.transport === 'http' && sameRegistration) {
+  const authFailure = probe.status === 401 || probe.status === 403 || probe.statusCode === 401 || probe.statusCode === 403
+    || isOAuthExpiredError(probe.error) || /\bHTTP 403\b/i.test(String(probe.error || ''))
+  if (entry && definition.transport === 'http' && sameRegistration && authFailure) {
     setRemoteVerification(pluginName, connectorName, definition, false)
   }
 
@@ -1884,7 +2141,7 @@ function warmInstalledConnectorTools(pluginName, connectors, record, epoch = cur
   for (const connector of connectors) {
     const entry = getConnectorEntry(pluginName, connector.name)
     const saved = readMcpToolsState()[`${pluginName}::${connector.name}`]
-    if (!connectorRequiresAuth(connector) && !saved?.savedConnectorDefinition && !saved?.savedOAuthRemoteConfig) {
+    if (!connectorRequiresAuth(connector) && !saved?.savedConnectorDefinition && !saved?.savedConnectorTemplate && !saved?.savedOAuthRemoteConfig) {
       // Installation stays responsive. DSH watches the profile patch and loads
       // the connector once its background probe succeeds.
       void enableConnector(pluginName, connector.name, connector, { pluginOwned: true, rememberDefinition: false, canEnable }).catch(() => {})
@@ -1942,7 +2199,11 @@ export async function syncPluginSkillsToDsh(pluginName, shouldSync = () => true,
   const dshSkills = dshSkillsDir()
   mkdirSync(dshSkills, { recursive: true })
 
-  const keepExisting = path => !shouldSync() || isUploadedSkillTarget(path)
+  const uploadedTargets = uploadedSkillTargetsSet()
+  const isUploadedTarget = (targetPath) => uploadedTargets.has(
+    process.platform === 'win32' ? resolve(targetPath).toLowerCase() : resolve(targetPath),
+  )
+  const keepExisting = path => !shouldSync() || isUploadedTarget(path)
   const candidates = []
   for (const entry of readdirSync(pluginSkillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
@@ -2593,13 +2854,13 @@ async function uninstallPluginUnlocked(pluginName) {
 }
 
 /** Toggle a plugin's skills scanning and connectors on/off. */
-export async function togglePlugin(pluginName, enabled) {
+export async function togglePlugin(pluginName, enabled, options = {}) {
   const epoch = bumpPluginEpoch(pluginName)
   cancelActivePluginProbes(pluginName)
-  return withPluginLock(pluginName, () => togglePluginUnlocked(pluginName, enabled, epoch))
+  return withPluginLock(pluginName, () => togglePluginUnlocked(pluginName, enabled, epoch, options))
 }
 
-async function togglePluginUnlocked(pluginName, enabled, epoch) {
+async function togglePluginUnlocked(pluginName, enabled, epoch, options = {}) {
   const state = readState()
   const rec = state.plugins.find((p) => p.name === pluginName)
   if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
@@ -2624,9 +2885,11 @@ async function togglePluginUnlocked(pluginName, enabled, epoch) {
         if (rec.enabled === false) await rollbackEnable()
         return { ok: false, error: '插件状态已变更，请刷新后重试' }
       }
-      for (const r of registerPluginLsp(pluginName)) {
-        if (!r.ok && r.error) lspErrors.push(r.error)
-      }
+      withCordisPatchBatch(() => {
+        for (const r of registerPluginLsp(pluginName)) {
+          if (!r.ok && r.error) lspErrors.push(r.error)
+        }
+      })
       await registerPluginHooks(pluginName)
     } catch (err) {
       if (rec.enabled === false) await rollbackEnable()
@@ -2636,11 +2899,13 @@ async function togglePluginUnlocked(pluginName, enabled, epoch) {
     cancelActivePluginProbes(pluginName)
     try {
       await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true })
-      for (const c of pluginConnectors) {
-        toggleConnector(pluginName, c.name, false)
-      }
-      unregisterPluginLsp(pluginName)
-      unregisterPluginHooks(pluginName)
+      withCordisPatchBatch(() => {
+        for (const c of pluginConnectors) {
+          toggleConnector(pluginName, c.name, false)
+        }
+        unregisterPluginLsp(pluginName)
+        unregisterPluginHooks(pluginName)
+      })
     } catch (err) {
       if (rec.enabled !== false && existsSync(skillsDir)) {
         await syncPluginSkillsToDsh(
@@ -2659,43 +2924,66 @@ async function togglePluginUnlocked(pluginName, enabled, epoch) {
     return { ok: false, error: '插件状态已变更，请刷新后重试' }
   }
   writeState({ ...latest, plugins: latest.plugins.map(item => sameInstall(item) ? { ...item, enabled } : item) })
+  let pendingConnectorNames = []
   if (enabled && pluginConnectors.length > 0) {
     const canEnable = () => stillCurrent() && readState().plugins.some(item => sameInstall(item) && item.enabled !== false)
     if (canEnable()) {
       const toolsState = readMcpToolsState()
-      for (const c of pluginConnectors) {
-        if (!canEnable()) break
-        if (getConnectorEntry(pluginName, c.name)) continue
-        const savedState = toolsState[`${pluginName}::${c.name}`]
-        const savedDef = savedState?.savedConnectorTemplate || savedState?.savedConnectorDefinition || savedState?.savedOAuthRemoteConfig || null
-        if (!savedDef && connectorRequiresAuth(c)) continue
-        const input = savedDef || {}
-        const def = connectorDefinition(pluginName, c.name, input, true)
-        const isStdio = def.transport === 'stdio'
-        const fingerprint = !isStdio ? remoteConfigFingerprint(remoteConfigFromEntry(def) || def) : null
-        const oauthOk = !isStdio && isOAuthMode(def.oauth)
-          ? isOAuthConnectorAuthenticated(pluginName, c.name, { ...def, credentialKey: oauthCredentialKey(pluginName, c.name, def.url, def.oauth) }, toolsState)
-          : true
-        const verifiedBefore = savedState?.cachedToolsResolved === true && (
-          isStdio
-            ? Boolean(savedState?.savedConnectorDefinition || savedState?.savedConnectorTemplate)
-            : (savedState?.verifiedRemoteConfig === fingerprint && oauthOk)
-        )
-        const rememberDefinition = Boolean(savedDef)
-        if (verifiedBefore) {
-          saveConnectorAuth(pluginName, c.name, input, {
-            pluginOwned: true,
-            rememberDefinition,
-            probe: { ok: true, tools: savedState.cachedTools || [], definition: def },
-          })
-        } else {
-          // Probe unverified connectors asynchronously so plugin switches return immediately.
-          void enableConnector(pluginName, c.name, undefined, { pluginOwned: true, rememberDefinition, canEnable }).catch(() => {})
+      const pendingConnectors = []
+      withCordisPatchBatch(() => {
+        for (const c of pluginConnectors) {
+          if (!canEnable()) break
+          if (getConnectorEntry(pluginName, c.name)) continue
+          const savedState = toolsState[`${pluginName}::${c.name}`]
+          const savedDef = savedState?.savedConnectorTemplate || savedState?.savedConnectorDefinition || savedState?.savedOAuthRemoteConfig || null
+          if (!savedDef && connectorRequiresAuth(c)) continue
+          const input = savedDef || {}
+          const def = connectorDefinition(pluginName, c.name, input, true)
+          const isStdio = def.transport === 'stdio'
+          const fingerprint = !isStdio ? remoteConfigFingerprint(remoteConfigFromEntry(def) || def) : null
+          const oauthOk = !isStdio && isOAuthMode(def.oauth)
+            ? isOAuthConnectorAuthenticated(pluginName, c.name, { ...def, credentialKey: oauthCredentialKey(pluginName, c.name, def.url, def.oauth) }, toolsState)
+            : true
+          const hasCachedTools = savedState?.cachedToolsResolved === true
+            || (Array.isArray(savedState?.cachedTools) && savedState.cachedTools.length > 0)
+          const verifiedBefore = hasCachedTools && (
+            isStdio
+              ? (Boolean(def.command && resolveCommandPath(def.command, process.env, def.cwd ? { cwd: def.cwd } : undefined))
+                && (savedState?.verifiedStdioConfig
+                  ? savedState.verifiedStdioConfig === stdioConfigFingerprint(def)
+                  : (Boolean(savedState?.savedConnectorDefinition || savedState?.savedConnectorTemplate) || !connectorRequiresAuth(c))))
+              : (savedState?.verifiedRemoteConfig === fingerprint && oauthOk)
+          )
+          const rememberDefinition = Boolean(savedDef)
+          if (verifiedBefore) {
+            saveConnectorAuth(pluginName, c.name, input, {
+              pluginOwned: true,
+              rememberDefinition,
+              probe: { ok: true, tools: savedState.cachedTools || [], definition: def },
+            })
+          } else {
+            pendingConnectors.push({ name: c.name, rememberDefinition })
+          }
         }
+      })
+      pendingConnectorNames = pendingConnectors.map((item) => item.name)
+      for (const item of pendingConnectors) {
+        if (!canEnable()) break
+        // Probe unverified connectors asynchronously so plugin switches return immediately.
+        void enableConnector(pluginName, item.name, undefined, { pluginOwned: true, rememberDefinition: item.rememberDefinition, canEnable })
+          .then((res) => {
+            if (res?.ok && canEnable()) options.onConnectorReady?.(getConnectorId(pluginName, item.name))
+          })
+          .catch(() => {})
       }
     }
   }
-  return { ok: true, enabled, lspErrors: lspErrors.length > 0 ? lspErrors : undefined }
+  return {
+    ok: true,
+    enabled,
+    lspErrors: lspErrors.length > 0 ? lspErrors : undefined,
+    ...(pendingConnectorNames.length > 0 ? { pendingConnectors: pendingConnectorNames } : {}),
+  }
 }
 
 /**
@@ -2901,188 +3189,213 @@ function hasOverlappingToolPrefix(publicName, name, servers) {
   return false
 }
 
-/** Re-exported for routes: list installed plugins with details. */
-export function installedDetails() {
-  const state = readState()
-  let connectorEntries
-  let toolsState
-  return state.plugins.map((rec) => {
-    const target = installedDir(rec.name)
-    const installed = existsSync(target)
-    if (installed && !PLUGIN_LOCKS.has(rec.name)) {
-      const skillsDir = join(target, 'skills')
-      try {
-        for (const entry of readdirSync(target, { withFileTypes: true })) {
-          if (
-            entry.isDirectory() &&
-            entry.name !== 'skills' &&
-            entry.name !== 'commands' &&
-            entry.name !== 'agents' &&
-            entry.name !== '.agents' &&
-            entry.name !== 'node_modules' &&
-            entry.name !== '.git'
-          ) {
-            const sMd = join(target, entry.name, 'SKILL.md')
-            if (existsSync(sMd) && !existsSync(join(skillsDir, entry.name))) {
-              const subDir = join(skillsDir, entry.name)
-              mkdirSync(subDir, { recursive: true })
-              copyDir(join(target, entry.name), subDir)
-            }
-          }
+function buildInstalledPluginDetail(rec, shared = {}) {
+  const getPatchEntries = () => {
+    if (!shared.patchEntries) {
+      const entries = new Map()
+      for (const block of readCordisPatch()) {
+        if (!Array.isArray(block?.insert)) continue
+        for (const entry of block.insert) {
+          if (entry && !entries.has(entry.id)) entries.set(entry.id, entry)
         }
-      } catch {}
+      }
+      shared.patchEntries = entries
     }
-    const targetManifest = installed ? readPluginManifest(target) : null
-    const connectors = installed ? getPluginConnectors(target, targetManifest).map((c) => {
-      if (!connectorEntries) {
-        connectorEntries = new Map()
-        for (const block of readCordisPatch()) {
-          if (!Array.isArray(block?.insert)) continue
-          for (const entry of block.insert) {
-            if (entry && !connectorEntries.has(entry.id)) connectorEntries.set(entry.id, entry)
+    return shared.patchEntries
+  }
+  const getToolsState = () => (shared.toolsState ??= readMcpToolsState())
+  const resolveCmdCached = (cmd, cwd) => {
+    if (!shared.commandCache) return resolveCommandPath(cmd, process.env, { cwd })
+    const cacheKey = `${cmd}\0${cwd || ''}`
+    if (!shared.commandCache.has(cacheKey)) {
+      shared.commandCache.set(cacheKey, resolveCommandPath(cmd, process.env, { cwd }))
+    }
+    return shared.commandCache.get(cacheKey)
+  }
+
+  const target = installedDir(rec.name)
+  const installed = existsSync(target)
+  if (installed && !PLUGIN_LOCKS.has(rec.name)) {
+    const skillsDir = join(target, 'skills')
+    try {
+      for (const entry of readdirSync(target, { withFileTypes: true })) {
+        if (
+          entry.isDirectory() &&
+          entry.name !== 'skills' &&
+          entry.name !== 'commands' &&
+          entry.name !== 'agents' &&
+          entry.name !== '.agents' &&
+          entry.name !== 'node_modules' &&
+          entry.name !== '.git'
+        ) {
+          const sMd = join(target, entry.name, 'SKILL.md')
+          if (existsSync(sMd) && !existsSync(join(skillsDir, entry.name))) {
+            const subDir = join(skillsDir, entry.name)
+            mkdirSync(subDir, { recursive: true })
+            copyDir(join(target, entry.name), subDir)
           }
         }
       }
-      const needsAuth = connectorRequiresAuth(c)
-      const savedEntry = connectorEntries.get(getConnectorId(rec.name, c.name))
-      const toolState = () => (toolsState ??= readMcpToolsState())[`${rec.name}::${c.name}`]
-      const authenticated = connectorAuthenticated(c, savedEntry)
-      const connected = connectorActive(savedEntry, () => authenticated, toolState)
-      const toolStateObj = toolState()
-      const storedTemplate = toolStateObj?.savedConnectorTemplate
-      const storedDefinition = toolStateObj?.savedConnectorDefinition
-      const savedConfig = savedEntry?.config || storedDefinition || {}
-      const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? toolStateObj?.savedOAuthRemoteConfig : null)
-      const editableUrl = remote ? remote.url : (storedTemplate?.url ?? storedDefinition?.url ?? c.url ?? savedConfig.url ?? null)
-      const editableCmd = remote ? null : (storedTemplate?.command ?? storedDefinition?.command ?? c.command ?? savedConfig.command ?? null)
-      const editableArgs = remote ? [] : (storedTemplate?.args ?? storedDefinition?.args ?? c.args ?? savedConfig.args ?? [])
-      const hasStoredTplCwd = !!(storedTemplate && 'cwd' in storedTemplate)
-      const hasStoredDefCwd = !!(storedDefinition && 'cwd' in storedDefinition)
-      const rawCwd = hasStoredTplCwd
-        ? storedTemplate.cwd
-        : (hasStoredDefCwd ? storedDefinition.cwd : c.cwd)
-      const editableCwd = remote ? null : (rawCwd ?? null)
-      const editableEnv = remote ? {} : stripSyntheticRuntimeEnv(
-        storedTemplate?.env ?? storedDefinition?.env ?? c.env ?? savedConfig.env ?? {},
-        rec.name,
-        target,
-      )
-      const dataDir = pluginDataDir(rec.name)
-      const expandedManifestHeaders = expandPluginVars(c.headers || {}, target, dataDir)
-      const sortHeaders = (obj) => JSON.stringify(Object.entries(obj || {}).sort(([a], [b]) => a.localeCompare(b)))
-      const hasCustomPatchHeaders = Boolean(
-        savedConfig.headers
-        && Object.keys(savedConfig.headers).length > 0
-        && sortHeaders(savedConfig.headers) !== sortHeaders(expandedManifestHeaders),
-      )
-      const editableHeaders = remote
-        ? remote.headers
-        : (storedTemplate?.headers ?? storedDefinition?.headers ?? (hasCustomPatchHeaders ? savedConfig.headers : undefined) ?? c.headers ?? {})
-      const savedTransport = remote ? 'http' : connectorTransport(
-        storedTemplate?.transport || storedTemplate?.type || savedConfig.transport || savedConfig.type,
-        editableUrl,
-        editableCmd,
-      )
-      const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, editableUrl, remote.oauth) : null
-      const oauthAuthenticated = isOAuthConnectorAuthenticated(rec.name, c.name, remote, toolsState)
-      const disp = resolveConnectorDisplay({
-        url: editableUrl,
-        command: editableCmd,
-        args: editableArgs,
-        ...(rawCwd !== undefined ? { cwd: rawCwd } : {}),
-      }, target, dataDir)
+    } catch {}
+  }
+  const targetManifest = installed ? readPluginManifest(target) : null
+  const connectors = installed ? getPluginConnectors(target, targetManifest).map((c) => {
+    const needsAuth = connectorRequiresAuth(c)
+    const savedEntry = getPatchEntries().get(getConnectorId(rec.name, c.name))
+    const toolState = () => getToolsState()[`${rec.name}::${c.name}`]
+    const authenticated = connectorAuthenticated(c, savedEntry)
+    const connected = connectorActive(savedEntry, () => authenticated, toolState)
+    const toolStateObj = toolState()
+    const storedTemplate = toolStateObj?.savedConnectorTemplate
+    const storedDefinition = toolStateObj?.savedConnectorDefinition
+    const savedConfig = savedEntry?.config || storedDefinition || {}
+    const remote = remoteConfigFromEntry(savedConfig) || (!savedEntry ? toolStateObj?.savedOAuthRemoteConfig : null)
+    const editableUrl = remote ? remote.url : (storedTemplate?.url ?? storedDefinition?.url ?? c.url ?? savedConfig.url ?? null)
+    const editableCmd = remote ? null : (storedTemplate?.command ?? storedDefinition?.command ?? c.command ?? savedConfig.command ?? null)
+    const editableArgs = remote ? [] : (storedTemplate?.args ?? storedDefinition?.args ?? c.args ?? savedConfig.args ?? [])
+    const hasStoredTplCwd = !!(storedTemplate && 'cwd' in storedTemplate)
+    const hasStoredDefCwd = !!(storedDefinition && 'cwd' in storedDefinition)
+    const rawCwd = hasStoredTplCwd
+      ? storedTemplate.cwd
+      : (hasStoredDefCwd ? storedDefinition.cwd : c.cwd)
+    const editableCwd = remote ? null : (rawCwd ?? null)
+    const editableEnv = remote ? {} : stripSyntheticRuntimeEnv(
+      storedTemplate?.env ?? storedDefinition?.env ?? c.env ?? savedConfig.env ?? {},
+      rec.name,
+      target,
+    )
+    const dataDir = pluginDataDir(rec.name)
+    const expandedManifestHeaders = expandPluginVars(c.headers || {}, target, dataDir)
+    const sortHeaders = (obj) => JSON.stringify(Object.entries(obj || {}).sort(([a], [b]) => a.localeCompare(b)))
+    const hasCustomPatchHeaders = Boolean(
+      savedConfig.headers
+      && Object.keys(savedConfig.headers).length > 0
+      && sortHeaders(savedConfig.headers) !== sortHeaders(expandedManifestHeaders),
+    )
+    const editableHeaders = remote
+      ? remote.headers
+      : (storedTemplate?.headers ?? storedDefinition?.headers ?? (hasCustomPatchHeaders ? savedConfig.headers : undefined) ?? c.headers ?? {})
+    const savedTransport = remote ? 'http' : connectorTransport(
+      storedTemplate?.transport || storedTemplate?.type || savedConfig.transport || savedConfig.type,
+      editableUrl,
+      editableCmd,
+    )
+    const savedClient = remote?.oauth === 'custom' ? readSavedOAuthClient(rec.name, c.name, editableUrl, remote.oauth) : null
+    const oauthAuthenticated = isOAuthConnectorAuthenticated(rec.name, c.name, remote, getToolsState())
+    const disp = resolveConnectorDisplay({
+      url: editableUrl,
+      command: editableCmd,
+      args: editableArgs,
+      ...(rawCwd !== undefined ? { cwd: rawCwd } : {}),
+    }, target, dataDir)
 
-      return {
-        ...c,
-        type: savedTransport,
-        command: editableCmd,
-        url: editableUrl,
-        ...(editableCwd !== null ? { cwd: editableCwd } : {}),
-        headers: editableHeaders,
-        env: editableEnv,
-        args: editableArgs,
-        ...disp,
-        oauth: remote?.oauth || savedConfig.oauth || c.oauth || 'none',
-        oauthClientId: savedClient?.clientId || '',
-        oauthHasClientSecret: savedClient?.hasClientSecret || false,
-        oauthCallbackPort: remote?.oauthCallbackPort || '',
-        oauthScope: remote?.oauthScope || '',
-        configured: !!(savedEntry || storedDefinition || storedTemplate || remote),
-        needsAuth,
-        authenticated,
-        oauthAuthenticated,
-        enabled: !!savedEntry,
-        connected,
-      }
-    }) : []
-    let lspServers = installed ? listLspServers(target, targetManifest) : []
-    // Auto-activate: if an LSP server's binary is now on PATH or relative inside
-    // pluginRoot, register it on the spot (honoring explicit removals).
-    if (lspServers.length > 0) {
-      const dataDir = pluginDataDir(rec.name)
-      const autoRegistered = lspServers.filter((s) => {
-        if (isLspActive(rec.name, s.name)) return false
-        if (autoActivatedLspServers.has(`${rec.name}::${s.name}`)) return false
-        const resolvedLspCmd = s.command ? resolvePluginCommand(s.command, target, dataDir) : null
-        return !!resolvedLspCmd
-          && resolveCommandPath(resolvedLspCmd, process.env, { cwd: target })
-          && Object.keys(s.extensionToLanguage || {}).length > 0
-      })
-      if (autoRegistered.length > 0) {
+    return {
+      ...c,
+      type: savedTransport,
+      command: editableCmd,
+      url: editableUrl,
+      ...(editableCwd !== null ? { cwd: editableCwd } : {}),
+      headers: editableHeaders,
+      env: editableEnv,
+      args: editableArgs,
+      ...disp,
+      oauth: remote?.oauth || savedConfig.oauth || c.oauth || 'none',
+      oauthClientId: savedClient?.clientId || '',
+      oauthHasClientSecret: savedClient?.hasClientSecret || false,
+      oauthCallbackPort: remote?.oauthCallbackPort || '',
+      oauthScope: remote?.oauthScope || '',
+      configured: !!(savedEntry || storedDefinition || storedTemplate || remote),
+      needsAuth,
+      authenticated,
+      oauthAuthenticated,
+      enabled: !!savedEntry,
+      connected,
+    }
+  }) : []
+  let lspServers = installed ? listLspServers(target, targetManifest) : []
+  const lspDataDir = pluginDataDir(rec.name)
+  // Auto-activate only while plugin is enabled; disabled plugins must stay unregistered.
+  if (rec.enabled !== false && lspServers.length > 0) {
+    const patchEntries = getPatchEntries()
+    const autoRegistered = lspServers.filter((s) => {
+      if (patchEntries.has(getLspServerId(rec.name, s.name))) return false
+      if (autoActivatedLspServers.has(`${rec.name}::${s.name}`)) return false
+      const resolvedLspCmd = s.command ? resolvePluginCommand(s.command, target, lspDataDir) : null
+      return !!resolvedLspCmd
+        && resolveCmdCached(resolvedLspCmd, target)
+        && Object.keys(s.extensionToLanguage || {}).length > 0
+    })
+    if (autoRegistered.length > 0) {
+      withCordisPatchBatch(() => {
         for (const s of autoRegistered) {
           try {
             const r = registerLspServer(rec.name, s.name, s)
             if (r.ok) autoActivatedLspServers.add(`${rec.name}::${s.name}`)
           } catch {}
         }
-        lspServers = listLspServers(target, targetManifest)
-      }
+      })
+      shared.patchEntries = null
+      lspServers = listLspServers(target, targetManifest)
     }
-    const lspDataDir = pluginDataDir(rec.name)
-    lspServers = lspServers.map((s) => {
-      const active = isLspActive(rec.name, s.name)
-      const resolvedLspCmd = s.command ? resolvePluginCommand(s.command, target, lspDataDir) : null
-      const missingCommand = !active && !!resolvedLspCmd && !resolveCommandPath(resolvedLspCmd, process.env, { cwd: target })
-      return { ...s, active, missingCommand }
-    })
-    // Author: the state record is written at install time, so installs made
-    // before the marketplace reader learned to merge a plugin's own manifest
-    // carry `author: null` forever. Fall back to the installed copy's manifest,
-    // then to the live marketplace row, so those records self-heal on read.
-    const marketRow = findMarketRowSync(rec.sourceId, rec.name)
-    // The browse list and the connector rows render the same plugin through the
-    // same icon component, so they must be handed the same identity fields the
-    // detail page merges in. Without these a plugin whose manifest declares no
-    // icon falls back to "author name as a GitHub handle" and shows a stranger's
-    // avatar while its own page shows the real logo.
-    const identity = installedPluginIconIdentity(rec, installed ? target : undefined, targetManifest, marketRow)
-    const detail = installed ? {
-      icons: identity.icons,
-      skills: listSkills(target, targetManifest),
-      agents: listAgents(target, targetManifest),
-      prompts: listPrompts(target, targetManifest),
-      connectors,
-      hooks: listHooks(target, targetManifest),
-      lspServers,
-      version: targetManifest?.version ?? null,
-    } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: null }
-    return {
-      ...rec,
-      ...detail,
-      description: rec.description || targetManifest?.description || marketRow?.description || '',
-      author: identity.author,
-      // Identity fields the icon chain reads. The detail page already merges
-      // these from the marketplace row before rendering, which is why the same
-      // plugin showed one icon inline and another on its own page.
-      homepage: identity.homepage,
-      source: identity.source,
-      skillCount: detail.skills.length,
-      agentCount: detail.agents.length,
-      promptCount: detail.prompts.length,
-      connectorCount: connectors.length,
-      hookCount: detail.hooks.length,
-      lspServerCount: lspServers.length,
-      dir: target,
-    }
+  }
+  const currentPatchEntries = lspServers.length > 0 ? getPatchEntries() : null
+  lspServers = lspServers.map((s) => {
+    const active = Boolean(currentPatchEntries?.has(getLspServerId(rec.name, s.name)))
+    const resolvedLspCmd = s.command ? resolvePluginCommand(s.command, target, lspDataDir) : null
+    const missingCommand = !active && !!resolvedLspCmd && !resolveCmdCached(resolvedLspCmd, target)
+    return { ...s, active, missingCommand }
   })
+  // Author: the state record is written at install time, so installs made
+  // before the marketplace reader learned to merge a plugin's own manifest
+  // carry `author: null` forever. Fall back to the installed copy's manifest,
+  // then to the live marketplace row, so those records self-heal on read.
+  const marketRow = findMarketRowSync(rec.sourceId, rec.name)
+  // The browse list and the connector rows render the same plugin through the
+  // same icon component, so they must be handed the same identity fields the
+  // detail page merges in. Without these a plugin whose manifest declares no
+  // icon falls back to "author name as a GitHub handle" and shows a stranger's
+  // avatar while its own page shows the real logo.
+  const identity = installedPluginIconIdentity(rec, installed ? target : undefined, targetManifest, marketRow)
+  const detail = installed ? {
+    icons: identity.icons,
+    skills: listSkills(target, targetManifest),
+    agents: listAgents(target, targetManifest),
+    prompts: listPrompts(target, targetManifest),
+    connectors,
+    hooks: listHooks(target, targetManifest),
+    lspServers,
+    version: targetManifest?.version ?? null,
+  } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: null }
+  return {
+    ...rec,
+    ...detail,
+    description: rec.description || targetManifest?.description || marketRow?.description || '',
+    author: identity.author,
+    // Identity fields the icon chain reads. The detail page already merges
+    // these from the marketplace row before rendering, which is why the same
+    // plugin showed one icon inline and another on its own page.
+    homepage: identity.homepage,
+    source: identity.source,
+    skillCount: detail.skills.length,
+    agentCount: detail.agents.length,
+    promptCount: detail.prompts.length,
+    connectorCount: connectors.length,
+    hookCount: detail.hooks.length,
+    lspServerCount: lspServers.length,
+    dir: target,
+  }
+}
+
+/** Re-exported for routes: get single installed plugin with details. */
+export function installedPluginDetail(pluginName) {
+  const rec = readState().plugins.find((p) => p.name === pluginName)
+  if (!rec) return null
+  return buildInstalledPluginDetail(rec, { commandCache: new Map() })
+}
+
+/** Re-exported for routes: list installed plugins with details. */
+export function installedDetails() {
+  const state = readState()
+  const shared = { commandCache: new Map() }
+  return state.plugins.map((rec) => buildInstalledPluginDetail(rec, shared))
 }

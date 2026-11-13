@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { encodeOAuthConfig, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
+import { bridgeRuntimeEnv, encodeOAuthConfig, oauthCredentialKey, oauthRuntimeConfig, remoteConfigFromEntry } from './oauth-config.js'
 import { allowOAuthRecordWrites, readOAuthRecord, oauthStoreDir, saveOAuthClientCredentials } from './oauth-store.js'
 
 const sessions = new Map()
@@ -58,7 +58,7 @@ function finish(session, result) {
 
 function startProcess(session) {
   let stderrBuffer = ''
-  const env = {
+  const env = bridgeRuntimeEnv({
     ...process.env,
     UPH_MCP_REMOTE_CONFIG: encodeOAuthConfig(session.config),
     UPH_OAUTH_STORE_DIR: oauthStoreDir(),
@@ -66,7 +66,7 @@ function startProcess(session) {
     UPH_MCP_VERIFY: '1',
     ...(session.noBrowser ? { UPH_MCP_NO_BROWSER: '1' } : {}),
     ...(session.callbackTimeout ? { UPH_OAUTH_CALLBACK_TIMEOUT_MS: String(session.callbackTimeout) } : {}),
-  }
+  })
   const child = spawn(process.execPath, [bridgePath], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   session.child = child
   let stdout = ''
