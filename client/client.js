@@ -4591,10 +4591,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const localPreview = preferPreview && first?.startsWith("/universal-plugin-hub/api/plugin-icon?") && plugin.icons?.previews?.[first];
 			if (localPreview) return h(PluginIconImage, {
 				key: `preview:${first}`, candidates: [localPreview, ...candidates], plugin, eager,
-				fallback: h(PluginIconFallback, { plugin, isDark, eager }),
+				fallback: h(PluginIconFallback, { plugin, isDark, eager, underlay: true }),
 			});
 			const embedded = plugin?.icons?.previews?.[candidates[0]] || candidates.find((url) => url.startsWith("data:image/"));
-			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, decoding: "sync", style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark, eager });
+			const fallback = embedded ? h("img", { src: embedded, alt: "", width: 38, height: 38, decoding: "sync", style: { width: "100%", height: "100%", objectFit: "contain" } }) : h(PluginIconFallback, { plugin, isDark, eager, underlay: candidates.length > 0 });
 			return candidates.length ? h(PluginIconImage, { key: candidates.join("|"), candidates, plugin, fallback, eager }) : fallback;
 		}
 
@@ -4607,8 +4607,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const known = !!avatarUrl && isKnownAvatar(avatarUrl);
 			const inline = avatarUrl?.startsWith("data:");
 			const imgLoaded = inline || loaded === avatarUrl;
+			const renderedFallback = (!inline && typeof React !== "undefined" && typeof PluginIconFallback === "function" && React.isValidElement?.(fallback) && fallback.type === PluginIconFallback)
+				? React.cloneElement(fallback, { underlay: !!avatarUrl })
+				: fallback;
 			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
-				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, fallback),
+				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, inline ? null : renderedFallback),
 				// A plugin-local icon is a same-origin disk read, so deferring it to
 				// the viewport buys nothing and costs a visible placeholder on scroll.
 				// Only remote avatars are worth deferring — and never above the fold.
@@ -4634,7 +4637,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			);
 		}
 
-	function PluginIconFallback({ plugin, isDark, eager = false }) {
+	function PluginIconFallback({ plugin, isDark, eager = false, underlay = false }) {
 		const name = (plugin?.name || "").toLowerCase();
 		const author = (typeof plugin?.author === "string" ? plugin.author : (plugin?.author && plugin.author.name) || "").trim().toLowerCase();
 		const badge = getPluginBadge(plugin || {});
@@ -4679,7 +4682,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				boxShadow: isDark ? "inset 0 1px 0 rgba(255,255,255,.04)" : "inset 0 1px 0 #fff, 0 1px 2px rgba(27,31,49,.06)",
 			},
 		},
-			h("img", { src: badge.src, alt: "", width: 34, height: 34, loading: eager ? "eager" : "lazy", decoding: eager ? "sync" : "async", style: { objectFit: "contain" } }),
+			h("img", { src: badge.src, alt: "", width: 34, height: 34, loading: underlay ? "lazy" : (eager ? "eager" : "lazy"), decoding: underlay ? "async" : (eager ? "sync" : "async"), ...(underlay ? { fetchPriority: "low" } : {}), style: { objectFit: "contain" } }),
 		);
 	}
 
@@ -6557,13 +6560,61 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// Detail View Data Fetching & LRU Cache
 		const [detail, setDetail] = useState(null);
 		const detailCacheRef = useRef({});
+		const detailEpochRef = useRef({});
+		const invalidateSourceDetailCache = useCallback((sourceId) => {
+			if (!sourceId) return;
+			detailEpochRef.current[sourceId] = (detailEpochRef.current[sourceId] || 0) + 1;
+			if (detailCacheRef.current) {
+				const prefix = `${sourceId}:`;
+				for (const k of Object.keys(detailCacheRef.current)) {
+					if (k.startsWith(prefix)) delete detailCacheRef.current[k];
+				}
+			}
+		}, []);
+		const omitSourceKey = (prev, removedId) => {
+			if (!prev || typeof prev !== "object") return prev;
+			const next = { ...prev };
+			delete next[removedId];
+			return next;
+		};
+		const stripDeletedSource = (prev, removedId) => {
+			if (!prev || typeof prev !== "object") return prev;
+			const next = { ...prev };
+			if (Array.isArray(prev.sources)) {
+				next.sources = prev.sources.filter((s) => s && s.id !== removedId);
+			}
+			if (Array.isArray(prev.tabOrder)) {
+				next.tabOrder = prev.tabOrder.filter((id) => id !== removedId);
+			}
+			return next;
+		};
+		const syncCachedStore = (storeKey, storageKey, fallbackValue, transform) => {
+			let base = SESSION_STORE[storeKey];
+			if (!base || typeof base !== "object") {
+				try {
+					const raw = localStorage.getItem(storageKey);
+					base = raw ? JSON.parse(raw) : null;
+				} catch {
+					base = null;
+				}
+			}
+			if ((!base || typeof base !== "object") && fallbackValue && typeof fallbackValue === "object") {
+				base = fallbackValue;
+			}
+			if (!base || typeof base !== "object") return;
+			const next = transform(base);
+			SESSION_STORE[storeKey] = next;
+			try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
+		};
 
 		const prefetchDetail = useCallback((sourceId, pluginName) => {
 				if (!sourceId || !pluginName || sourceId === "skills-local") return;
 			const cacheKey = `${sourceId}:${pluginName}`;
 			if (!detailCacheRef.current[cacheKey]) {
+				const epoch = detailEpochRef.current[sourceId] || 0;
 				api("/plugins/" + encodeURIComponent(sourceId) + "/" + encodeURIComponent(pluginName))
 					.then((body) => {
+						if ((detailEpochRef.current[sourceId] || 0) !== epoch) return;
 						if (body && body.plugin) {
 							detailCacheRef.current[cacheKey] = body.plugin;
 						}
@@ -7586,8 +7637,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			// Set initial detail immediately from view.plugin so there is 0ms delay / no blank loading screen
 			setDetail(view.plugin);
 			let alive = true;
+			const epoch = detailEpochRef.current[view.sourceId] || 0;
 			api("/plugins/" + encodeURIComponent(view.sourceId) + "/" + encodeURIComponent(view.plugin.name))
 				.then((body) => {
+					if ((detailEpochRef.current[view.sourceId] || 0) !== epoch) return;
 					if (body && body.plugin) {
 						const fetchedDetail = body.plugin.detail || body.plugin;
 						const merged = {
@@ -7617,7 +7670,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 				})
 				.catch(() => {
-					if (alive) setDetail(view.plugin);
+					if (alive && (detailEpochRef.current[view.sourceId] || 0) === epoch) setDetail(view.plugin);
 				});
 			return () => { alive = false; };
 		}, [view]);
@@ -7679,6 +7732,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const refresh = async () => {
 			setIsRefreshing(true);
+			if (detailEpochRef.current) {
+				const seen = new Set(Object.keys(detailEpochRef.current));
+				if (activeSourceId) seen.add(activeSourceId);
+				for (const s of (state?.sources || [])) {
+					if (s?.id) seen.add(s.id);
+				}
+				for (const id of seen) detailEpochRef.current[id] = (detailEpochRef.current[id] || 0) + 1;
+			}
 			if (detailCacheRef.current) detailCacheRef.current = {};
 			try {
 				if (activeSourceId === "skills-local") {
@@ -8232,18 +8293,36 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								try {
 									await api("/sources/" + encodeURIComponent(toRemove.id), { method: "DELETE" });
 									showToast("插件源已删除", `已移除分类「${toRemove.name}」`, { restart: false });
-									if (SESSION_STORE.sourceViews) delete SESSION_STORE.sourceViews[toRemove.id];
-									if (SESSION_STORE.scrollTops) delete SESSION_STORE.scrollTops[toRemove.id];
-									savedTabScrolls.delete(toRemove.id);
-									if (activeSourceId === toRemove.id) {
-										setActiveSourceId("anthropic");
+									invalidateSourceDetailCache(toRemove.id);
+									const currentSources = Array.isArray(SESSION_STORE.state?.sources)
+										? SESSION_STORE.state.sources
+										: (Array.isArray(state?.sources) ? state.sources : []);
+									const remainingSources = currentSources.filter((s) => s && s.id !== toRemove.id);
+									const fallbackSourceId = remainingSources.some((s) => s.id === "anthropic")
+										? "anthropic"
+										: (remainingSources.find((s) => s.id !== "local" || hasLocalPlugins) || remainingSources[0])?.id;
+									if (SESSION_STORE.activeSourceId === toRemove.id || activeSourceId === toRemove.id) {
+										if (fallbackSourceId) {
+											setActiveSourceId(fallbackSourceId, SESSION_STORE.sourceFilters?.[fallbackSourceId]);
+										} else {
+											SESSION_STORE.activeSourceId = "";
+											setActiveSourceIdRaw("");
+											const emptyView = { type: "browse" };
+											SESSION_STORE.view = emptyView;
+											setViewRaw(emptyView);
+										}
 									}
-									setRows((prev) => {
-										const next = { ...(prev || {}) };
-										delete next[toRemove.id];
-										return next;
-									});
-									await refreshState();
+									for (const mapKey of ["sourceViews", "scrollTops", "sourceFilters", "browseSortSnapshots"]) {
+										if (SESSION_STORE[mapKey]) delete SESSION_STORE[mapKey][toRemove.id];
+									}
+									if (SESSION_STORE.checkedCatalogs) SESSION_STORE.checkedCatalogs.delete(toRemove.id);
+									savedTabScrolls.delete(toRemove.id);
+									if (tabRefs?.current) delete tabRefs.current[toRemove.id];
+									setRows((prev) => omitSourceKey(prev, toRemove.id));
+									syncCachedStore("rows", STORAGE_KEY_ROWS, rows, (prev) => omitSourceKey(prev, toRemove.id));
+									setState((prev) => stripDeletedSource(prev, toRemove.id));
+									syncCachedStore("state", STORAGE_KEY_STATE, state, (prev) => stripDeletedSource(prev, toRemove.id));
+									try { await refreshState(); } catch {}
 								} catch (e) {
 									showToast("删除失败", cleanError(e), { restart: false });
 								} finally {
