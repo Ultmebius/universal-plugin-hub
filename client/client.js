@@ -2239,10 +2239,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	box-shadow:
 		inset 0 1px 0 rgba(255, 255, 255, 0.9),
 		inset 0 0 32px rgba(37, 99, 235, 0.06);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	padding: 24px;
 	z-index: 20;
 	pointer-events: none;
 	opacity: 0;
@@ -2265,38 +2261,51 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		inset 0 1px 0 rgba(147, 197, 253, 0.16),
 		inset 0 0 32px rgba(59, 130, 246, 0.12);
 }
-.cpm-source-drag-overlay > * {
+.cpm-source-drag-content > * {
 	pointer-events: none;
 }
 .cpm-source-drag-content {
+	position: absolute;
+	/* Fallback top offset aligned to idle .cpm-dropzone-icon inside .cpm-upload-dialog. */
+	inset-block-start: 110px;
+	inset-inline: 24px;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	justify-content: center;
-	gap: 8px;
-	/* Optical bottom counterbalance so the icon and title sit above geometric vertical center. */
-	padding-bottom: calc(8px + 1.0875rem);
+	justify-content: flex-start;
+	gap: 10px;
 	text-align: center;
+	z-index: 21;
+	pointer-events: none;
 	opacity: 0;
+	visibility: hidden;
 	transform: scale(0.96);
 	transition:
 		opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
-		transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+		transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+		visibility 0s linear 160ms;
 }
-.cpm-source-drag-overlay.is-visible .cpm-source-drag-content {
+.cpm-upload-dialog.is-dragging .cpm-source-drag-content,
+.cpm-source-drag-content.is-visible {
 	opacity: 1;
+	visibility: visible;
 	transform: scale(1);
+	transition:
+		opacity 150ms cubic-bezier(0.22, 1, 0.36, 1),
+		transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+		visibility 0s linear 0s;
 }
-.cpm-source-drag-overlay .cpm-dropzone-icon {
+.cpm-source-drag-content .cpm-dropzone-icon {
 	color: var(--cpm-accent);
 	margin-bottom: 2px;
 	transform: translateY(3px) scale(0.92);
 	transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.cpm-source-drag-overlay.is-visible .cpm-dropzone-icon {
+.cpm-upload-dialog.is-dragging .cpm-source-drag-content .cpm-dropzone-icon,
+.cpm-source-drag-content.is-visible .cpm-dropzone-icon {
 	transform: translateY(0) scale(1);
 }
-.cpm-dark .cpm-source-drag-overlay .cpm-dropzone-icon {
+.cpm-dark .cpm-source-drag-content .cpm-dropzone-icon {
 	color: #93c5fd;
 }
 .cpm-source-drag-title {
@@ -2305,6 +2314,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	letter-spacing: -0.01em;
 	line-height: 1.4;
 	color: var(--cpm-text);
+}
+@supports (anchor-name: --cpm-upload-icon) {
+	.cpm-upload-dialog {
+		anchor-scope: --cpm-upload-icon;
+	}
+	.cpm-upload-dialog .cpm-dropzone > .cpm-dropzone-icon {
+		anchor-name: --cpm-upload-icon;
+	}
+	.cpm-upload-dialog .cpm-source-drag-content {
+		inset-block-start: anchor(--cpm-upload-icon top);
+	}
 }
 .cpm-local-preview-card {
 	display: flex;
@@ -4430,15 +4450,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	.cpm-dialog { animation-duration: 0.08s; }
 	.cpm-dialog-box { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
 	.cpm-source-dialog-box { transition: border-color 100ms ease, box-shadow 100ms ease; }
-	.cpm-source-drag-overlay {
+	.cpm-source-drag-overlay,
+	.cpm-source-drag-content {
 		transition: opacity 100ms ease, visibility 0s linear 100ms;
 	}
-	.cpm-source-drag-overlay.is-visible {
+	.cpm-source-drag-overlay.is-visible,
+	.cpm-upload-dialog.is-dragging .cpm-source-drag-content,
+	.cpm-source-drag-content.is-visible {
 		transition: opacity 100ms ease, visibility 0s linear 0s;
 	}
 	.cpm-source-drag-content,
-	.cpm-source-drag-overlay .cpm-dropzone-icon {
+	.cpm-upload-dialog.is-dragging .cpm-source-drag-content,
+	.cpm-source-drag-content.is-visible,
+	.cpm-source-drag-content .cpm-dropzone-icon,
+	.cpm-upload-dialog.is-dragging .cpm-source-drag-content .cpm-dropzone-icon,
+	.cpm-source-drag-content.is-visible .cpm-dropzone-icon {
 		transform: none;
+	}
+	.cpm-source-drag-content .cpm-dropzone-icon {
 		transition: opacity 100ms ease;
 	}
 	.cpm-btn, .cpm-dropzone, .cpm-dropzone-icon, .cpm-radio-card, .cpm-custom-radio {
@@ -4480,7 +4509,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		border: 2px dashed Highlight;
 		box-shadow: none;
 	}
-	.cpm-source-drag-overlay .cpm-dropzone-icon { color: Highlight; }
+	.cpm-source-drag-content .cpm-dropzone-icon { color: Highlight; }
 	.cpm-upload-dialog .cpm-dropzone {
 		border: 2px dashed ButtonBorder;
 		background: ButtonFace;
@@ -9709,15 +9738,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 				},
 			},
-				phase === "upload" && h("div", {
-					className: "cpm-source-drag-overlay" + (isDragging ? " is-visible" : ""),
-					"aria-hidden": isDragging ? undefined : "true",
-				},
-					h("div", { className: "cpm-source-drag-content" },
-						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
-						h("div", { className: "cpm-source-drag-title" }, "释放以解析插件 / Skills"),
-					),
-				),
 				phase === "upload" && [
 					h("div", { className: "cpm-upload-header", key: "header" },
 						h("h2", { className: "cpm-dialog-title", id: "cpm-dialog-title" }, "上传插件 / Skills"),
@@ -9788,6 +9808,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: onCancel }, "取消"),
+					),
+					h("div", {
+						key: "drag-overlay",
+						className: "cpm-source-drag-overlay" + (isDragging ? " is-visible" : ""),
+						"aria-hidden": isDragging ? undefined : "true",
+					}),
+					h("div", {
+						key: "drag-content",
+						className: "cpm-source-drag-content" + (isDragging ? " is-visible" : ""),
+						"aria-hidden": isDragging ? undefined : "true",
+					},
+						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
+						h("div", { className: "cpm-source-drag-title" }, "释放以解析插件 / Skills"),
 					),
 				],
 				phase === "url" && [

@@ -588,16 +588,23 @@ test('drag overlay CSS fills edge-to-edge without white outer rim or restarting 
   // Children during active drag must not steal dragenter/dragleave hit tests
   assert.match(css, /\.cpm-upload-dialog\s+\.cpm-dropzone\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/)
   assert.match(css, /\.cpm-upload-dialog\.is-dragging\s*>\s*:not\(\.cpm-source-drag-overlay\)\s*\{[^}]*pointer-events:\s*none/)
-  assert.match(css, /\.cpm-source-drag-overlay\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/)
+  assert.doesNotMatch(overlay[1], /display:\s*flex|align-items:\s*center|justify-content:\s*center|padding:\s*24px/, 'empty drag backdrop should not retain dead flex container rules')
+  assert.doesNotMatch(css, /\.cpm-source-drag-overlay\s*>\s*\*/, 'empty drag backdrop should not retain dead child selector')
 
-  // Content transitions compositor-only opacity/transform cleanly and respects reduced motion + forced colors
+  // Content transitions compositor-only opacity/transform cleanly, anchors to idle icon, and respects reduced motion + forced colors
   const content = css.match(/\.cpm-source-drag-content\s*\{([^}]+)\}/)
   assert.ok(content, '.cpm-source-drag-content rule must exist')
+  assert.match(content[1], /position:\s*absolute/)
+  assert.match(content[1], /inset-block-start:\s*110px/)
+  assert.match(content[1], /gap:\s*10px/)
   assert.match(content[1], /transform:\s*scale\(/)
-  assert.match(content[1], /padding-bottom:\s*calc\(8px \+ 1\.0875rem\)/)
+  assert.match(content[1], /pointer-events:\s*none/)
+  assert.match(css, /\.cpm-source-drag-content\s*>\s*\*\s*\{[^}]*pointer-events:\s*none/)
+  assert.match(css, /@supports\s*\(anchor-name:\s*--cpm-upload-icon\)[\s\S]*anchor-scope:\s*--cpm-upload-icon[\s\S]*anchor-name:\s*--cpm-upload-icon[\s\S]*inset-block-start:\s*anchor\(--cpm-upload-icon top\)/)
   assert.doesNotMatch(css, /\.cpm-source-drag-sub\b/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.cpm-source-drag-content[\s\S]*transform:\s*none/)
   assert.match(css, /@media \(forced-colors: active\)[\s\S]*\.cpm-source-drag-overlay\s*\{/)
+  assert.match(css, /@media \(forced-colors: active\)[\s\S]*\.cpm-source-drag-content\s+\.cpm-dropzone-icon\s*\{[^}]*color:\s*Highlight/)
 })
 
 test('AddSourceDialog drag overlay resists spurious dragleave flicker and stays mounted for reversible transitions', async () => {
@@ -678,61 +685,57 @@ test('drag overlay covers 100% of upload dialog client area with zero white bord
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }))
   const css = extractCss()
   const file = join(dir, 'drag-overlay.html')
+  const uploadSvg = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+  const dialogMarkup = `
+    <div class="cpm-dialog">
+      <div role="dialog" class="cpm-dialog-box cpm-source-dialog-box cpm-upload-dialog is-dragging" style="position:relative">
+        <div class="cpm-upload-header">
+          <h2 class="cpm-dialog-title">上传插件 / Skills</h2>
+          <p class="cpm-upload-subtitle">自动识别本地插件与独立 Skills</p>
+        </div>
+        <button class="cpm-dropzone" type="button">
+          <span class="cpm-dropzone-icon" aria-hidden="true">${uploadSvg}</span>
+          <span class="cpm-dropzone-title">拖入插件 / Skills，或点击上传</span>
+          <span class="cpm-dropzone-formats">
+            <span class="cpm-dropzone-format">.zip</span>
+            <span class="cpm-dropzone-format">.tgz</span>
+            <span class="cpm-dropzone-format">.tar.gz</span>
+            <span class="cpm-dropzone-format">SKILL.md</span>
+          </span>
+        </button>
+        <div class="cpm-dialog-actions"><button class="cpm-btn cpm-btn-secondary" type="button">取消</button></div>
+        <div class="cpm-source-drag-overlay is-visible"></div>
+        <div class="cpm-source-drag-content is-visible">
+          <span class="cpm-dropzone-icon" aria-hidden="true">${uploadSvg}</span>
+          <div class="cpm-source-drag-title">释放以解析插件 / Skills</div>
+        </div>
+      </div>
+    </div>`
   writeFileSync(file, `<!doctype html><meta charset="utf-8"><style>${css}
     body { margin: 0; font-family: sans-serif; }
     .cpm-dialog, .cpm-dialog-box { animation: none; }
   </style>
-  <div class="cpm-root" id="light-root" style="width:1280px;height:800px">
-    <div class="cpm-dialog">
-      <div role="dialog" class="cpm-dialog-box cpm-source-dialog-box cpm-upload-dialog is-dragging" style="position:relative">
-        <div class="cpm-upload-header">
-          <h2 class="cpm-dialog-title">上传插件 / Skills</h2>
-          <p class="cpm-upload-subtitle">自动识别本地插件与独立 Skills</p>
-        </div>
-        <button class="cpm-dropzone" type="button">
-          <span class="cpm-dropzone-title">拖入插件 / Skills，或点击上传</span>
-        </button>
-        <div class="cpm-dialog-actions"><button class="cpm-btn cpm-btn-secondary" type="button">取消</button></div>
-        <div class="cpm-source-drag-overlay is-visible">
-          <div class="cpm-source-drag-content">
-            <span class="cpm-dropzone-icon" aria-hidden="true"></span>
-            <div class="cpm-source-drag-title">释放以解析插件 / Skills</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="cpm-root cpm-dark" id="dark-root" style="width:1280px;height:800px">
-    <div class="cpm-dialog">
-      <div role="dialog" class="cpm-dialog-box cpm-source-dialog-box cpm-upload-dialog is-dragging" style="position:relative">
-        <div class="cpm-upload-header">
-          <h2 class="cpm-dialog-title">上传插件 / Skills</h2>
-          <p class="cpm-upload-subtitle">自动识别本地插件与独立 Skills</p>
-        </div>
-        <button class="cpm-dropzone" type="button">
-          <span class="cpm-dropzone-title">拖入插件 / Skills，或点击上传</span>
-        </button>
-        <div class="cpm-dialog-actions"><button class="cpm-btn cpm-btn-secondary" type="button">取消</button></div>
-        <div class="cpm-source-drag-overlay is-visible">
-          <div class="cpm-source-drag-content">
-            <span class="cpm-dropzone-icon" aria-hidden="true"></span>
-            <div class="cpm-source-drag-title">释放以解析插件 / Skills</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div class="cpm-root" id="light-root" style="width:1280px;height:800px">${dialogMarkup}</div>
+  <div class="cpm-root cpm-dark" id="dark-root" style="width:1280px;height:800px">${dialogMarkup}</div>
   <pre id="metrics"></pre>
   <script>
     const measure = (id) => {
       const box = document.querySelector('#' + id + ' .cpm-upload-dialog');
       const ov = box.querySelector('.cpm-source-drag-overlay');
-      const content = ov.querySelector('.cpm-source-drag-content');
+      const content = box.querySelector('.cpm-source-drag-content');
+      const idleIcon = box.querySelector('.cpm-dropzone > .cpm-dropzone-icon svg');
+      const dragIcon = content.querySelector('.cpm-dropzone-icon svg');
+      const idleTitle = box.querySelector('.cpm-dropzone-title');
+      const dragTitle = content.querySelector('.cpm-source-drag-title');
       const br = box.getBoundingClientRect();
       const or = ov.getBoundingClientRect();
-      const cr = content.getBoundingClientRect();
+      const iir = idleIcon.getBoundingClientRect();
+      const dir = dragIcon.getBoundingClientRect();
+      const itr = idleTitle.getBoundingClientRect();
+      const dtr = dragTitle.getBoundingClientRect();
       const bs = getComputedStyle(box);
       const os = getComputedStyle(ov);
+      const cs = getComputedStyle(content);
       const bl = parseFloat(bs.borderLeftWidth) || 0;
       const bt = parseFloat(bs.borderTopWidth) || 0;
       const brw = parseFloat(bs.borderRightWidth) || 0;
@@ -747,7 +750,11 @@ test('drag overlay covers 100% of upload dialog client area with zero white bord
         boxBorderColor: bs.borderTopColor,
         overlayBg: os.backgroundImage !== 'none' ? os.backgroundImage : os.backgroundColor,
         overlayPointerEvents: os.pointerEvents,
-        contentCenterDelta: Math.abs((cr.top + cr.height / 2) - (or.top + or.height / 2)),
+        contentPointerEvents: cs.pointerEvents,
+        iconTopDelta: Math.abs(dir.top - iir.top),
+        iconCenterXDelta: Math.abs(((dir.left + dir.right) / 2) - ((iir.left + iir.right) / 2)),
+        titleTopDelta: Math.abs(dtr.top - itr.top),
+        titleCenterXDelta: Math.abs(((dtr.left + dtr.right) / 2) - ((itr.left + itr.right) / 2)),
       };
     };
     document.querySelector('#metrics').textContent = JSON.stringify({
@@ -769,7 +776,11 @@ test('drag overlay covers 100% of upload dialog client area with zero white bord
     assert.equal(tMetrics.overflowX, false, `${theme} horizontal overflow must not trigger scrollbar`)
     assert.equal(tMetrics.overflowY, false, `${theme} vertical overflow must not trigger scrollbar`)
     assert.equal(tMetrics.overlayPointerEvents, 'none')
-    assert.ok(tMetrics.contentCenterDelta <= 2, `${theme} overlay content should stay vertically centered`)
+    assert.equal(tMetrics.contentPointerEvents, 'none')
+    assert.ok(tMetrics.iconTopDelta <= 1, `${theme} drag icon top differs from idle icon by ${tMetrics.iconTopDelta}px`)
+    assert.ok(tMetrics.iconCenterXDelta <= 1, `${theme} drag icon horizontal center differs by ${tMetrics.iconCenterXDelta}px`)
+    assert.ok(tMetrics.titleTopDelta <= 1, `${theme} drag title top differs from idle title by ${tMetrics.titleTopDelta}px`)
+    assert.ok(tMetrics.titleCenterXDelta <= 1, `${theme} drag title horizontal center differs by ${tMetrics.titleCenterXDelta}px`)
     assert.notEqual(tMetrics.boxBorderColor, 'rgb(255, 255, 255)')
   }
 })
