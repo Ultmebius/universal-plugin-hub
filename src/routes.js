@@ -3,15 +3,16 @@
  * This layer only parses requests, calls service modules, and serializes.
  * Mutations are same-origin only.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { load as parseYaml } from 'js-yaml'
 import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
   readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, removeManagedDir, sourceCacheDir, safeRmDir,
 } from './store.js'
 import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from './market.js'
-import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceCache } from './parser.js'
-import { getOrFetchIcon, readLocalIcon } from './icons.js'
+import { readMarketplace, pluginDetail, pluginContentDir, invalidateMarketplaceCache, readPluginManifest } from './parser.js'
+import { getOrFetchIcon, readLocalIconCached, invalidateLocalIconCache, touchLru, setLru } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, isScanDirRegistered, toolCallIconGroups,
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
@@ -40,6 +41,219 @@ function normalizeMcpName(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+|-+$/g, '') || 'mcp'
 }
 
+const ICON_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox"
+const MANIFEST_INDEX_CACHE = new Map()
+const MANIFEST_INDEX_LIMIT = 64
+const VALID_PLUGIN_NAME = /^[a-z0-9][a-z0-9._-]*$/i
+const MANIFEST_CANDIDATE_PARTS = [
+  ['.claude-plugin', 'marketplace.json'],
+  ['.agents', 'plugins', 'marketplace.json'],
+  ['marketplace.json'],
+  ['claude-plugins.json'],
+  ['registry.json'],
+  ['plugins.json'],
+  ['catalog.json'],
+  ['market.json'],
+  ['mcp-servers.json'],
+  ['servers.json'],
+  ['index.json'],
+  ['.well-known', 'agent-card.json'],
+]
+
+function invalidateIconDirCache(sourceId) {
+  if (sourceId) MANIFEST_INDEX_CACHE.delete(sourceId)
+  else MANIFEST_INDEX_CACHE.clear()
+}
+
+function etagMatches(ifNoneMatch, etag) {
+  if (!ifNoneMatch || !etag) return false
+  const raw = Array.isArray(ifNoneMatch) ? ifNoneMatch.join(',') : String(ifNoneMatch)
+  const trimmed = raw.trim()
+  if (!trimmed) return false
+  if (trimmed === '*') return true
+  const bare = (tag) => (tag.startsWith('W/') ? tag.slice(2) : tag)
+  const target = bare(etag.trim())
+  const tokens = trimmed.match(/(?:W\/)?"(?:\\.|[^"])*"|\*/g)
+  if (!tokens) return false
+  return tokens.some((token) => token === '*' || bare(token) === target)
+}
+
+function sendIconResponse(req, res, { buffer, contentType, etag, cacheControl }) {
+  const baseHeaders = {
+    'Cache-Control': cacheControl,
+    ...(etag ? { 'ETag': etag } : {}),
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': ICON_CSP,
+  }
+  if (etag && etagMatches(req.headers?.['if-none-match'], etag)) {
+    res.writeHead(304, baseHeaders)
+    return res.end()
+  }
+  res.writeHead(200, {
+    'Content-Type': contentType || 'image/png',
+    ...baseHeaders,
+  })
+  return res.end(buffer)
+}
+
+function indexManifestEntries(content) {
+  if (!content || typeof content !== 'object') return null
+  const entries = new Map()
+  if (Array.isArray(content.plugins) || Array.isArray(content)) {
+    const list = Array.isArray(content) ? content : content.plugins
+    for (const r of list) {
+      if (!r || typeof r !== 'object') continue
+      const rawName = typeof r.name === 'string' ? r.name : (typeof r.identifier === 'string' ? r.identifier : '')
+      if (!rawName || !VALID_PLUGIN_NAME.test(rawName)) continue
+      const source = r.source?.source === 'local' ? r.source.path : (r.source || './')
+      if (r.source?.source === 'local' && (typeof source !== 'string' || !source.startsWith('./'))) continue
+      const cleanName = rawName.toLowerCase()
+      if (!entries.has(cleanName)) entries.set(cleanName, source)
+    }
+    return entries.size > 0 ? entries : null
+  }
+  const mcpDict = (content.mcpServers && typeof content.mcpServers === 'object')
+    ? content.mcpServers
+    : ((content.servers && typeof content.servers === 'object') ? content.servers : null)
+  if (mcpDict) {
+    for (const srvName of Object.keys(mcpDict)) {
+      if (!VALID_PLUGIN_NAME.test(srvName)) continue
+      const cleanName = srvName.toLowerCase()
+      if (!entries.has(cleanName)) entries.set(cleanName, './')
+    }
+    return entries.size > 0 ? entries : null
+  }
+  return null
+}
+
+function pluginDirMatchesName(entryDir, fallbackName, targetName) {
+  const rootSkill = existsSync(join(entryDir, 'SKILL.md')) || existsSync(join(entryDir, 'skill.md'))
+  const hasSkill = rootSkill || existsSync(join(entryDir, 'skills')) || existsSync(join(entryDir, 'commands'))
+  const hasManifest = existsSync(join(entryDir, '.codex-plugin', 'plugin.json')) || existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
+  const hasMcp = existsSync(join(entryDir, 'mcp.json')) || existsSync(join(entryDir, '.mcp.json')) || existsSync(join(entryDir, 'server.json'))
+  const hasAgents = existsSync(join(entryDir, 'agents'))
+  if (!hasSkill && !hasManifest && !hasMcp && !hasAgents) return { valid: false, matches: false }
+
+  let resolvedName = fallbackName
+  const manifest = readPluginManifest(entryDir, false)
+  if (manifest?.name) {
+    resolvedName = manifest.name
+  } else if (rootSkill) {
+    try {
+      const raw = readFileSync(join(entryDir, existsSync(join(entryDir, 'SKILL.md')) ? 'SKILL.md' : 'skill.md'), 'utf8')
+      const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+      const meta = match ? parseYaml(match[1]) : null
+      if (typeof meta?.name === 'string') resolvedName = meta.name
+    } catch {}
+  }
+  const matches = typeof resolvedName === 'string' && VALID_PLUGIN_NAME.test(resolvedName) && resolvedName.toLowerCase() === targetName
+  return { valid: true, matches }
+}
+
+/**
+ * Resolve one plugin's directory in O(1) without calling readMarketplace()
+ * across every sibling plugin and icon in the marketplace.
+ */
+function resolvePluginIconDir(sourceId, name) {
+  const record = readState().plugins.find((p) => p.name === name && p.sourceId === sourceId)
+  if (record) {
+    const inst = installedDir(name)
+    if (existsSync(inst)) return inst
+  }
+  const cache = sourceCacheDir(sourceId)
+  if (!existsSync(cache)) {
+    MANIFEST_INDEX_CACHE.delete(sourceId)
+    return null
+  }
+
+  const cached = MANIFEST_INDEX_CACHE.get(sourceId)
+  if (cached) {
+    try {
+      const info = statSync(cached.manifestPath)
+      if (info.isFile() && info.mtimeMs === cached.mtimeMs && info.size === cached.size) {
+        touchLru(MANIFEST_INDEX_CACHE, sourceId, cached)
+        if (!cached.entries.has(name)) return null
+        return pluginContentDir(sourceId, name, cached.entries.get(name), false)
+      }
+    } catch {}
+    MANIFEST_INDEX_CACHE.delete(sourceId)
+  }
+
+  for (const parts of MANIFEST_CANDIDATE_PARTS) {
+    const manifestPath = join(cache, ...parts)
+    try {
+      const info = statSync(manifestPath)
+      if (!info.isFile()) continue
+      const content = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const entries = indexManifestEntries(content)
+      if (!entries) continue
+      setLru(MANIFEST_INDEX_CACHE, MANIFEST_INDEX_LIMIT, sourceId, {
+        manifestPath, mtimeMs: info.mtimeMs, size: info.size, entries,
+      })
+      return entries.has(name) ? pluginContentDir(sourceId, name, entries.get(name), false) : null
+    } catch {}
+  }
+
+  if (sourceId === 'local') {
+    const direct = join(cache, name)
+    if (existsSync(direct) && pluginDirMatchesName(direct, name, name).matches) return direct
+    try {
+      for (const entry of readdirSync(cache, { withFileTypes: true })) {
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          const dir = join(cache, entry.name)
+          if (pluginDirMatchesName(dir, entry.name, name).matches) return dir
+        }
+      }
+    } catch {}
+    return null
+  }
+
+  if (
+    existsSync(join(cache, '.codex-plugin', 'plugin.json'))
+    || existsSync(join(cache, '.claude-plugin', 'plugin.json'))
+    || existsSync(join(cache, 'SKILL.md'))
+    || existsSync(join(cache, 'skill.md'))
+  ) {
+    return pluginDirMatchesName(cache, sourceId, name).matches ? cache : null
+  }
+
+  const monoDirs = ['plugins', 'skills', 'packages', 'tools', 'extensions']
+  for (const sub of monoDirs) {
+    const direct = join(cache, sub, name)
+    if (existsSync(direct) && pluginDirMatchesName(direct, name, name).matches) return direct
+  }
+  let anyMono = false
+  for (const sub of monoDirs) {
+    const subRoot = join(cache, sub)
+    if (!existsSync(subRoot)) continue
+    try {
+      for (const entry of readdirSync(subRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const dir = join(subRoot, entry.name)
+        const checked = pluginDirMatchesName(dir, entry.name, name)
+        if (checked.valid) anyMono = true
+        if (checked.matches) return dir
+      }
+    } catch {}
+  }
+  if (anyMono) return null
+
+  const rootMarkers = [
+    join(cache, 'SKILL.md'), join(cache, 'skills'), join(cache, 'commands'),
+    join(cache, 'agents'), join(cache, 'hooks'), join(cache, 'mcp.json'),
+    join(cache, '.mcp.json'), join(cache, 'server.json'),
+    join(cache, '.claude-plugin', 'plugin.json'), join(cache, '.codex-plugin', 'plugin.json'),
+    join(cache, 'plugin.json'), join(cache, '.cursor', 'rules'),
+    join(cache, '.cursorrules'), join(cache, 'package.json'),
+  ]
+  if (rootMarkers.some((p) => existsSync(p))) {
+    const manifest = readPluginManifest(cache)
+    const resolved = manifest?.name || sourceId
+    return typeof resolved === 'string' && VALID_PLUGIN_NAME.test(resolved) && resolved.toLowerCase() === name ? cache : null
+  }
+  return null
+}
+
 
 async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile = null) {
   const url = new URL(req.url, 'http://localhost')
@@ -52,14 +266,13 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const targetUrl = url.searchParams.get('u')
       if (!targetUrl) return sendJson(res, 400, { error: 'missing u parameter' })
       try {
-        const { buffer, contentType } = await getOrFetchIcon(targetUrl)
-        res.writeHead(200, {
-          'Content-Type': contentType || 'image/png',
-          'Cache-Control': 'public, max-age=604800',
-          'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+        const { buffer, contentType, etag, immutable } = await getOrFetchIcon(targetUrl)
+        return sendIconResponse(req, res, {
+          buffer,
+          contentType,
+          etag,
+          cacheControl: immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=604800',
         })
-        return res.end(buffer)
       } catch (err) {
         return sendJson(res, 502, { error: err.message })
       }
@@ -69,13 +282,15 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       try {
         const sourceId = safeSegment(url.searchParams.get('sourceId'), 'source id')
         const name = safeSegment(url.searchParams.get('name'), 'plugin name')
-        const record = readState().plugins.find((p) => p.name === name && p.sourceId === sourceId)
-        const row = readMarketplace(sourceId).find((p) => p.name === name)
-        const dir = record && existsSync(installedDir(name)) ? installedDir(name) : (row ? pluginContentDir(sourceId, name, row.source, false) : null)
+        const relPath = url.searchParams.get('path')
+        const dir = resolvePluginIconDir(sourceId, name)
         if (!dir) return sendJson(res, 404, { error: 'Plugin icon not found' })
-        const { buffer, contentType } = readLocalIcon(dir, url.searchParams.get('path'))
-        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=604800', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox" })
-        return res.end(buffer)
+        const { buffer, contentType, etag, fileVersion } = await readLocalIconCached(dir, relPath, [sourceId, name, relPath])
+        const requestedVersion = url.searchParams.get('v')
+        const cacheControl = requestedVersion && requestedVersion === fileVersion
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=604800'
+        return sendIconResponse(req, res, { buffer, contentType, etag, cacheControl })
       } catch {
         return sendJson(res, 404, { error: 'Plugin icon not found' })
       }
@@ -151,9 +366,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     if (path === '/skills/icon' && method === 'GET' && skills) {
       try {
         const item = skills.detail(url.searchParams.get('id'), false)
-        const { buffer, contentType } = readLocalIcon(item.directory, item.iconPath)
-        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox" })
-        return res.end(buffer)
+        const { buffer, contentType, etag } = await readLocalIconCached(item.directory, item.iconPath, ['skill', item.id, item.iconPath])
+        return sendIconResponse(req, res, { buffer, contentType, etag, cacheControl: 'public, max-age=3600' })
       } catch { return sendJson(res, 404, { error: 'Icon not found' }) }
     }
 
@@ -179,6 +393,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
       await pullSource(sourceId)
       invalidateMarketplaceCache(sourceId)
+      invalidateIconDirCache(sourceId)
+      invalidateLocalIconCache(sourceId)
       let plugins = readMarketplace(sourceId)
       if (sourceId === 'local') {
         const names = new Set(plugins.map(p => p.name))
@@ -243,6 +459,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const body = await readJsonBody(req, 30_000_000)
       const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
       const result = await importLocalPlugin({ path: target, overwrite: body.overwrite, sourceName: body.sourceName })
+      invalidateIconDirCache('local')
+      invalidateLocalIconCache('local')
       return sendJson(res, 200, result)
     }
 
@@ -266,6 +484,10 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const body = await readJsonBody(req, 30_000_000)
       const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
       const result = await importLocalMarketplace(target, { sourceName: body.sourceName, overwrite: body.overwrite === true })
+      if (result?.sourceId) {
+        invalidateIconDirCache(result.sourceId)
+        invalidateLocalIconCache(result.sourceId)
+      }
       return sendJson(res, 200, result)
     }
 
@@ -348,8 +570,11 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       // source's own clone or uploaded marketplace copy.
       if (sourceId !== 'remote') removeManagedDir(sourceCacheDir(sourceId))
       state.sources = state.sources.filter((s) => s.id !== sourceId)
+      if (Array.isArray(state.tabOrder)) state.tabOrder = state.tabOrder.filter((id) => id !== sourceId)
       writeState(state)
       invalidateMarketplaceCache(sourceId)
+      invalidateIconDirCache(sourceId)
+      invalidateLocalIconCache(sourceId)
       return sendJson(res, 200, { ok: true })
     }
 
@@ -646,6 +871,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (!detail && row?.source && typeof row.source === 'object') {
         await materializePlugin(sourceId, pluginName, row.source)
         invalidateMarketplaceCache(sourceId)
+        invalidateIconDirCache(sourceId)
+        invalidateLocalIconCache(sourceId)
         row = readMarketplace(sourceId).find((r) => r.name === pluginName) || row
         detail = pluginDetail(sourceId, pluginName, row.source, row)
       }
@@ -703,6 +930,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         pluginName,
       })
       invalidateMarketplaceCache(sourceId)
+      invalidateIconDirCache(sourceId)
+      invalidateLocalIconCache(sourceId)
       return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 
@@ -718,6 +947,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/update'.length), 'plugin name')
       const result = await updatePlugin(pluginName)
       invalidateMarketplaceCache()
+      invalidateIconDirCache()
+      invalidateLocalIconCache()
       return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 
@@ -761,6 +992,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(path.slice('/plugins/'.length), 'plugin name')
       const result = await uninstallPlugin(pluginName)
       invalidateMarketplaceCache()
+      invalidateIconDirCache()
+      invalidateLocalIconCache()
       return sendJson(res, 200, scheduledResult(result, applyProfile))
     }
 

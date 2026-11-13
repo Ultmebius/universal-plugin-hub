@@ -1,5 +1,5 @@
 import { statSync, realpathSync, readFileSync, readdirSync, openSync, readSync, closeSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, stat, realpath } from 'node:fs/promises'
 import { join, relative, isAbsolute, posix } from 'node:path'
 import { createHash } from 'node:crypto'
 import { PNG } from 'pngjs'
@@ -8,11 +8,39 @@ import { pluginPath } from './market.js'
 
 const MAX_BYTES = 2 * 1024 * 1024
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000
+const MEMORY_LIMIT = 256
+const PREVIEW_MEMORY_LIMIT = 512
+const FAILURES_LIMIT = 256
+const LOCAL_ICON_MEMORY_LIMIT = 512
 const memory = new Map()
 const pending = new Map()
 const failures = new Map()
+const bundledCache = new Map()
+const bundledPending = new Map()
+const localIconMemory = new Map()
+const localIconPending = new Map()
 const bundledIconRoot = new URL('../assets/fluent-3d/', import.meta.url)
 const bundledIconFiles = new Map(Object.values(JSON.parse(readFileSync(new URL('manifest.json', bundledIconRoot), 'utf8')).icons).map(icon => [icon.url, icon.file]))
+
+/** Compute a strong HTTP ETag from raw bytes. */
+export function computeEtag(buffer) {
+  return `"${createHash('sha256').update(buffer).digest('base64url')}"`
+}
+
+/** Promote an existing Map entry to most-recently-used. */
+export function touchLru(map, key, value) {
+  map.delete(key)
+  map.set(key, value)
+  return value
+}
+
+/** Insert or update a bounded Map entry with true LRU eviction. */
+export function setLru(map, limit, key, value) {
+  if (map.has(key)) map.delete(key)
+  else if (map.size >= limit) map.delete(map.keys().next().value)
+  map.set(key, value)
+  return value
+}
 
 export function imageContentType(buffer) {
   if (!buffer?.length) return null
@@ -37,6 +65,51 @@ export function readLocalIcon(root, path) {
   const contentType = imageContentType(buffer)
   if (!contentType) throw new Error('Unsupported icon content')
   return { buffer, contentType }
+}
+
+/**
+ * Resolve, verify containment, and read/cache a local icon asynchronously.
+ * Always validates directory traversal containment and current file stat so
+ * removed or out-of-bounds files fail immediately instead of hitting cache.
+ */
+export async function readLocalIconCached(root, path, scopeParts = []) {
+  const candidate = pluginPath(root, path)
+  const [realRoot, realFile] = await Promise.all([realpath(root), realpath(candidate)])
+  const rel = relative(realRoot, realFile)
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) {
+    throw new Error('Icon is outside plugin directory')
+  }
+  const info = await stat(realFile)
+  if (!info.isFile() || info.size > MAX_BYTES) throw new Error('Invalid icon size')
+  const fileVersion = `${info.mtimeMs}-${info.size}`
+  const scopePrefix = JSON.stringify(scopeParts)
+  const key = `${scopePrefix}\0${realFile}\0${fileVersion}`
+  const hit = localIconMemory.get(key)
+  if (hit) return touchLru(localIconMemory, key, hit)
+  const inflight = localIconPending.get(key)
+  if (inflight) return inflight
+  const task = (async () => {
+    const buffer = await readFile(realFile)
+    const contentType = imageContentType(buffer)
+    if (!contentType) throw new Error('Unsupported icon content')
+    const entry = { buffer, contentType, etag: computeEtag(buffer), fileVersion }
+    return setLru(localIconMemory, LOCAL_ICON_MEMORY_LIMIT, key, entry)
+  })()
+  localIconPending.set(key, task)
+  try { return await task } finally { localIconPending.delete(key) }
+}
+
+/** Drop cached local icon bytes for one sourceId (or all entries when omitted). */
+export function invalidateLocalIconCache(sourceId) {
+  if (!sourceId) {
+    localIconMemory.clear()
+    return
+  }
+  const prefix = JSON.stringify([sourceId])
+  const head = prefix.slice(0, -1) + ','
+  for (const key of localIconMemory.keys()) {
+    if (key.startsWith(head)) localIconMemory.delete(key)
+  }
 }
 
 // Claude's plugin manifest has no icon field and marketplace entries do not
@@ -190,6 +263,26 @@ function inlineFile(file) {
   } catch { return null }
 }
 
+function buildSamplingAxes(srcLen, dstLen) {
+  const starts = new Int32Array(dstLen)
+  const ends = new Int32Array(dstLen)
+  const weights = new Array(dstLen)
+  const spans = new Float64Array(dstLen)
+  for (let i = 0; i < dstLen; i++) {
+    const start = (i * srcLen) / dstLen
+    const end = ((i + 1) * srcLen) / dstLen
+    const s0 = Math.floor(start)
+    const s1 = Math.min(srcLen, Math.ceil(end))
+    const w = new Float64Array(s1 - s0)
+    for (let s = s0; s < s1; s++) w[s - s0] = Math.min(end, s + 1) - Math.max(start, s)
+    starts[i] = s0
+    ends[i] = s1
+    weights[i] = w
+    spans[i] = end - start
+  }
+  return { starts, ends, weights, spans }
+}
+
 function inlinePreview(buffer, maxPixels = PREVIEW_MAX_PIXELS) {
   const contentType = imageContentType(buffer)
   if (!contentType) return null
@@ -212,22 +305,43 @@ function inlinePreview(buffer, maxPixels = PREVIEW_MAX_PIXELS) {
     const ratio = Math.min(1, 96 / Math.max(w, h))
     const width = Math.max(1, Math.round(w * ratio)), height = Math.max(1, Math.round(h * ratio))
     const data = Buffer.alloc(width * height * 4)
+    // Precompute source index spans and overlap weights outside inner pixel loops.
+    const xAxis = buildSamplingAxes(w, width)
+    const yAxis = buildSamplingAxes(h, height)
+    const src = image.data
+    const rowStride = w * 4
     // Area sampling with premultiplied alpha preserves fine edges on both
     // themes; simply averaging transparent RGB creates dark logo fringes.
-    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-      const left = x * w / width, right = (x + 1) * w / width
-      const top = y * h / height, bottom = (y + 1) * h / height
-      let red = 0, green = 0, blue = 0, alpha = 0
-      for (let sy = Math.floor(top); sy < Math.ceil(bottom); sy++) for (let sx = Math.floor(left); sx < Math.ceil(right); sx++) {
-        const weight = (Math.min(right, sx + 1) - Math.max(left, sx)) * (Math.min(bottom, sy + 1) - Math.max(top, sy))
-        const i = (sy * w + sx) * 4, a = image.data[i + 3] / 255 * weight
-        alpha += a; red += image.data[i] * a; green += image.data[i + 1] * a; blue += image.data[i + 2] * a
+    for (let y = 0; y < height; y++) {
+      const sy0 = yAxis.starts[y], sy1 = yAxis.ends[y], yw = yAxis.weights[y], ySpan = yAxis.spans[y]
+      const dstRow = y * width * 4
+      for (let x = 0; x < width; x++) {
+        const sx0 = xAxis.starts[x], sx1 = xAxis.ends[x], xw = xAxis.weights[x]
+        const area = xAxis.spans[x] * ySpan
+        let red = 0, green = 0, blue = 0, alpha = 0
+        for (let sy = sy0, yi = 0; sy < sy1; sy++, yi++) {
+          const wy = yw[yi]
+          let rowOff = sy * rowStride + sx0 * 4
+          for (let sx = sx0, xi = 0; sx < sx1; sx++, xi++, rowOff += 4) {
+            const aByte = src[rowOff + 3]
+            if (aByte === 0) continue
+            const a = aByte * xw[xi] * wy
+            alpha += a
+            red += src[rowOff] * a
+            green += src[rowOff + 1] * a
+            blue += src[rowOff + 2] * a
+          }
+        }
+        const dst = dstRow + x * 4
+        if (alpha) {
+          data[dst] = Math.round(red / alpha)
+          data[dst + 1] = Math.round(green / alpha)
+          data[dst + 2] = Math.round(blue / alpha)
+        }
+        data[dst + 3] = Math.round(alpha / area)
       }
-      const i = (y * width + x) * 4
-      if (alpha) { data[i] = Math.round(red / alpha); data[i + 1] = Math.round(green / alpha); data[i + 2] = Math.round(blue / alpha) }
-      data[i + 3] = Math.round(255 * alpha / ((right - left) * (bottom - top)))
     }
-    const thumbnail = PNG.sync.write({ width, height, data }, { deflateLevel: 9, deflateStrategy: 0 })
+    const thumbnail = PNG.sync.write({ width, height, data }, { deflateLevel: 6, deflateStrategy: 0 })
     if (thumbnail.length > INLINE_LIMIT) return null
     try {
       mkdirSync(directory, { recursive: true })
@@ -262,18 +376,21 @@ function previewFile(file, maxPixels = PREVIEW_MAX_PIXELS) {
     const info = statSync(file)
     if (!info.isFile() || info.size > MAX_BYTES) return null
     const key = `${file}:${info.mtimeMs}:${info.size}:${maxPixels}`
-    if (previewMemory.has(key)) return previewMemory.get(key)
+    if (previewMemory.has(key)) return touchLru(previewMemory, key, previewMemory.get(key))
     const preview = inlinePreview(readFileSync(file), maxPixels)
-    if (previewMemory.size >= 256) previewMemory.delete(previewMemory.keys().next().value)
-    previewMemory.set(key, preview)
-    return preview
+    return setLru(previewMemory, PREVIEW_MEMORY_LIMIT, key, preview)
   } catch { return null }
 }
 
 function cachedIconPreview(url) {
   const cached = memory.get(url)
   if (cached) {
+    touchLru(memory, url, cached)
     try { return inlinePreview(cached.buffer) } catch { return null }
+  }
+  const bundled = bundledCache.get(url)
+  if (bundled) {
+    try { return inlinePreview(bundled.buffer) } catch { return null }
   }
   return previewFile(iconCacheFile(url))
 }
@@ -373,9 +490,14 @@ export function buildPluginIcons(meta, { sourceId, name, dir, source } = {}) {
 }
 
 function remember(key, value) {
-  if (memory.size >= 256) memory.delete(memory.keys().next().value)
-  memory.set(key, { ...value, time: Date.now() })
-  return value
+  failures.delete(key)
+  const entry = {
+    ...value,
+    etag: value.etag || computeEtag(value.buffer),
+    immutable: Boolean(value.immutable),
+    time: Date.now(),
+  }
+  return setLru(memory, MEMORY_LIMIT, key, entry)
 }
 
 function iconCacheFile(url) {
@@ -410,11 +532,34 @@ export async function getOrFetchIcon(url) {
   if (parsed.hostname === 'avatars.githubusercontent.com' && /^\/[a-z0-9_-]+\/?$/i.test(parsed.pathname)) {
     url = `https://github.com/${parsed.pathname.split('/')[1]}.png?size=${parsed.searchParams.get('s') || '80'}`
   }
-  const cached = memory.get(url)
-  if (cached && Date.now() - cached.time < CACHE_TTL) return cached
   const bundledFile = bundledIconFiles.get(url)
-  if (bundledFile) return remember(url, { buffer: readFileSync(new URL(bundledFile, bundledIconRoot)), contentType: 'image/png' })
-  if (failures.get(url) > Date.now()) throw new Error('Icon temporarily unavailable')
+  if (bundledFile) {
+    const hit = bundledCache.get(url)
+    if (hit) return hit
+    if (bundledPending.has(url)) return bundledPending.get(url)
+    const load = (async () => {
+      const buffer = await readFile(new URL(bundledFile, bundledIconRoot))
+      const entry = { buffer, contentType: 'image/png', etag: computeEtag(buffer), immutable: true }
+      bundledCache.set(url, entry)
+      return entry
+    })()
+    bundledPending.set(url, load)
+    try { return await load } finally { bundledPending.delete(url) }
+  }
+  const now = Date.now()
+  const cached = memory.get(url)
+  if (cached) {
+    if (now - cached.time < CACHE_TTL) return touchLru(memory, url, cached)
+    memory.delete(url)
+  }
+  const failedUntil = failures.get(url)
+  if (failedUntil !== undefined) {
+    if (failedUntil > now) {
+      touchLru(failures, url, failedUntil)
+      throw new Error('Icon temporarily unavailable')
+    }
+    failures.delete(url)
+  }
   if (pending.has(url)) return pending.get(url)
   const task = (async () => {
     const file = iconCacheFile(url)
@@ -438,18 +583,18 @@ export async function getOrFetchIcon(url) {
       // Record the failure in the same cooldown the foreground path uses, or a
       // permanently dead URL launches a fresh 4s fetch on every request while
       // continuing to serve the stale bytes.
-      downloadIcon(url, file).catch(() => {
-        if (failures.size >= 256) failures.delete(failures.keys().next().value)
-        failures.set(url, Date.now() + 60_000)
-      })
+      downloadIcon(url, file)
+        .then((fresh) => remember(url, fresh))
+        .catch(() => {
+          setLru(failures, FAILURES_LIMIT, url, Date.now() + 60_000)
+        })
       return remember(url, expired)
     }
     return remember(url, await downloadIcon(url, file))
   })()
   pending.set(url, task)
   try { return await task } catch (error) {
-    if (failures.size >= 256) failures.delete(failures.keys().next().value)
-    failures.set(url, Date.now() + 60_000)
+    setLru(failures, FAILURES_LIMIT, url, Date.now() + 60_000)
     throw error
   } finally { pending.delete(url) }
 }
