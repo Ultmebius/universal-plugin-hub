@@ -34,9 +34,10 @@ export function connectorOauthSettings(pluginName, connectorName, payload) {
 function publicSession(session) {
   return {
     found: true, ok: session.status === 'success', pending: session.status === 'waiting' || session.status === 'starting',
-    sessionId: session.id, status: session.status, statusCode: session.statusCode,
+    sessionId: session.id, server: session.connectorName, status: session.status, statusCode: session.statusCode,
     message: session.message, authorizationUrl: session.authorizationUrl,
     duration: session.duration, tools: session.tools,
+    ...(Array.isArray(session.tools) ? { toolsCount: session.tools.length } : {}),
   }
 }
 

@@ -171,7 +171,7 @@ function provider() {
       persist()
     },
     async redirectToAuthorization(url) {
-      if (!interactive) throw new Error('OAuth 授权已失效，请在连接器设置中重新登录。')
+      if (!interactive) throw new Error('OAuth 授权已失效，请重新登录。')
       emit({ status: 'waiting', authorizationUrl: String(url) })
       await openBrowser(url)
     },

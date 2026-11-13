@@ -608,7 +608,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     if (method === 'POST' && path === '/mcps/verify') {
       requireSameOrigin(req)
       const body = await readJsonBody(req)
-      const name = String(body.name || '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+|-+$/g, '') || 'mcp'
+      const name = normalizeMcpName(body.name)
       const result = await verifyConnectorAuth('user-mcp', name, body)
       return sendJson(res, 200, result)
     }

@@ -1299,10 +1299,24 @@ function connectorEnvironment(found, payload) {
   return { ...base, ...overrides }
 }
 
+function isOAuthExpiredError(err) {
+  return /OAuth 授权已(?:失效|移除)|Unauthorized|HTTP 401|\b401\b|invalid_token|invalid_grant|Invalid OAuth/i.test(String(err || ''))
+}
+
+function cleanOAuthProbeError(err) {
+  const raw = String(err || '').trim()
+  const marker = /MCP error -32000:\s*Connection closed[：:]\s*/i
+  const match = marker.exec(raw)
+  if (match) return raw.slice(match.index + match[0].length).trim() || raw
+  return raw.replace(/^无法启动\s+.+?:\s+(?!\/\/)/, '').trim() || raw
+}
+
 export async function verifyConnectorAuth(pluginName, connectorName, payload, { pluginOwned = pluginName !== 'user-mcp' } = {}) {
   const definition = connectorDefinition(pluginName, connectorName, payload, pluginOwned)
   const { transport, url } = definition
-  if (transport !== 'stdio' && url && isOAuthMode(definition.oauth)) {
+  const isOAuthRemote = transport !== 'stdio' && url && isOAuthMode(definition.oauth)
+  const probeOnly = payload?.probeOnly === true
+  if (isOAuthRemote && !probeOnly) {
     payload = { ...payload, ...definition }
     try {
       if (pluginOwned) rememberPluginOAuthUrls(pluginName, connectorName, url)
@@ -1324,16 +1338,47 @@ export async function verifyConnectorAuth(pluginName, connectorName, payload, { 
   }
 
   const started = Date.now()
+  if (isOAuthRemote && probeOnly) {
+    const credKey = oauthCredentialKey(pluginName, connectorName, url, definition.oauth)
+    const oauthRecord = readOAuthRecord(credKey)
+    const missingClient = definition.oauth === 'custom' && (
+      !oauthRecord?.customClient ||
+      oauthRecord.customClient.client_id !== definition.oauthClientId ||
+      (payload?.oauthClientSecret && oauthRecord.customClient.client_secret !== payload.oauthClientSecret)
+    )
+    if (!oauthRecord?.tokens || missingClient) {
+      return {
+        ok: false,
+        mode: 'probe',
+        authExpired: true,
+        message: 'OAuth 授权已失效，请点击「登录并连接」重新授权。',
+        server: connectorName,
+        transport: 'http',
+        endpoint: url,
+        status: 401,
+        statusCode: 401,
+        duration: 0,
+      }
+    }
+  }
+
   const probe = await probeConnectorDefinition(pluginName, connectorName, definition, MCP_AUTH_TIMEOUT_MS)
-  setRemoteVerification(pluginName, connectorName, definition, !probe.error)
+  const errorMessage = probe.error ? (isOAuthRemote ? cleanOAuthProbeError(probe.error) : probe.error) : null
+  const authExpired = isOAuthRemote && !!errorMessage && isOAuthExpiredError(errorMessage)
+  if (!probeOnly && transport !== 'stdio') {
+    setRemoteVerification(pluginName, connectorName, definition, !probe.error)
+  }
   return {
     ok: !probe.error,
-    message: probe.error || 'MCP 连接和工具列表验证通过',
+    ...(probeOnly ? { mode: 'probe' } : {}),
+    ...(authExpired ? { authExpired: true } : {}),
+    message: errorMessage || 'MCP 连接和工具列表验证通过',
     server: connectorName,
     transport,
     endpoint: url || definition.command || '',
-    status: probe.status,
+    status: !probe.error ? (probe.status || 200) : (authExpired ? 401 : probe.status),
     duration: Date.now() - started,
+    ...(Array.isArray(probe.tools) ? { toolsCount: probe.tools.length } : {}),
   }
 }
 
@@ -1473,7 +1518,7 @@ export async function probeConnectorAuth(pluginName, connectorName, payload, { p
     const client = readOAuthRecord(key)?.customClient
     if (!client || client.client_id !== definition.oauthClientId ||
       (payload.oauthClientSecret && client.client_secret !== payload.oauthClientSecret)) {
-      return { ok: false, error: '请先点击「测试连接」完成 OAuth 授权' }
+      return { ok: false, error: '请先点击「登录并连接」完成 OAuth 授权' }
     }
   }
   const probe = await probeConnectorDefinition(pluginName, connectorName, definition, MCP_AUTH_TIMEOUT_MS)
