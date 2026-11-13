@@ -22,7 +22,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir, trashRoot, isSameOrInsidePath } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, readPluginShortDescription, formatDisplayName, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { isUploadedSkillTarget, uploadedSkillTargetsSet } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
@@ -3090,7 +3090,7 @@ function findMarketRowSync(sourceId, pluginName) {
   }
 }
 
-function installedPluginIconIdentity(rec, target, manifest, marketRow) {
+export function installedPluginIconIdentity(rec, target, manifest, marketRow) {
   const author = typeof manifest?.author === 'string' ? manifest.author : manifest?.author?.name
   const declared = buildPluginIcons(manifest, { sourceId: rec.sourceId, name: rec.name, dir: target, source: marketRow?.source })
   return {
@@ -3366,10 +3366,13 @@ function buildInstalledPluginDetail(rec, shared = {}) {
     lspServers,
     version: targetManifest?.version ?? null,
   } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: null }
+  const shortDescription = rec.shortDescription || (installed ? readPluginShortDescription(target) : '') || marketRow?.shortDescription || ''
   return {
     ...rec,
     ...detail,
+    displayName: rec.displayName || targetManifest?.displayName || marketRow?.displayName || formatDisplayName(rec.name),
     description: rec.description || targetManifest?.description || marketRow?.description || '',
+    ...(shortDescription ? { shortDescription } : {}),
     author: identity.author,
     // Identity fields the icon chain reads. The detail page already merges
     // these from the marketplace row before rendering, which is why the same

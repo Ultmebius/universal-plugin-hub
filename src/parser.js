@@ -18,6 +18,11 @@ import { buildPluginIcons, touchLru, setLru } from './icons.js'
 
 const DIR_PARSER_CACHE = new Map()
 const DIR_PARSER_CACHE_TTL = 20000 // 20s TTL for file scanning
+let PARSER_CACHE_REVISION = 0
+
+export function parserCacheRevision() {
+  return PARSER_CACHE_REVISION
+}
 const VALID_PLUGIN_NAME = /^[a-z0-9][a-z0-9._-]*$/i
 const MANIFEST_CANDIDATE_PARTS = [
   ['.claude-plugin', 'marketplace.json'],
@@ -184,6 +189,7 @@ function resolveMarketplacePluginSource(rawSource, pluginRootMeta) {
 
 export function invalidateParserCaches() {
   DIR_PARSER_CACHE.clear()
+  PARSER_CACHE_REVISION += 1
 }
 
 export function formatDisplayName(name) {
@@ -231,7 +237,7 @@ function extractMdDescription(text) {
 
 // Presentation only: read Codex's card copy without changing which manifest
 // owns the plugin's description, components, or installation behavior.
-function readPluginShortDescription(dir) {
+export function readPluginShortDescription(dir) {
   if (!dir) return ''
   const text = value => typeof value === 'string' ? value.trim() : ''
   try {
@@ -337,6 +343,7 @@ export function invalidateMarketplaceCache(sourceId) {
     MARKETPLACE_SELECTION_CACHE.clear()
     PLUGIN_DIR_INDEX_CACHE.clear()
   }
+  PARSER_CACHE_REVISION += 1
 }
 
 /**
@@ -360,10 +367,12 @@ export function readMarketplace(sourceId, names) {
     if (selection?.key === key && now - selection.time < MARKETPLACE_CACHE_TTL) return selection.data
     const data = parseMarketplaceFromDisk(sourceId, cache, names).filter(row => names.has(row.name))
     MARKETPLACE_SELECTION_CACHE.set(sourceId, { key, time: now, data })
+    PARSER_CACHE_REVISION += 1
     return data
   }
   const rows = parseMarketplaceFromDisk(sourceId, cache)
   MARKETPLACE_CACHE.set(sourceId, { time: now, data: rows })
+  PARSER_CACHE_REVISION += 1
   return rows
 }
 

@@ -22,6 +22,7 @@ const bundledPending = new Map()
 const localIconMemory = new Map()
 const localIconPending = new Map()
 let localIconMemoryBytes = 0
+let localIconCacheRevisionCounter = 0
 const bundledIconRoot = new URL('../assets/fluent-3d/', import.meta.url)
 const bundledIconFiles = new Map(Object.values(JSON.parse(readFileSync(new URL('manifest.json', bundledIconRoot), 'utf8')).icons).map(icon => [icon.url, icon.file]))
 
@@ -135,8 +136,14 @@ export async function readLocalIconCached(root, path, scopeParts = []) {
   try { return await task } finally { localIconPending.delete(key) }
 }
 
+/** Monotonic counter incremented when cached local icons are invalidated. */
+export function localIconCacheRevision() {
+  return localIconCacheRevisionCounter
+}
+
 /** Drop cached local icon bytes for one sourceId (or all entries when omitted). */
 export function invalidateLocalIconCache(sourceId) {
+  localIconCacheRevisionCounter += 1
   if (!sourceId) {
     localIconMemory.clear()
     localIconMemoryBytes = 0

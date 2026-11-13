@@ -24,6 +24,7 @@ import { uninstallUploadedSkill, uploadedSkillRecord } from './skill-uploads.js'
 import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
 import { remoteConfigFromEntry } from './oauth-config.js'
 import { scheduledResult } from './runtime.js'
+import { listAtPlugins, invalidateAtPluginsCache } from './at-plugins.js'
 
 function scheduledIfOk(result, applyProfile, ids) {
   if (!result || result.ok === false) return result
@@ -214,6 +215,10 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       return sendJson(res, 200, { groups: toolCallIconGroups() })
     }
 
+    if (method === 'GET' && path === '/at-plugins') {
+      return sendJson(res, 200, { plugins: listAtPlugins() })
+    }
+
     if (method === 'GET' && path === '/state') {
       const state = readState()
       const details = installedDetails()
@@ -308,6 +313,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         await pullSource(sourceId)
         invalidateMarketplaceCache(sourceId)
         invalidateLocalIconCache(sourceId)
+        invalidateAtPluginsCache()
         let rows = readMarketplace(sourceId)
         if (sourceId === 'local') {
           const names = new Set(rows.map(r => r.name))
@@ -419,6 +425,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       }
       if (stagedId) discardStagedUpload(stagedId)
       invalidateLocalIconCache('local')
+      invalidateAtPluginsCache()
       return sendJson(res, 200, result)
     }
 
@@ -459,6 +466,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (result?.sourceId) {
         invalidateLocalIconCache(result.sourceId)
       }
+      invalidateAtPluginsCache()
       return sendJson(res, 200, result)
     }
 
@@ -550,6 +558,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         writeState(latestState)
         invalidateMarketplaceCache(sourceId)
         invalidateLocalIconCache(sourceId)
+        invalidateAtPluginsCache()
       })
       return sendJson(res, 200, { ok: true })
     }
@@ -857,6 +866,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         await materializePlugin(sourceId, pluginName, row.source)
         invalidateMarketplaceCache(sourceId)
         invalidateLocalIconCache(sourceId)
+        invalidateAtPluginsCache()
         row = readMarketplace(sourceId).find((r) => r.name === pluginName) || row
         detail = pluginDetail(sourceId, pluginName, row.source, row)
       }
@@ -915,6 +925,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       })
       invalidateMarketplaceCache(sourceId)
       invalidateLocalIconCache(sourceId)
+      invalidateAtPluginsCache()
       return sendJson(res, 200, scheduledIfOk(result, applyProfile))
     }
 
@@ -923,7 +934,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const pluginName = safeSegment(path.slice('/plugins/'.length, -'/toggle'.length), 'plugin name')
       const body = await readJsonBody(req)
       const result = await togglePlugin(pluginName, body.enabled === true, { onConnectorReady: (id) => applyProfile?.([id]) })
-      return sendJson(res, 200, scheduledIfOk(withPluginDetail(result, pluginName), applyProfile))
+      const payload = scheduledIfOk(withPluginDetail(result, pluginName), applyProfile)
+      invalidateAtPluginsCache()
+      return sendJson(res, 200, payload)
     }
 
     if (method === 'POST' && path.startsWith('/plugins/') && path.endsWith('/update')) {
@@ -932,6 +945,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const result = await updatePlugin(pluginName)
       invalidateMarketplaceCache()
       invalidateLocalIconCache()
+      invalidateAtPluginsCache()
       return sendJson(res, 200, scheduledIfOk(result, applyProfile))
     }
 
@@ -976,6 +990,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const result = await uninstallPlugin(pluginName)
       invalidateMarketplaceCache()
       invalidateLocalIconCache()
+      invalidateAtPluginsCache()
       return sendJson(res, 200, scheduledIfOk(result, applyProfile))
     }
 

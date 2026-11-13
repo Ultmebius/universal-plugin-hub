@@ -142,7 +142,14 @@ export function removeManagedDir(dir, { allowTrash = false } = {}) {
 }
 
 let STATE_CACHE = null
+let STATE_CACHE_PATH = ''
 let STATE_CACHE_MTIME = 0
+let STATE_CACHE_SIZE = -1
+let STATE_REVISION = 0
+
+export function stateRevision() {
+  return STATE_REVISION
+}
 
 export const ROOT_DIR_NAME = 'universal-plugin-hub'
 
@@ -247,17 +254,28 @@ export function defaultState() {
   }
 }
 
-/** Read state.json with 0ms in-memory cache and mtime invalidation. */
+/** Read state.json with 0ms in-memory cache and path + mtime + size invalidation. */
 export function readState() {
   const path = statePath()
   if (!existsSync(path)) {
+    if (STATE_CACHE_PATH === path) {
+      STATE_CACHE = null
+      STATE_CACHE_PATH = ''
+      STATE_CACHE_MTIME = 0
+      STATE_CACHE_SIZE = -1
+    }
     const fresh = defaultState()
     writeState(fresh)
     return structuredClone(fresh)
   }
   try {
     const stat = statSync(path)
-    if (STATE_CACHE && STATE_CACHE_MTIME === stat.mtimeMs) {
+    if (
+      STATE_CACHE &&
+      STATE_CACHE_PATH === path &&
+      STATE_CACHE_MTIME === stat.mtimeMs &&
+      STATE_CACHE_SIZE === stat.size
+    ) {
       return structuredClone(STATE_CACHE)
     }
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
@@ -269,9 +287,17 @@ export function readState() {
       plugins: Array.isArray(parsed.plugins) ? parsed.plugins : [],
     }
     STATE_CACHE = merged
+    STATE_CACHE_PATH = path
     STATE_CACHE_MTIME = stat.mtimeMs
+    STATE_CACHE_SIZE = stat.size
     return structuredClone(merged)
   } catch {
+    if (STATE_CACHE_PATH === path) {
+      STATE_CACHE = null
+      STATE_CACHE_PATH = ''
+      STATE_CACHE_MTIME = 0
+      STATE_CACHE_SIZE = -1
+    }
     return defaultState()
   }
 }
@@ -284,11 +310,16 @@ export function writeState(state) {
   const snapshot = structuredClone(state)
   writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf8')
   renameSync(tmp, file)
+  STATE_REVISION += 1
   STATE_CACHE = snapshot
+  STATE_CACHE_PATH = file
   try {
-    STATE_CACHE_MTIME = statSync(file).mtimeMs
+    const stat = statSync(file)
+    STATE_CACHE_MTIME = stat.mtimeMs
+    STATE_CACHE_SIZE = stat.size
   } catch {
     STATE_CACHE_MTIME = Date.now()
+    STATE_CACHE_SIZE = -1
   }
 }
 

@@ -14,6 +14,7 @@ import { sweepTrash } from './store.js'
 import { restoreUploadedSkills } from './skill-uploads.js'
 import { removeDuplicateLocalMarketTabs } from './local.js'
 import { createProfileApplicator } from './runtime.js'
+import { attachAtPluginsAgentHook, atPluginsBootPayload, invalidateAtPluginsCache } from './at-plugins.js'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
@@ -43,6 +44,7 @@ export function apply(ctx) {
       if (removed.length) ctx.logger?.info?.(`[universal-plugin-hub] removed duplicate local tabs: ${removed.join(', ')}`)
 
       await syncAllInstalledSkillsToDsh()
+      invalidateAtPluginsCache()
     } catch (err) {
       ctx.logger?.warn?.(`[universal-plugin-hub] skill sync error: ${err.message}`)
     }
@@ -81,6 +83,9 @@ export function apply(ctx) {
     }
     hostCtx.effect(() => skills.attachAgents(hostCtx, createScope), 'universal-plugin-hub: scoped skill switches')
   })
+  ctx.inject(['agents'], (hostCtx) => {
+    hostCtx.effect(() => attachAtPluginsAgentHook(hostCtx), 'universal-plugin-hub: @ plugins routing')
+  })
   ctx.inject(['webServer'], (hostCtx) => {
     hostCtx.effect(() => {
       const unmount = mountRoutes(hostCtx.webServer, skills, createProfileApplicator(ctx))
@@ -98,6 +103,11 @@ export function apply(ctx) {
           if (value.length) table.push({ kind: 'global', name: '__UPH_TOOL_CALL_ICONS__', value })
         } catch (error) {
           ctx.logger?.warn?.(`[universal-plugin-hub] MCP tool icon boot data unavailable: ${error.message}`)
+        }
+        try {
+          table.push({ kind: 'global', name: '__UPH_AT_PLUGINS__', value: atPluginsBootPayload() })
+        } catch (error) {
+          ctx.logger?.warn?.(`[universal-plugin-hub] @ plugins boot data unavailable: ${error.message}`)
         }
       })
       return () => { offBoot?.(); unmount(); cancelAllOAuthVerifications() }

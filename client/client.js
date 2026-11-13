@@ -4878,9 +4878,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			err.status = res.status;
 			throw err;
 		}
-		if (body?.ok !== false && !body?.error && /^(POST|PUT|PATCH|DELETE)$/.test(options?.method || "") &&
-			/^\/(plugins|mcps)(\/|$)/.test(path) && !/\/(verify|oauth-status|inspect|tools\/toggle)$/.test(path)) {
-			document.dispatchEvent(new Event("uph-mcp-branding-changed"));
+		if (typeof document !== "undefined" && body?.ok !== false && !body?.error && /^(POST|PUT|PATCH|DELETE)$/i.test(options?.method || "") &&
+			!/\/(verify|oauth-status|inspect|tools\/toggle)$/.test(path)) {
+			if (/^\/(plugins|mcps)(\/|$)/.test(path)) {
+				document.dispatchEvent(new Event("uph-mcp-branding-changed"));
+			} else if (/^\/(sources|marketplaces|market)(\/|$)/.test(path)) {
+				document.dispatchEvent(new Event("uph-at-plugins-changed"));
+			}
 		}
 		return body;
 	}
@@ -6326,7 +6330,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const seq = ++stateSeqRef.current;
 			try {
 				const res = await api("/state");
-				if (mountedRef.current && seq === stateSeqRef.current) setState(res);
+				if (mountedRef.current && seq === stateSeqRef.current) {
+					setState(res);
+					if (typeof document !== "undefined") document.dispatchEvent(new Event("uph-at-plugins-changed"));
+				}
 				return res;
 			} catch (e) {
 				showToast("加载状态失败", e.message, { restart: false });
@@ -6351,6 +6358,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					? prev.plugins.map((p) => (p.name === pluginName ? updatedPlugin : p))
 					: prev.plugins,
 			}));
+			if (typeof document !== "undefined") document.dispatchEvent(new Event("uph-at-plugins-changed"));
 			const pendingList = Array.isArray(pendingConnectors) ? pendingConnectors.filter(Boolean) : [];
 			if (pendingList.length === 0 || updatedPlugin.enabled === false) return;
 			const delays = [250, 700, 1500, 3000];
@@ -13237,6 +13245,1264 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
+	const AT_PLUGIN_SCHEME = "uph-plugin:";
+	const AT_PLUGIN_WIRE_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]+)\)/uy;
+	const AT_PLUGIN_RAW_TOKEN_RE = /@([^\s\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}，。；：、！？（）【】《》“”‘’」』]+)/uy;
+	const AT_PLUGIN_LEFT_ALLOWED_RE = /[\s(\[{"'“‘（【《，。；：、！？\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+	const AT_PLUGIN_TRAILING_PUNCT_RE = /[.,;:!?，。；：！？)"'\]”’）】》]+$/u;
+	const AT_PLUGINS_CSS = `
+[role="listbox"] button[id^="dsh-slash-option-plugins-"] {
+	gap: 8px;
+}
+[role="listbox"] button[id^="dsh-slash-option-plugins-"] > span:first-child {
+	width: 16px;
+	height: 16px;
+	border-radius: 4px;
+	overflow: hidden;
+}
+[role="listbox"] button[id^="dsh-slash-option-plugins-"] > span:nth-child(2) {
+	font-weight: 600;
+	color: var(--dsw-alias-label-primary);
+}
+[role="listbox"] button[id^="dsh-slash-option-plugins-"] > span:nth-child(3) {
+	text-align: left;
+}
+.cpm-at-plugin-icon,
+.cpm-at-plugin-chip-icon {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	flex: none;
+	overflow: hidden;
+	border-radius: 3px;
+}
+.cpm-at-plugin-icon .cpm-card-icon,
+.cpm-at-plugin-chip-icon .cpm-card-icon,
+.cpm-at-plugin-icon .cpm-icon-underlay > .cpm-card-icon,
+.cpm-at-plugin-chip-icon .cpm-icon-underlay > .cpm-card-icon {
+	width: 100% !important;
+	height: 100% !important;
+	flex: none !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	border: none !important;
+	border-radius: 3px !important;
+	corner-shape: initial !important;
+	box-shadow: none !important;
+	background: transparent !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	overflow: hidden;
+}
+.cpm-at-plugin-icon .cpm-card-icon img,
+.cpm-at-plugin-icon .cpm-card-icon svg,
+.cpm-at-plugin-icon > svg,
+.cpm-at-plugin-icon > img,
+.cpm-at-plugin-chip-icon .cpm-card-icon img,
+.cpm-at-plugin-chip-icon .cpm-card-icon svg,
+.cpm-at-plugin-chip-icon > svg,
+.cpm-at-plugin-chip-icon > img {
+	width: 100% !important;
+	height: 100% !important;
+	border-radius: 3px !important;
+	object-fit: contain !important;
+	display: block;
+}
+[data-composer-chip="plugins"],
+.cpm-at-plugin-chip {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 4px;
+	max-width: 240px;
+	padding: 0 4px;
+	border-radius: var(--dsw-radius-sm, 4px);
+	color: var(--dsw-alias-label-primary, #18181b);
+	background: transparent;
+	font-weight: 600;
+	line-height: inherit;
+	vertical-align: baseline;
+	user-select: none;
+	cursor: default;
+	transition: background-color 120ms ease;
+}
+body[data-ds-dark-theme] [data-composer-chip="plugins"],
+body[data-ds-dark-theme] .cpm-at-plugin-chip {
+	color: var(--dsw-alias-label-primary, #f4f4f5);
+}
+@media (hover: hover) {
+	[data-composer-chip="plugins"]:hover,
+	.cpm-at-plugin-chip:hover {
+		background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+	}
+	body[data-ds-dark-theme] [data-composer-chip="plugins"]:hover,
+	body[data-ds-dark-theme] .cpm-at-plugin-chip:hover {
+		background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.08));
+	}
+}
+[data-composer-chip="plugins"] > span:not([data-uph-chip-icon]) {
+	display: inline-flex;
+	align-items: baseline;
+	padding: 0 !important;
+	margin: 0 !important;
+	border-radius: 0 !important;
+	background: transparent !important;
+	color: inherit !important;
+	font-weight: inherit !important;
+	line-height: inherit !important;
+	vertical-align: baseline !important;
+	max-width: none !important;
+	min-width: 0;
+	overflow: hidden;
+}
+[data-composer-chip="plugins"][data-uph-plugin-resolved="true"] > span:not([data-uph-chip-icon]) > span:first-child:not(:last-child) {
+	display: none !important;
+}
+[data-composer-chip="plugins"]:not([data-uph-plugin-resolved="true"]) > span:not([data-uph-chip-icon]) {
+	gap: 3px;
+}
+.cpm-at-plugin-chip.is-unresolved {
+	opacity: 0.72;
+	font-weight: 500;
+}
+.cpm-at-plugin-chip-marker {
+	flex: none;
+	font-weight: 500;
+}
+.cpm-at-plugin-chip-icon-wrap {
+	display: inline-flex;
+	width: clamp(13px, 1em, 16px);
+	height: clamp(13px, 1em, 16px);
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	align-self: center;
+	overflow: hidden;
+	line-height: 1;
+	position: relative;
+	top: 0.05em;
+}
+.cpm-at-plugin-chip-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.cpm-at-plugin-popover {
+	position: fixed;
+	inset: auto;
+	right: auto;
+	bottom: auto;
+	margin: 0;
+	z-index: 100040;
+	width: max-content;
+	min-width: 0;
+	max-width: min(204px, calc(100vw - 24px));
+	max-height: min(160px, 36vh);
+	padding: 6px 10px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	box-sizing: border-box;
+	border-radius: var(--dsw-radius-lg, 16px);
+	corner-shape: squircle;
+	background: rgba(255, 255, 255, 0.72);
+	backdrop-filter: blur(20px) saturate(180%);
+	-webkit-backdrop-filter: blur(20px) saturate(180%);
+	border: 1px solid rgba(0, 0, 0, 0.08);
+	box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.04);
+	color: #18181b;
+	font-size: 12px;
+	line-height: 1.48;
+	letter-spacing: -0.005em;
+	overflow-wrap: break-word;
+	user-select: text;
+}
+.cpm-at-plugin-popover:not(:popover-open):not(.\:popover-open):not([data-open="true"]) {
+	display: none;
+}
+.cpm-at-plugin-popover:is(:popover-open, .\:popover-open, [data-open="true"]) {
+	display: block;
+}
+body[data-ds-dark-theme] .cpm-at-plugin-popover,
+.cpm-at-plugin-popover.cpm-dark {
+	background: rgba(55, 55, 57, 0.75);
+	backdrop-filter: blur(22px) saturate(180%);
+	-webkit-backdrop-filter: blur(22px) saturate(180%);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+	color: #f4f4f5;
+}
+.cpm-at-plugin-popover::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}
+.cpm-at-plugin-popover-desc {
+	margin: 0;
+	white-space: pre-wrap;
+	text-wrap: pretty;
+	color: inherit;
+}
+.cpm-at-plugin-popover[data-unresolved="true"] .cpm-at-plugin-popover-desc {
+	opacity: 0.72;
+}
+@media (prefers-reduced-motion: no-preference) {
+	.cpm-at-plugin-popover {
+		opacity: 0;
+		transform: translateY(4px) scale(0.96);
+		transition:
+			opacity 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+			transform 0.22s linear(0 0%, 0.049 2.9%, 0.1685 5.9%, 0.3235 8.8%, 0.4877 11.8%, 0.6428 14.7%, 0.7778 17.6%, 0.8871 20.6%, 0.9694 23.5%, 1.0265 26.5%, 1.0617 29.4%, 1.0792 32.4%, 1.0835 35.3%, 1.0787 38.2%, 1.0683 41.2%, 1.0551 44.1%, 1.0414 47.1%, 1.0286 50%, 1.0176 52.9%, 1.0086 55.9%, 1.002 58.8%, 0.9974 61.8%, 0.9946 64.7%, 0.9933 67.6%, 0.993 70.6%, 0.9935 73.5%, 0.9944 76.5%, 0.9955 79.4%, 0.9966 82.4%, 0.9977 85.3%, 0.9986 88.2%, 0.9993 91.2%, 0.9999 94.1%, 1 100%),
+			display 0.16s,
+			overlay 0.16s;
+		transition-behavior: allow-discrete;
+	}
+	.cpm-at-plugin-popover[data-placement="bottom"] {
+		transform: translateY(-4px) scale(0.96);
+	}
+	.cpm-at-plugin-popover:is(:popover-open, .\:popover-open, [data-open="true"]) {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+	@starting-style {
+		.cpm-at-plugin-popover:is(:popover-open, .\:popover-open, [data-open="true"]) {
+			opacity: 0;
+			transform: translateY(4px) scale(0.96);
+		}
+		.cpm-at-plugin-popover[data-placement="bottom"]:is(:popover-open, .\:popover-open, [data-open="true"]) {
+			transform: translateY(-4px) scale(0.96);
+		}
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	[data-composer-chip="plugins"],
+	.cpm-at-plugin-chip,
+	.cpm-at-plugin-popover {
+		transition: none;
+	}
+}
+@media (prefers-reduced-transparency: reduce) {
+	.cpm-at-plugin-popover {
+		background: #ffffff;
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+	body[data-ds-dark-theme] .cpm-at-plugin-popover,
+	.cpm-at-plugin-popover.cpm-dark {
+		background: #27272a;
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+}
+@media (prefers-contrast: more) {
+	.cpm-at-plugin-popover {
+		border-color: rgba(0, 0, 0, 0.24);
+		background: rgba(255, 255, 255, 0.94);
+	}
+	body[data-ds-dark-theme] .cpm-at-plugin-popover,
+	.cpm-at-plugin-popover.cpm-dark {
+		border-color: rgba(255, 255, 255, 0.32);
+		background: rgba(39, 39, 42, 0.96);
+	}
+}
+`;
+
+	function placePluginChipPopover(anchorRect, width, height, viewport) {
+		const margin = 12, gap = 8;
+		const vw = Math.max(margin * 2 + 80, Number(viewport?.width) || 0);
+		const vh = Math.max(margin * 2 + 48, Number(viewport?.height) || 0);
+		const w = Math.min(Number(width) || 0, vw - margin * 2);
+		const h = Math.min(Number(height) || 0, vh - margin * 2);
+		const anchorCenterX = anchorRect.left + anchorRect.width / 2;
+		const left = Math.max(margin, Math.min(anchorCenterX - w / 2, vw - w - margin));
+		const spaceAbove = anchorRect.top - gap - margin;
+		const spaceBelow = vh - anchorRect.bottom - gap - margin;
+		const preferBottom = anchorRect.top - h - gap < margin && spaceBelow > spaceAbove;
+		const placement = preferBottom ? "bottom" : "top";
+		const rawTop = preferBottom ? anchorRect.bottom + gap : anchorRect.top - h - gap;
+		const top = Math.max(margin, Math.min(rawTop, vh - h - margin));
+		const edgeInset = Math.min(12, Math.floor(w / 2));
+		const originX = Math.max(edgeInset, Math.min(w - edgeInset, anchorCenterX - left));
+		const originY = placement === "bottom" ? "0%" : "100%";
+		return { left: Math.round(left), top: Math.round(top), placement, originX: Math.round(originX), originY };
+	}
+
+	function formatAtPluginMention(pluginName, displayName) {
+		const id = String(pluginName || "").trim();
+		const label = String(displayName || id).replace(/[\r\n\[\]]+/g, " ").trim() || id;
+		return `@[${label}](${AT_PLUGIN_SCHEME}${encodeURIComponent(id)})`;
+	}
+
+	function parseAtPluginCandidateValue(value) {
+		if (typeof value !== "string" || !value) return null;
+		try {
+			const parsed = JSON.parse(value);
+			if (parsed && typeof parsed.name === "string" && parsed.name) {
+				return { name: parsed.name, displayName: parsed.displayName || parsed.name };
+			}
+		} catch {}
+		return null;
+	}
+
+	function isAtPluginLeftBoundary(text, index) {
+		return index === 0 || AT_PLUGIN_LEFT_ALLOWED_RE.test(text[index - 1]);
+	}
+
+	function matchAtPluginMention(text, from, byLowerName) {
+		if (typeof text !== "string" || !text.includes("@")) return undefined;
+		let cursor = from;
+		while (cursor < text.length) {
+			const at = text.indexOf("@", cursor);
+			if (at < 0) return undefined;
+			AT_PLUGIN_WIRE_RE.lastIndex = at;
+			const wire = AT_PLUGIN_WIRE_RE.exec(text);
+			if (wire !== null) {
+				if (isAtPluginLeftBoundary(text, at)) {
+					try {
+						const decoded = decodeURIComponent(wire[2]);
+						const live = byLowerName?.get(decoded.toLowerCase()) || null;
+						return {
+							id: "uph-plugin",
+							start: at,
+							end: at + wire[0].length,
+							data: { name: live?.name || decoded, label: live?.displayName || wire[1] },
+						};
+					} catch {}
+				}
+				cursor = at + wire[0].length;
+				continue;
+			}
+			if (isAtPluginLeftBoundary(text, at) && byLowerName && byLowerName.size > 0) {
+				AT_PLUGIN_RAW_TOKEN_RE.lastIndex = at;
+				const raw = AT_PLUGIN_RAW_TOKEN_RE.exec(text);
+				if (raw !== null && !raw[1].startsWith("\"")) {
+					const cleaned = raw[1].replace(AT_PLUGIN_TRAILING_PUNCT_RE, "");
+					if (cleaned.length > 0) {
+						const live = byLowerName.get(cleaned.toLowerCase());
+						if (live) {
+							return {
+								id: "uph-plugin",
+								start: at,
+								end: at + 1 + cleaned.length,
+								data: { name: live.name, label: live.displayName || live.name },
+							};
+						}
+					}
+				}
+			}
+			cursor = at + 1;
+		}
+		return undefined;
+	}
+
+	function filterAtPluginCandidates(plugins, query) {
+		const q = String(query || "").trim().toLowerCase();
+		if (!q) return plugins;
+		const prefixed = [];
+		const matched = [];
+		for (const plugin of plugins) {
+			const nameLower = String(plugin.name || "").toLowerCase();
+			const titleLower = String(plugin.displayName || plugin.name || "").toLowerCase();
+			if (titleLower.startsWith(q) || nameLower.startsWith(q)) prefixed.push(plugin);
+			else if (titleLower.includes(q) || nameLower.includes(q)) matched.push(plugin);
+		}
+		return prefixed.length && matched.length ? [...prefixed, ...matched] : (prefixed.length ? prefixed : matched);
+	}
+
+	function createAtPluginsStore(ctx) {
+		let plugins = [];
+		let byLowerName = new Map();
+		let byDisplayNameLower = new Map();
+		let lexiconNames = [];
+		let currentSignature = "";
+		let hydrated = false;
+		let disposed = false;
+		let checkedAt = -Infinity;
+		let fetchSeq = 0;
+		let inFlight = null;
+		let inFlightController = null;
+		const listeners = new Set();
+		const themeListeners = new Set();
+		const iconComponents = new Map();
+		const iconPluginRefs = new Map();
+		const recentPicks = [];
+		const refreshInterval = 10000;
+
+		function readCurrentDark() {
+			try {
+				if (typeof document !== "undefined" && document.body?.hasAttribute?.("data-ds-dark-theme")) {
+					return true;
+				}
+			} catch {}
+			const root = typeof document !== "undefined" ? document.documentElement : null;
+			return isDarkMode(ctx, root);
+		}
+
+		let lastDark = readCurrentDark();
+		const onThemePotentiallyChanged = () => {
+			if (disposed) return;
+			const nextDark = readCurrentDark();
+			if (nextDark === lastDark) return;
+			lastDark = nextDark;
+			for (const listener of Array.from(themeListeners)) {
+				try { listener(nextDark); } catch {}
+			}
+		};
+
+		let themeObserver = null;
+		if (typeof document !== "undefined" && typeof MutationObserver === "function") {
+			const watchAttrs = ["data-ds-dark-theme", "data-theme", "class"];
+			themeObserver = new MutationObserver(onThemePotentiallyChanged);
+			if (document.body) themeObserver.observe(document.body, { attributes: true, attributeFilter: watchAttrs });
+			if (document.documentElement) themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: watchAttrs });
+		}
+		const darkMedia = typeof window !== "undefined" && typeof window.matchMedia === "function"
+			? window.matchMedia("(prefers-color-scheme: dark)")
+			: null;
+		darkMedia?.addEventListener?.("change", onThemePotentiallyChanged);
+
+		function applyList(list) {
+			const normalized = Array.isArray(list) ? list.filter((p) => p && typeof p.name === "string" && p.name) : [];
+			const signature = JSON.stringify(normalized);
+			hydrated = true;
+			if (signature === currentSignature) return false;
+			currentSignature = signature;
+			plugins = normalized;
+			byLowerName = new Map(normalized.map((p) => [p.name.toLowerCase(), p]));
+			byDisplayNameLower = new Map();
+			for (const p of normalized) {
+				const dKey = String(p.displayName || p.name || "").trim().toLowerCase();
+				if (dKey && !byDisplayNameLower.has(dKey)) byDisplayNameLower.set(dKey, p);
+			}
+			lexiconNames = normalized.map((p) => p.name);
+			for (const listener of Array.from(listeners)) {
+				try { listener(); } catch {}
+			}
+			return true;
+		}
+
+		function pruneRecentPicks(nowMs = Date.now()) {
+			while (recentPicks.length && nowMs - recentPicks[0].at > 5000) {
+				recentPicks.shift();
+			}
+		}
+
+		function recordPick(name, displayName) {
+			if (!name) return;
+			const nowMs = Date.now();
+			pruneRecentPicks(nowMs);
+			recentPicks.push({
+				name: String(name),
+				displayNameLower: String(displayName || name).trim().toLowerCase(),
+				at: nowMs,
+			});
+			if (recentPicks.length > 24) recentPicks.shift();
+		}
+
+		function resolveChipPlugin({ name, label, consumePick = false } = {}) {
+			if (name) {
+				const direct = byLowerName.get(String(name).trim().toLowerCase());
+				if (direct) return direct;
+			}
+			const labelLower = String(label || "").trim().toLowerCase();
+			if (!labelLower) return null;
+			if (consumePick && recentPicks.length > 0) {
+				pruneRecentPicks();
+				for (let i = recentPicks.length - 1; i >= 0; i--) {
+					if (recentPicks[i].displayNameLower === labelLower) {
+						const candidate = byLowerName.get(recentPicks[i].name.toLowerCase()) || null;
+						if (candidate) {
+							recentPicks.splice(i, 1);
+							return candidate;
+						}
+					}
+				}
+			}
+			return byDisplayNameLower.get(labelLower) || byLowerName.get(labelLower) || null;
+		}
+
+		function getDescription(plugin, resolved = true) {
+			if (!resolved || !plugin) return "该插件当前未启用或未安装";
+			return plugin.shortDescription || plugin.description || plugin.summary || (plugin.author ? `by ${plugin.author}` : "暂无插件描述");
+		}
+
+		function getIconComponent(plugin) {
+			const lower = String(plugin?.name || "").toLowerCase();
+			if (iconPluginRefs.size >= 512 && !iconPluginRefs.has(lower)) iconPluginRefs.clear();
+			iconPluginRefs.set(lower, plugin);
+			let Comp = iconComponents.get(lower);
+			if (!Comp) {
+				Comp = function AtPluginMenuIcon() {
+					const current = byLowerName.get(lower) || iconPluginRefs.get(lower) || plugin;
+					return h("span", { className: "cpm-at-plugin-icon", "aria-hidden": "true" },
+						h(PluginIcon, { plugin: current, isDark: readCurrentDark(), eager: true, preferPreview: true })
+					);
+				};
+				if (iconComponents.size >= 512) iconComponents.clear();
+				iconComponents.set(lower, Comp);
+			}
+			return Comp;
+		}
+
+		async function fetchFresh(force = false) {
+			if (disposed) return plugins;
+			if (inFlight && !force) return inFlight;
+			if (force && inFlightController) {
+				inFlightController.abort();
+				inFlightController = null;
+				inFlight = null;
+			}
+			const seq = ++fetchSeq;
+			const controller = typeof AbortController === "function" ? new AbortController() : null;
+			inFlightController = controller;
+			checkedAt = Date.now();
+			const run = (async () => {
+				try {
+					const data = await api("/at-plugins", controller ? { cache: "no-store", signal: controller.signal } : { cache: "no-store" });
+					if (!disposed && seq === fetchSeq && (!controller || !controller.signal.aborted) && Array.isArray(data?.plugins)) {
+						applyList(data.plugins);
+						checkedAt = Date.now();
+					}
+				} catch {
+					// Keep the last known snapshot when a background refresh fails or aborts.
+				} finally {
+					if (inFlight === run) {
+						inFlightController = null;
+						inFlight = null;
+					}
+				}
+				return plugins;
+			})();
+			inFlight = run;
+			return run;
+		}
+
+		function raceWithSignal(promise, signal) {
+			if (!signal) return promise;
+			if (signal.aborted) return Promise.resolve([]);
+			return new Promise((resolve) => {
+				const onAbort = () => {
+					signal.removeEventListener?.("abort", onAbort);
+					resolve([]);
+				};
+				signal.addEventListener?.("abort", onAbort, { once: true });
+				void promise.then((value) => {
+					signal.removeEventListener?.("abort", onAbort);
+					resolve(signal.aborted ? [] : value);
+				});
+			});
+		}
+
+		const boot = globalThis.__UPH_AT_PLUGINS__;
+		if (Array.isArray(boot)) {
+			delete globalThis.__UPH_AT_PLUGINS__;
+			applyList(boot);
+			checkedAt = Date.now();
+		}
+
+		const onInvalidate = () => {
+			if (disposed) return;
+			checkedAt = -Infinity;
+			void fetchFresh(true);
+		};
+		const onVisibility = () => {
+			if (typeof document !== "undefined" && document.hidden) return;
+			if (!hydrated || Date.now() - checkedAt >= refreshInterval) {
+				void fetchFresh(false);
+			}
+		};
+
+		if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+			document.addEventListener("uph-at-plugins-changed", onInvalidate);
+			document.addEventListener("uph-mcp-branding-changed", onInvalidate);
+			document.addEventListener("visibilitychange", onVisibility);
+		}
+		const offReset = ctx.on?.("connection/reset", onInvalidate);
+		const offChanged = ctx.on?.("plugin-manager/changed", onInvalidate);
+
+		return {
+			warm() {
+				if (!hydrated || Date.now() - checkedAt >= refreshInterval) {
+					void fetchFresh(false);
+				}
+			},
+			async candidates({ query, quoted, signal } = {}) {
+				if (quoted === true || signal?.aborted) return [];
+				if (!hydrated) {
+					await raceWithSignal(fetchFresh(false), signal);
+					if (!hydrated && inFlight && !signal?.aborted) {
+						await raceWithSignal(inFlight, signal);
+					}
+					if (signal?.aborted) return [];
+				} else if (Date.now() - checkedAt >= refreshInterval) {
+					void fetchFresh(false);
+				}
+				const matches = filterAtPluginCandidates(plugins, query);
+				return matches.map((plugin) => {
+					const title = plugin.displayName || plugin.name;
+					const summary = plugin.summary || plugin.shortDescription || plugin.description || (plugin.author ? `by ${plugin.author}` : "");
+					return {
+						name: title,
+						...(summary ? { description: summary } : {}),
+						icon: getIconComponent(plugin),
+						section: "Plugins",
+						value: JSON.stringify({ name: plugin.name, displayName: title }),
+					};
+				});
+			},
+			lexicon() {
+				return hydrated ? lexiconNames : undefined;
+			},
+			lexiconKey() {
+				return lexiconNames.join("\0");
+			},
+			subscribe(listener) {
+				listeners.add(listener);
+				return () => { listeners.delete(listener); };
+			},
+			subscribeTheme(listener) {
+				themeListeners.add(listener);
+				return () => { themeListeners.delete(listener); };
+			},
+			getByLowerName() {
+				return byLowerName;
+			},
+			isHydrated() {
+				return hydrated;
+			},
+			recordPick,
+			resolveChipPlugin,
+			getDescription,
+			isDark() {
+				return readCurrentDark();
+			},
+			dispose() {
+				disposed = true;
+				fetchSeq += 1;
+				inFlightController?.abort();
+				inFlightController = null;
+				inFlight = null;
+				listeners.clear();
+				themeListeners.clear();
+				iconComponents.clear();
+				iconPluginRefs.clear();
+				recentPicks.length = 0;
+				try { themeObserver?.disconnect?.(); } catch {}
+				themeObserver = null;
+				try { darkMedia?.removeEventListener?.("change", onThemePotentiallyChanged); } catch {}
+				if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+					document.removeEventListener("uph-at-plugins-changed", onInvalidate);
+					document.removeEventListener("uph-mcp-branding-changed", onInvalidate);
+					document.removeEventListener("visibilitychange", onVisibility);
+				}
+				try { offReset?.(); } catch {}
+				try { offChanged?.(); } catch {}
+			},
+		};
+	}
+
+	const AT_PLUGINS_ACTIVE_DISPOSE_KEY = "__UPH_AT_PLUGINS_DISPOSE__";
+
+	function cleanupStaleAtPluginDom(preserveOwnedSlots) {
+		if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") return;
+		const oldHosts = document.querySelectorAll("[data-uph-at-plugins-overlay]");
+		for (let i = 0; i < oldHosts.length; i++) oldHosts[i]?.remove?.();
+		const oldSlots = document.querySelectorAll("[data-uph-chip-icon]");
+		for (let i = 0; i < oldSlots.length; i++) {
+			if (!preserveOwnedSlots || !preserveOwnedSlots.has(oldSlots[i])) oldSlots[i]?.remove?.();
+		}
+		if (!preserveOwnedSlots) {
+			const oldStyles = document.querySelectorAll("style[data-uph-at-plugins]");
+			for (let i = 0; i < oldStyles.length; i++) oldStyles[i]?.remove?.();
+			const oldChips = document.querySelectorAll('[data-composer-chip="plugins"]');
+			for (let i = 0; i < oldChips.length; i++) {
+				const chip = oldChips[i];
+				if (chip.dataset) {
+					delete chip.dataset.uphPluginResolved;
+					delete chip.dataset.uphPluginName;
+					delete chip.dataset.uphPluginLabel;
+				} else {
+					chip.removeAttribute?.("data-uph-plugin-resolved");
+					chip.removeAttribute?.("data-uph-plugin-name");
+					chip.removeAttribute?.("data-uph-plugin-label");
+				}
+			}
+			const oldDescribed = document.querySelectorAll('[aria-describedby="uph-at-plugin-hover-popover"]');
+			for (let i = 0; i < oldDescribed.length; i++) oldDescribed[i]?.removeAttribute?.("aria-describedby");
+		}
+	}
+
+	function installAtPlugins(ctx) {
+		if (typeof globalThis !== "undefined" && typeof globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] === "function") {
+			try { globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY](); } catch {}
+		}
+		cleanupStaleAtPluginDom();
+		const store = createAtPluginsStore(ctx);
+		const disposers = [() => store.dispose()];
+		if (typeof document !== "undefined" && document.head) {
+			const style = document.createElement("style");
+			style.dataset.plugin = "universal-plugin-hub";
+			style.dataset.uphAtPlugins = "";
+			style.textContent = AT_PLUGINS_CSS;
+			document.head.append(style);
+			disposers.push(() => style.remove());
+		}
+
+		const ReactDOM = (() => { try { return require("react-dom") || null; } catch { return null; } })();
+		const ReactDOMClient = (() => { try { return require("react-dom/client") || null; } catch { return null; } })();
+
+		function PluginMentionChip({ node }) {
+			const [revision, setRevision] = useState(0);
+			useEffect(() => {
+				const bump = () => setRevision((r) => r + 1);
+				const offStore = store.subscribe(bump);
+				const offTheme = store.subscribeTheme(bump);
+				return () => {
+					offStore();
+					offTheme();
+				};
+			}, []);
+			void revision;
+			const live = store.getByLowerName().get(String(node?.data?.name || "").toLowerCase()) || null;
+			const label = live?.displayName || node?.data?.label || node?.data?.name || "";
+			return h("span", {
+				className: "cpm-at-plugin-chip" + (live ? "" : " is-unresolved"),
+				"data-uph-plugin-chip": "true",
+				"data-uph-plugin-name": live?.name || node?.data?.name || "",
+				"data-uph-plugin-label": label,
+			},
+				live
+					? h("span", { className: "cpm-at-plugin-chip-icon-wrap", "aria-hidden": "true" },
+						h("span", { className: "cpm-at-plugin-chip-icon" },
+							h(PluginIcon, { plugin: live, isDark: store.isDark(), eager: true, preferPreview: true })
+						)
+					)
+					: h("span", { className: "cpm-at-plugin-chip-marker", "aria-hidden": "true" }, "@"),
+				h("span", { className: "cpm-at-plugin-chip-label" }, label)
+			);
+		}
+
+		function PluginChipHoverPopover({ hovered, isDark, session }) {
+			const popRef = useRef(null);
+			const [position, setPosition] = useState(null);
+			const lastContentRef = useRef({ description: "", resolved: true });
+			if (hovered) {
+				lastContentRef.current = {
+					description: hovered.description || "",
+					resolved: hovered.resolved !== false,
+				};
+			}
+
+			useSafeLayoutEffect(() => {
+				const popup = popRef.current;
+				if (!popup) return;
+				if (!popup.hasAttribute("popover")) {
+					try { popup.setAttribute("popover", "hint"); } catch {}
+				}
+				if (!hovered?.anchor?.isConnected) {
+					popup.removeAttribute("data-open");
+					if (typeof popup.hidePopover === "function") {
+						try { if (popup.matches?.(":popover-open")) popup.hidePopover(); } catch {}
+					}
+					setPosition(null);
+					return;
+				}
+
+				const anchor = hovered.anchor;
+				const prevDescribedBy = anchor.getAttribute("aria-describedby");
+				const ownsDescribedBy = prevDescribedBy === null;
+				if (ownsDescribedBy) anchor.setAttribute("aria-describedby", "uph-at-plugin-hover-popover");
+
+				setPosition(null);
+				popup.setAttribute("data-open", "true");
+				if (typeof popup.showPopover === "function") {
+					try { if (!popup.matches?.(":popover-open")) popup.showPopover(); } catch {}
+				}
+
+				const measure = () => {
+					if (!anchor.isConnected) return;
+					const trigger = anchor.getBoundingClientRect();
+					if (!trigger || (trigger.width <= 0 && trigger.height <= 0)) return;
+					const measured = popup.getBoundingClientRect();
+					const vw = typeof window !== "undefined" ? (window.innerWidth || 0) : 0;
+					const vh = typeof window !== "undefined" ? (window.innerHeight || 0) : 0;
+					setPosition(placePluginChipPopover(trigger, measured.width || 192, measured.height || 36, { width: vw, height: vh }));
+				};
+				measure();
+				const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+				observer?.observe(popup);
+				const detach = session.attach(popup, anchor);
+				return () => {
+					observer?.disconnect();
+					detach();
+					if (ownsDescribedBy && anchor.getAttribute("aria-describedby") === "uph-at-plugin-hover-popover") {
+						anchor.removeAttribute("aria-describedby");
+					}
+				};
+			}, [hovered, session]);
+
+			const viewContent = hovered || lastContentRef.current;
+			return h("div", {
+				id: "uph-at-plugin-hover-popover",
+				ref: popRef,
+				role: "tooltip",
+				className: "cpm-at-plugin-popover" + (isDark ? " cpm-dark" : ""),
+				"data-placement": position?.placement || "top",
+				"data-unresolved": viewContent.resolved === false ? "true" : undefined,
+				style: {
+					left: `${position?.left ?? 12}px`,
+					top: `${position?.top ?? 12}px`,
+					visibility: hovered && position ? "visible" : "hidden",
+					pointerEvents: !hovered ? "none" : undefined,
+					transformOrigin: position ? `${position.originX}px ${position.originY}` : "50% 100%",
+				},
+				onWheel: (e) => e.stopPropagation(),
+				onScroll: (e) => e.stopPropagation(),
+			},
+				h("p", { className: "cpm-at-plugin-popover-desc" }, viewContent.description)
+			);
+		}
+
+		// Syncs DSH Lexical composer chips (`[data-composer-chip="plugins"]`): strips browser `title`,
+		// replaces the default `@` marker with the crisp plugin icon without stretching line-height,
+		// and shares one top-layer frosted glass description popover across composer + message chips.
+		if (typeof document !== "undefined") {
+			const chipIds = new WeakMap();
+			const ownedSlots = new WeakSet();
+			let nextChipId = 1;
+			let knownComposerEl = null;
+			let syncQueued = false;
+			let blockDisposed = false;
+			let activeOverlayState = { chips: [], hovered: null, isDark: store.isDark() };
+			let setOverlayState = null;
+			let hoverSession = null;
+
+			const getChipId = (el) => {
+				let id = chipIds.get(el);
+				if (!id) {
+					id = `chip-${nextChipId++}`;
+					chipIds.set(el, id);
+				}
+				return id;
+			};
+
+			const stripNativeTitle = (el) => {
+				if (el.hasAttribute?.("title")) el.removeAttribute("title");
+				if (typeof el.querySelectorAll === "function") {
+					const titled = el.querySelectorAll("[title]");
+					for (let i = 0; i < titled.length; i++) titled[i].removeAttribute("title");
+				}
+			};
+
+			const readComposerChipLabel = (el) => {
+				const children = Array.from(el.children || []);
+				const reactSpan = children.find((c) => !c.hasAttribute?.("data-uph-chip-icon"));
+				if (!reactSpan) return String(el.textContent || "").replace(/^@/, "").trim();
+				const reactChildren = Array.from(reactSpan.children || []);
+				if (reactChildren.length >= 2) {
+					return String(reactChildren[reactChildren.length - 1]?.textContent || "").trim();
+				}
+				return String(reactSpan.textContent || "").replace(/^@/, "").trim();
+			};
+
+			const syncComposerChips = () => {
+				syncQueued = false;
+				if (blockDisposed) return;
+				const nodes = typeof document.querySelectorAll === "function"
+					? Array.from(document.querySelectorAll('[data-composer-chip="plugins"]'))
+					: [];
+				if (nodes.length > 0 && !store.isHydrated()) store.warm();
+
+				const nextChips = [];
+				for (const el of nodes) {
+					stripNativeTitle(el);
+					const label = readComposerChipLabel(el);
+					const prevName = el.dataset?.uphPluginName || el.getAttribute?.("data-uph-plugin-name") || "";
+					const prevLabel = el.dataset?.uphPluginLabel || el.getAttribute?.("data-uph-plugin-label") || "";
+					const reusedForDifferentLabel = Boolean(prevLabel && label && prevLabel.toLowerCase() !== label.toLowerCase());
+					let live = (prevName && !reusedForDifferentLabel)
+						? (store.getByLowerName().get(prevName.toLowerCase()) || null)
+						: null;
+					if (!live) {
+						live = store.resolveChipPlugin({ label, consumePick: true });
+					}
+
+					const existingSlots = Array.from(el.children || []).filter((c) => c.hasAttribute?.("data-uph-chip-icon"));
+					let ownedSlot = existingSlots.find((c) => ownedSlots.has(c)) || null;
+					for (let i = 0; i < existingSlots.length; i++) {
+						if (existingSlots[i] !== ownedSlot) existingSlots[i].remove?.();
+					}
+					if (live) {
+						if (el.dataset) {
+							el.dataset.uphPluginResolved = "true";
+							el.dataset.uphPluginName = live.name;
+							el.dataset.uphPluginLabel = label || live.displayName || live.name;
+						} else {
+							el.setAttribute("data-uph-plugin-resolved", "true");
+							el.setAttribute("data-uph-plugin-name", live.name);
+							el.setAttribute("data-uph-plugin-label", label || live.displayName || live.name);
+						}
+						let iconSlot = ownedSlot;
+						if (!iconSlot && typeof document.createElement === "function") {
+							iconSlot = document.createElement("span");
+							iconSlot.className = "cpm-at-plugin-chip-icon-wrap";
+							iconSlot.setAttribute("data-uph-chip-icon", "");
+							iconSlot.setAttribute("aria-hidden", "true");
+							ownedSlots.add(iconSlot);
+							el.prepend(iconSlot);
+						} else if (iconSlot && el.children?.[0] !== iconSlot && typeof el.prepend === "function") {
+							el.prepend(iconSlot);
+						}
+						if (iconSlot) {
+							nextChips.push({ key: getChipId(el), chipEl: el, iconSlot, plugin: live });
+						}
+					} else {
+						if (el.dataset) {
+							delete el.dataset.uphPluginResolved;
+							el.dataset.uphPluginName = "";
+							el.dataset.uphPluginLabel = label;
+						} else {
+							el.removeAttribute?.("data-uph-plugin-resolved");
+							el.setAttribute?.("data-uph-plugin-name", "");
+							el.setAttribute?.("data-uph-plugin-label", label);
+						}
+						if (ownedSlot) ownedSlot.remove();
+					}
+				}
+
+				const dark = store.isDark();
+				const sameChips = activeOverlayState.isDark === dark &&
+					activeOverlayState.chips.length === nextChips.length &&
+					activeOverlayState.chips.every((prev, i) => (
+						prev.chipEl === nextChips[i].chipEl &&
+						prev.iconSlot === nextChips[i].iconSlot &&
+						prev.plugin === nextChips[i].plugin
+					));
+				if (!sameChips) {
+					activeOverlayState = { ...activeOverlayState, chips: nextChips, isDark: dark };
+					setOverlayState?.(activeOverlayState);
+				}
+				if (activeOverlayState.hovered?.anchor && !activeOverlayState.hovered.anchor.isConnected) {
+					hoverSession?.dismiss();
+				}
+			};
+
+			const scheduleChipSync = () => {
+				if (blockDisposed || syncQueued) return;
+				syncQueued = true;
+				if (typeof queueMicrotask === "function") queueMicrotask(syncComposerChips);
+				else Promise.resolve().then(syncComposerChips);
+			};
+
+			const buildChipHoverPayload = (anchor) => {
+				const name = anchor.dataset?.uphPluginName || anchor.getAttribute?.("data-uph-plugin-name") || "";
+				const label = anchor.dataset?.uphPluginLabel || anchor.getAttribute?.("data-uph-plugin-label") || "";
+				const live = store.resolveChipPlugin({ name, label });
+				return live
+					? { name: live.name, description: store.getDescription(live, true), resolved: true }
+					: { name, description: store.getDescription(null, false), resolved: false };
+			};
+
+			hoverSession = createHoverSession({
+				initialDelay: 160,
+				onChange(next) {
+					if (blockDisposed) return;
+					activeOverlayState = { ...activeOverlayState, hovered: next, isDark: store.isDark() };
+					setOverlayState?.(activeOverlayState);
+				},
+			});
+
+			const findPluginChipAnchor = (target) => (
+				target?.closest?.('[data-composer-chip="plugins"], .cpm-at-plugin-chip') || null
+			);
+
+			const onPointerOver = (event) => {
+				if (blockDisposed || event.pointerType === "touch") return;
+				const anchor = findPluginChipAnchor(event.target);
+				if (!anchor) return;
+				hoverSession.enter(
+					buildChipHoverPayload(anchor),
+					anchor,
+					{ x: event.clientX, y: event.clientY, buttons: event.buttons },
+					false
+				);
+			};
+
+			const onFocusIn = (event) => {
+				if (blockDisposed) return;
+				const anchor = findPluginChipAnchor(event.target);
+				if (!anchor) return;
+				if (anchor === document.activeElement || anchor.contains?.(document.activeElement)) {
+					hoverSession.enter(buildChipHoverPayload(anchor), anchor, null, true);
+				}
+			};
+
+			const onComposerKeyDown = (event) => {
+				if (blockDisposed || !activeOverlayState.hovered) return;
+				if (event.key === "Shift" || event.key === "Control" || event.key === "Alt" || event.key === "Meta") return;
+				if (event.target?.closest?.("[data-composer-input]")) {
+					hoverSession.dismiss();
+				}
+			};
+
+			const updateDarkOverlayState = () => {
+				if (blockDisposed) return;
+				const dark = store.isDark();
+				if (dark !== activeOverlayState.isDark) {
+					activeOverlayState = { ...activeOverlayState, isDark: dark };
+					setOverlayState?.(activeOverlayState);
+				}
+			};
+
+			let domObserver = null;
+			if (typeof MutationObserver === "function" && document.body) {
+				knownComposerEl = document.querySelector?.("[data-composer-input]") || null;
+				domObserver = new MutationObserver((mutations) => {
+					if (blockDisposed) return;
+					let needSync = false;
+					let hasRemovals = false;
+					for (const m of mutations) {
+						if (m.target?.closest?.("[data-uph-chip-icon]")) continue;
+						if (m.type === "attributes") {
+							const tgt = m.target;
+							if (tgt?.hasAttribute?.("title") && tgt.closest?.('[data-composer-chip="plugins"]')) {
+								tgt.removeAttribute("title");
+								needSync = true;
+							}
+							continue;
+						}
+						if (m.type === "childList") {
+							if (m.removedNodes.length > 0) hasRemovals = true;
+							if (!knownComposerEl?.isConnected) {
+								knownComposerEl = document.querySelector?.("[data-composer-input]") || null;
+								needSync = true;
+								continue;
+							}
+							if (knownComposerEl.contains(m.target)) {
+								needSync = true;
+								continue;
+							}
+							for (let i = 0; i < m.addedNodes.length; i++) {
+								const added = m.addedNodes[i];
+								if (added?.nodeType !== 1) continue;
+								if (
+									added.getAttribute?.("data-composer-chip") === "plugins" ||
+									added.getAttribute?.("data-composer-input") !== null ||
+									added.querySelector?.('[data-composer-chip="plugins"]')
+								) {
+									needSync = true;
+									break;
+								}
+							}
+						}
+					}
+					if (hasRemovals) {
+						if (activeOverlayState.hovered?.anchor && !activeOverlayState.hovered.anchor.isConnected) {
+							hoverSession?.dismiss();
+						}
+						if (!needSync && activeOverlayState.chips.some((c) => !c.chipEl.isConnected)) {
+							needSync = true;
+						}
+					}
+					if (needSync) scheduleChipSync();
+				});
+				domObserver.observe(document.body, {
+					childList: true,
+					subtree: true,
+					attributes: true,
+					attributeFilter: ["title"],
+				});
+				disposers.push(() => domObserver.disconnect());
+			}
+
+			disposers.push(store.subscribeTheme(updateDarkOverlayState));
+
+			if (typeof document.addEventListener === "function") {
+				document.addEventListener("pointerover", onPointerOver, true);
+				document.addEventListener("focusin", onFocusIn, true);
+				document.addEventListener("keydown", onComposerKeyDown, true);
+				disposers.push(() => {
+					document.removeEventListener("pointerover", onPointerOver, true);
+					document.removeEventListener("focusin", onFocusIn, true);
+					document.removeEventListener("keydown", onComposerKeyDown, true);
+				});
+			}
+
+			if (typeof window !== "undefined" && typeof window.addEventListener === "function" && typeof document.addEventListener === "function") {
+				const unbindHover = hoverSession.bind(document, window);
+				disposers.push(unbindHover);
+			} else {
+				disposers.push(() => hoverSession.dismiss(false));
+			}
+
+			const offStoreSync = store.subscribe(() => {
+				if (blockDisposed) return;
+				syncComposerChips();
+				const curHovered = activeOverlayState.hovered;
+				if (curHovered?.anchor?.isConnected) {
+					const refreshed = buildChipHoverPayload(curHovered.anchor);
+					const dark = store.isDark();
+					if (
+						dark !== activeOverlayState.isDark ||
+						refreshed.name !== curHovered.name ||
+						refreshed.description !== curHovered.description ||
+						refreshed.resolved !== curHovered.resolved
+					) {
+						activeOverlayState = {
+							...activeOverlayState,
+							isDark: dark,
+							hovered: { ...curHovered, ...refreshed },
+						};
+						setOverlayState?.(activeOverlayState);
+					}
+				}
+			});
+			disposers.push(offStoreSync);
+
+			if (ReactDOM?.createPortal && ReactDOMClient?.createRoot && document.body && typeof document.createElement === "function") {
+				const overlayHost = document.createElement("div");
+				overlayHost.setAttribute("data-uph-at-plugins-overlay", "");
+				overlayHost.style.display = "contents";
+				document.body.append(overlayHost);
+
+				function AtPluginsOverlay() {
+					const [overlayState, setLocalState] = useState(activeOverlayState);
+					useEffect(() => {
+						setOverlayState = setLocalState;
+						setLocalState(activeOverlayState);
+						return () => { if (setOverlayState === setLocalState) setOverlayState = null; };
+					}, []);
+					return h(React.Fragment, null,
+						overlayState.chips.map((entry) => (
+							entry.iconSlot?.isConnected
+								? ReactDOM.createPortal(
+									h("span", { className: "cpm-at-plugin-chip-icon" },
+										h(PluginIcon, { plugin: entry.plugin, isDark: overlayState.isDark, eager: true, preferPreview: true })
+									),
+									entry.iconSlot,
+									entry.key
+								)
+								: null
+						)),
+						h(PluginChipHoverPopover, {
+							hovered: overlayState.hovered,
+							isDark: overlayState.isDark,
+							session: hoverSession,
+						})
+					);
+				}
+
+				const overlayRoot = ReactDOMClient.createRoot(overlayHost);
+				overlayRoot.render(h(AtPluginsOverlay));
+				disposers.push(() => {
+					setOverlayState = null;
+					activeOverlayState = { chips: [], hovered: null, isDark: false };
+					cleanupStaleAtPluginDom();
+					try { overlayRoot.unmount(); } catch {}
+					try { overlayHost.remove(); } catch {}
+				});
+			} else {
+				disposers.push(() => cleanupStaleAtPluginDom());
+			}
+			disposers.push(() => {
+				blockDisposed = true;
+				syncQueued = false;
+			});
+
+			syncComposerChips();
+		}
+
+		const triggerSource = {
+			trigger: "@",
+			name: "plugins",
+			order: -1,
+			showGroupTitle: false,
+			warm() {
+				store.warm();
+			},
+			lexicon() {
+				return store.lexicon();
+			},
+			subscribeLexicon(_session, listener) {
+				return store.subscribe(listener);
+			},
+			candidates(_session, req) {
+				return store.candidates(req);
+			},
+			onPick({ candidate }) {
+				const picked = parseAtPluginCandidateValue(candidate?.value);
+				if (!picked) return undefined;
+				store.recordPick(picked.name, picked.displayName);
+				const mention = formatAtPluginMention(picked.name, picked.displayName);
+				return {
+					insert: {
+						source: "plugins",
+						ref: mention,
+						label: picked.displayName,
+						clipboardText: mention,
+					},
+				};
+			},
+			codec: {
+				clipboardText: (ref) => ref,
+				serialize: (ref) => Promise.resolve(ref),
+			},
+		};
+
+		ctx.inject?.(["inputTriggers"], (hostCtx) => {
+			if (typeof hostCtx?.inputTriggers?.registerSource !== "function") return;
+			hostCtx.effect?.(() => hostCtx.inputTriggers.registerSource(triggerSource), "universal-plugin-hub: @ plugins trigger");
+		});
+
+		ctx.inject?.(["uiConversation"], (hostCtx) => {
+			const registerRule = () => hostCtx?.uiConversation?.userText?.register?.({
+				id: "uph-plugin",
+				order: 15,
+				match(text, from) {
+					return matchAtPluginMention(text, from, store.getByLowerName());
+				},
+			});
+			if (typeof hostCtx?.uiConversation?.userText?.register !== "function") return;
+			hostCtx.effect?.(() => {
+				let offRule = registerRule();
+				let prevLexKey = store.lexiconKey();
+				const offSub = store.subscribe(() => {
+					const nextLexKey = store.lexiconKey();
+					if (nextLexKey === prevLexKey) return;
+					prevLexKey = nextLexKey;
+					try { offRule?.(); } catch {}
+					offRule = registerRule();
+				});
+				return () => {
+					offSub();
+					try { offRule?.(); } catch {}
+				};
+			}, "universal-plugin-hub: @ plugins user-text");
+		});
+
+		if (typeof ctx.slots?.register === "function") {
+			const offNodeSlot = ctx.slots.register({
+				name: "conversation.user.text.node",
+				key: "uph-plugin",
+				priority: 100,
+			}, PluginMentionChip);
+			if (typeof offNodeSlot === "function") disposers.push(offNodeSlot);
+		}
+
+		const disposeAll = () => {
+			if (typeof globalThis !== "undefined" && globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] === disposeAll) {
+				delete globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY];
+			}
+			for (let i = disposers.length - 1; i >= 0; i--) {
+				try { disposers[i]?.(); } catch {}
+			}
+		};
+		if (typeof globalThis !== "undefined") globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] = disposeAll;
+		return disposeAll;
+	}
+
 	const name = "universal-plugin-hub";
 	const inject = ["slots", "theme"];
 
@@ -13247,6 +14513,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			iconsReady = dispose.ready;
 			return dispose;
 		}, "universal-plugin-hub: tool call icons");
+		ctx.effect?.(() => installAtPlugins(ctx), "universal-plugin-hub: @ plugins");
 		ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
 			name: "sidebar.panellist",
 			id: "universal-plugin-hub",

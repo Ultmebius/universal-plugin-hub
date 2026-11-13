@@ -85,7 +85,11 @@ test('tool-call icon API exposes only unambiguous, installed plugin tool names a
     try {
       const boot = []
       listeners.get('webserver/index-inject')?.(boot)
-      assert.deepEqual(JSON.parse(JSON.stringify(boot)), [{ kind: 'global', name: '__UPH_TOOL_CALL_ICONS__', value: data.groups }])
+      const parsedBoot = JSON.parse(JSON.stringify(boot))
+      assert.deepEqual(
+        parsedBoot.find(entry => entry?.name === '__UPH_TOOL_CALL_ICONS__'),
+        { kind: 'global', name: '__UPH_TOOL_CALL_ICONS__', value: data.groups },
+      )
       assert.doesNotMatch(JSON.stringify(boot), /fixture-secret|fixture\.invalid|headers/)
     } finally {
       for (const cleanup of cleanups.reverse()) cleanup?.()
