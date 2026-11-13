@@ -700,7 +700,6 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (!detail && row?.source && typeof row.source === 'object') {
         await materializePlugin(sourceId, pluginName, row.source)
         invalidateMarketplaceCache(sourceId)
-        invalidateIconDirCache(sourceId)
         invalidateLocalIconCache(sourceId)
         row = readMarketplace(sourceId).find((r) => r.name === pluginName) || row
         detail = pluginDetail(sourceId, pluginName, row.source, row)
