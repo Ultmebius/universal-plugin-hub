@@ -4,7 +4,8 @@
  * Mutations are same-origin only.
  */
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { join, dirname } from 'node:path'
 import { sendJson, readJsonBody, sameOrigin } from './http.js'
 import {
   readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, removeManagedDir, sourceCacheDir, safeRmDir,
@@ -17,13 +18,81 @@ import {
   toggleConnector, isConnectorActive, verifyConnectorAuth, saveConnectorAuth, enableConnector, probeConnectorAuth, probeUserMcpUpdate,
   fetchConnectorTools, setToolDisabled, isLspActive, readCordisPatch, unregisterConnector, removeUserMcp, renameUserMcp, getConnectorEntry, getConnectorId, readMcpToolsState, userMcpConfig,
 } from './install.js'
-import { inspectLocalPlugin, importLocalPlugin, importLocalSkills, importLocalMarketplace, saveUploadedZip } from './local.js'
+import { inspectLocalPlugin, importLocalPlugin, importLocalSkills, importLocalMarketplace, saveUploadedZip, saveUploadedStream, MAX_UPLOAD_BYTES } from './local.js'
 import { uninstallUploadedSkill, uploadedSkillRecord } from './skill-uploads.js'
 import { getOAuthVerification, cancelOAuthVerification, readSavedOAuthClient } from './oauth.js'
 import { remoteConfigFromEntry } from './oauth-config.js'
 import { scheduledResult } from './runtime.js'
 
 const API_PREFIX = '/universal-plugin-hub/api'
+const STAGED_UPLOADS = new Map()
+const STAGED_UPLOAD_TTL = 3_600_000
+const STAGED_UPLOAD_LIMIT = 8
+
+function sweepStagedUploads() {
+  const cutoff = Date.now() - STAGED_UPLOAD_TTL
+  for (const [id, entry] of STAGED_UPLOADS) {
+    if (entry.createdAt < cutoff) {
+      STAGED_UPLOADS.delete(id)
+      safeRmDir(entry.uploadDir)
+    }
+  }
+}
+
+function registerStagedUpload(file, uploadDir) {
+  sweepStagedUploads()
+  while (STAGED_UPLOADS.size >= STAGED_UPLOAD_LIMIT) {
+    const oldestKey = STAGED_UPLOADS.keys().next().value
+    const oldest = STAGED_UPLOADS.get(oldestKey)
+    STAGED_UPLOADS.delete(oldestKey)
+    if (oldest?.uploadDir) safeRmDir(oldest.uploadDir)
+  }
+  const id = randomUUID()
+  STAGED_UPLOADS.set(id, { file, uploadDir, createdAt: Date.now() })
+  return id
+}
+
+function discardStagedUpload(id) {
+  const key = String(id || '').trim()
+  if (!key) return false
+  const entry = STAGED_UPLOADS.get(key)
+  if (!entry) return false
+  STAGED_UPLOADS.delete(key)
+  safeRmDir(entry.uploadDir)
+  return true
+}
+
+function cleanupAllStagedUploads() {
+  for (const [, entry] of STAGED_UPLOADS) {
+    if (entry?.uploadDir) safeRmDir(entry.uploadDir)
+  }
+  STAGED_UPLOADS.clear()
+}
+
+function disableUploadTimeouts(req, res) {
+  try { req?.setTimeout?.(0) } catch {}
+  try { req?.socket?.setTimeout?.(0) } catch {}
+  try { res?.setTimeout?.(0) } catch {}
+}
+
+async function resolveLocalImportTarget(body) {
+  if (body?.uploadId) {
+    sweepStagedUploads()
+    const id = String(body.uploadId)
+    const entry = STAGED_UPLOADS.get(id)
+    if (!entry || !existsSync(entry.file)) {
+      const error = new Error('上传缓存已过期，请重新选择文件上传')
+      error.status = 410
+      throw error
+    }
+    return { target: entry.file, stagedId: id, tempUploadDir: null }
+  }
+  if (body?.data) {
+    const target = await saveUploadedZip(body.data, body.filename)
+    return { target, stagedId: null, tempUploadDir: dirname(target) }
+  }
+  return { target: body?.path, stagedId: null, tempUploadDir: null }
+}
 
 export function mountRoutes(webServer, skills = null, applyProfile = null) {
   const r = webServer.register({
@@ -32,6 +101,7 @@ export function mountRoutes(webServer, skills = null, applyProfile = null) {
     handler: (req, res) => handle(req, res, API_PREFIX, skills, applyProfile),
   })
   return () => {
+    cleanupAllStagedUploads()
     try { if (typeof r === 'function') r() } catch {}
   }
 }
@@ -275,22 +345,65 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     // ── local plugin inspection & import ──────────────────────────────────
     if (method === 'POST' && path === '/plugins/local/inspect') {
       requireSameOrigin(req)
-      const body = await readJsonBody(req, 30_000_000)
-      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
-      const result = await inspectLocalPlugin(target)
-      // The extraction is only for this preview: the import call brings its own
-      // copy of the payload and extracts again, so keeping this one would leak a
-      // temp directory per upload. Server paths stay out of the response too.
+      disableUploadTimeouts(req, res)
+      const contentType = String(req.headers?.['content-type'] || '').toLowerCase()
+      let target = ''
+      let stagedUpload = null
+      if (contentType.includes('application/octet-stream')) {
+        const rawHeaderName = String(req.headers?.['x-upload-filename'] || '')
+        let filename = url.searchParams.get('filename') || ''
+        if (rawHeaderName) {
+          try { filename = decodeURIComponent(rawHeaderName) } catch { filename = rawHeaderName }
+        }
+        stagedUpload = await saveUploadedStream(req, filename, MAX_UPLOAD_BYTES)
+        target = stagedUpload.file
+      } else {
+        const body = await readJsonBody(req, 30_000_000)
+        if (body.data) {
+          const file = await saveUploadedZip(body.data, body.filename)
+          stagedUpload = { file, uploadDir: dirname(file) }
+          target = file
+        } else {
+          target = body.path
+        }
+      }
+      let result
+      try {
+        result = await inspectLocalPlugin(target)
+      } catch (err) {
+        if (stagedUpload) safeRmDir(stagedUpload.uploadDir)
+        throw err
+      }
+      // The extraction is only for this preview: clean up the temp extract dir,
+      // while staging valid streamed uploads behind an opaque token so confirm does not re-upload.
       if (result.tempExtractDir) safeRmDir(result.tempExtractDir)
+      if (!result.ok && stagedUpload) {
+        safeRmDir(stagedUpload.uploadDir)
+      }
+      const uploadId = (result.ok && stagedUpload) ? registerStagedUpload(stagedUpload.file, stagedUpload.uploadDir) : undefined
       const { tempExtractDir, effectiveDir, entries, ...preview } = result
-      return sendJson(res, 200, preview)
+      return sendJson(res, 200, uploadId ? { ...preview, uploadId } : preview)
+    }
+
+    if (method === 'POST' && path === '/plugins/local/upload-cancel') {
+      requireSameOrigin(req)
+      const body = await readJsonBody(req)
+      discardStagedUpload(body?.uploadId)
+      return sendJson(res, 200, { ok: true })
     }
 
     if (method === 'POST' && path === '/plugins/local/import') {
       requireSameOrigin(req)
+      disableUploadTimeouts(req, res)
       const body = await readJsonBody(req, 30_000_000)
-      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
-      const result = await importLocalPlugin({ path: target, overwrite: body.overwrite, sourceName: body.sourceName })
+      const { target, stagedId, tempUploadDir } = await resolveLocalImportTarget(body)
+      let result
+      try {
+        result = await importLocalPlugin({ path: target, overwrite: body.overwrite, sourceName: body.sourceName })
+      } finally {
+        if (tempUploadDir) safeRmDir(tempUploadDir)
+      }
+      if (stagedId) discardStagedUpload(stagedId)
       invalidateLocalIconCache('local')
       return sendJson(res, 200, result)
     }
@@ -299,12 +412,19 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     // junction into $DSH_HOME/skills, then a hot refresh of the Skills tab.
     if (method === 'POST' && path === '/skills/import') {
       requireSameOrigin(req)
+      disableUploadTimeouts(req, res)
       const body = await readJsonBody(req, 30_000_000)
-      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
-      const result = await importLocalSkills(target, {
-        overwrite: body.overwrite === true,
-        overwriteNames: Array.isArray(body.overwriteNames) ? body.overwriteNames.map(String) : null,
-      })
+      const { target, stagedId, tempUploadDir } = await resolveLocalImportTarget(body)
+      let result
+      try {
+        result = await importLocalSkills(target, {
+          overwrite: body.overwrite === true,
+          overwriteNames: Array.isArray(body.overwriteNames) ? body.overwriteNames.map(String) : null,
+        })
+      } finally {
+        if (tempUploadDir) safeRmDir(tempUploadDir)
+      }
+      if (stagedId) discardStagedUpload(stagedId)
       skills?.refresh()
       return sendJson(res, 200, result)
     }
@@ -312,9 +432,16 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     // An uploaded marketplace becomes its own plugin source tab.
     if (method === 'POST' && path === '/marketplaces/import') {
       requireSameOrigin(req)
+      disableUploadTimeouts(req, res)
       const body = await readJsonBody(req, 30_000_000)
-      const target = body.data ? await saveUploadedZip(body.data, body.filename) : body.path
-      const result = await importLocalMarketplace(target, { sourceName: body.sourceName, overwrite: body.overwrite === true })
+      const { target, stagedId, tempUploadDir } = await resolveLocalImportTarget(body)
+      let result
+      try {
+        result = await importLocalMarketplace(target, { sourceName: body.sourceName, overwrite: body.overwrite === true, target: body.target })
+      } finally {
+        if (tempUploadDir) safeRmDir(tempUploadDir)
+      }
+      if (stagedId) discardStagedUpload(stagedId)
       if (result?.sourceId) {
         invalidateLocalIconCache(result.sourceId)
       }
@@ -398,6 +525,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       if (used) throw new Error('该源下仍有已安装插件，请先卸载')
       // The remote checkout pool is shared by marketplaces. Only remove this
       // source's own clone or uploaded marketplace copy.
+      if (sourceId === 'local') cleanupAllStagedUploads()
       if (sourceId !== 'remote') removeManagedDir(sourceCacheDir(sourceId))
       state.sources = state.sources.filter((s) => s.id !== sourceId)
       if (Array.isArray(state.tabOrder)) state.tabOrder = state.tabOrder.filter((id) => id !== sourceId)
@@ -825,6 +953,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     return sendJson(res, 404, { error: 'not found' })
   } catch (error) {
     const status = (error && typeof error === 'object' && error.status) ? error.status : 500
+    if (status === 413 && res) {
+      try { res.setHeader?.('Connection', 'close') } catch {}
+    }
     sendJson(res, status, { error: error instanceof Error ? error.message : String(error) })
   }
 }

@@ -115,6 +115,36 @@ function readPluginShortDescription(dir) {
   } catch { return '' }
 }
 
+/**
+ * Normalizes a semantic/free-form version string: trims whitespace, drops a
+ * redundant leading `v` before digits so UI badges render `vX.Y.Z` consistently,
+ * and maps empty values to `undefined`.
+ */
+export function normalizeVersion(value) {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  return trimmed.replace(/^v(?=\d)/i, '')
+}
+
+function manifestRootDir(manifestPath) {
+  const parent = dirname(manifestPath)
+  const folder = basename(parent)
+  if (folder === '.claude-plugin' || folder === '.codex-plugin' || folder === '.well-known') return dirname(parent)
+  if (folder === 'plugins' && basename(dirname(parent)) === '.agents') return dirname(dirname(parent))
+  return parent
+}
+
+function readPackageVersion(dir) {
+  if (!dir) return undefined
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    return normalizeVersion(pkg?.['claude-plugin']?.version) || normalizeVersion(pkg?.version)
+  } catch {
+    return undefined
+  }
+}
+
 function normalizeRow(row, sourceId, dir, { skipIcons = false } = {}) {
   if (!row) return null
   const name = typeof row.name === 'string' ? row.name : (typeof row.identifier === 'string' ? row.identifier : '')
@@ -144,7 +174,10 @@ function normalizeRow(row, sourceId, dir, { skipIcons = false } = {}) {
     description,
     ...(shortDescription ? { shortDescription } : {}),
     author: typeof author === 'string' ? author : (meta.author || undefined),
-    version: typeof row.version === 'string' ? row.version : (meta.version || undefined),
+    version: normalizeVersion(row.version)
+      || normalizeVersion(row.interface?.version)
+      || normalizeVersion(row.extensions?.['com.openai']?.version)
+      || normalizeVersion(meta.version),
     category: typeof row.category === 'string' ? row.category : (meta.category || undefined),
     homepage: typeof row.homepage === 'string' ? row.homepage : (meta.homepage || undefined),
     source,
@@ -498,6 +531,7 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
         // Case A: Claude / standard manifest with plugins array
         if (Array.isArray(content.plugins)) {
           let skipped = false
+          const marketVersion = normalizeVersion(content.metadata?.version) || normalizeVersion(content.version)
           const rows = content.plugins.map((r) => {
             const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
             if (names && typeof r.name === 'string' && !names.has(r.name.toLowerCase())) {
@@ -505,7 +539,14 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
               return null
             }
             const manifest = dir ? readPluginManifest(dir, false) : null
+            const resolvedVersion =
+              normalizeVersion(r.version)
+              || normalizeVersion(r.interface?.version)
+              || normalizeVersion(r.extensions?.['com.openai']?.version)
+              || normalizeVersion(manifest?.version)
+              || marketVersion
             return normalizeRow({ ...manifest, ...r,
+              version: resolvedVersion,
               displayName: r.displayName || r.interface?.displayName || manifest?.displayName,
               description: r.description || r.interface?.shortDescription || manifest?.description,
             }, sourceId, dir, options)
@@ -516,7 +557,16 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
         }
         // Case B: Direct array of plugin descriptors
         if (Array.isArray(content)) {
-          const rows = content.map((r) => normalizeRow(r, sourceId, undefined, options)).filter(Boolean)
+          const rows = content.map((r) => {
+            const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
+            const manifest = dir ? readPluginManifest(dir, false) : null
+            const resolvedVersion =
+              normalizeVersion(r?.version)
+              || normalizeVersion(r?.interface?.version)
+              || normalizeVersion(r?.extensions?.['com.openai']?.version)
+              || normalizeVersion(manifest?.version)
+            return normalizeRow({ ...manifest, ...r, version: resolvedVersion }, sourceId, dir, options)
+          }).filter(Boolean)
           if (rows.length > 0) return rows
         }
         // Case C: MCP Servers dictionary (mcpServers or servers object)
@@ -653,12 +703,14 @@ export function readPluginManifest(dir, includeParent = true) {
     ...(portable ? [rootManifest] : []),
     join(dir, '.codex-plugin', 'plugin.json'),
     join(dir, '.claude-plugin', 'marketplace.json'),
+    join(dir, '.agents', 'plugins', 'marketplace.json'),
     rootManifest,
     join(dir, 'manifest.json'),
     join(dir, 'server.json'),
     join(dir, 'package.json'),
     ...(includeParent ? [join(dir, '..', '.claude-plugin', 'plugin.json'),
     join(dir, '..', '.claude-plugin', 'marketplace.json'),
+    join(dir, '..', '.agents', 'plugins', 'marketplace.json'),
     join(dir, '..', 'plugin.json'),
     join(dir, '..', 'manifest.json')] : []),
   ]
@@ -668,12 +720,17 @@ export function readPluginManifest(dir, includeParent = true) {
       try {
         const raw = JSON.parse(readFileSync(p, 'utf8'))
         if (p.endsWith('package.json')) {
-          if (raw['claude-plugin']) return raw['claude-plugin']
+          if (raw['claude-plugin']) {
+            return {
+              ...raw['claude-plugin'],
+              version: normalizeVersion(raw['claude-plugin']?.version) || normalizeVersion(raw.version),
+            }
+          }
           return {
             name: raw.name,
             displayName: raw.displayName || formatDisplayName(raw.name),
             description: raw.description,
-            version: raw.version,
+            version: normalizeVersion(raw.version),
             author: raw.author,
             mcpServers: raw.mcpServers,
             lspServers: raw.lspServers,
@@ -685,7 +742,11 @@ export function readPluginManifest(dir, includeParent = true) {
             name: matched.name || raw.name,
             displayName: matched.displayName || formatDisplayName(matched.name || raw.name),
             description: matched.description || raw.metadata?.description || '',
-            version: matched.version || raw.metadata?.version || undefined,
+            version: normalizeVersion(matched.version)
+              || normalizeVersion(matched.interface?.version)
+              || normalizeVersion(matched.extensions?.['com.openai']?.version)
+              || normalizeVersion(raw.metadata?.version)
+              || normalizeVersion(raw.version),
             author: matched.author || raw.owner?.name || undefined,
             skills: matched.skills,
             commands: matched.commands,
@@ -696,11 +757,16 @@ export function readPluginManifest(dir, includeParent = true) {
         }
         const openai = raw.extensions?.['com.openai']
         const settings = openai && typeof openai === 'object' ? openai : raw
+        const version =
+          normalizeVersion(raw.version)
+          || normalizeVersion(settings.version)
+          || normalizeVersion(settings.interface?.version)
+          || readPackageVersion(manifestRootDir(p))
         return {
           ...raw,
           ...settings,
           name: raw.name,
-          version: raw.version,
+          version,
           displayName: raw.displayName || settings.interface?.displayName,
           description: raw.description || settings.interface?.shortDescription || settings.interface?.longDescription || '',
           author: raw.author || settings.interface?.developerName,

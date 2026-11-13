@@ -2247,6 +2247,35 @@ export async function updatePlugin(pluginName) {
   return installPlugin({ sourceId: rec.sourceId, pluginName, refresh: true })
 }
 
+/**
+ * Re-materialize already-installed plugins belonging to `sourceId` whose names
+ * appear in `pluginNames`, clearing cached metadata/tools while preserving any
+ * prior disabled (`enabled === false`) state. Plugins from other sources stay
+ * untouched so local overwrites never hijack foreign installs.
+ */
+export async function refreshInstalledPluginsFromSource(sourceId, pluginNames) {
+  const names = new Set(Array.from(pluginNames || []).map((n) => String(n || '').toLowerCase()).filter(Boolean))
+  if (!names.size) return []
+  const targets = readState().plugins.filter(
+    (rec) => rec && rec.sourceId === sourceId && names.has(String(rec.name || '').toLowerCase()),
+  )
+  const refreshed = []
+  for (const rec of targets) {
+    for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
+      if (k.startsWith(`${rec.name}::`)) MEMORY_TOOLS_CACHE.delete(k)
+    }
+    invalidateMarketplaceCache(sourceId)
+    invalidateParserCaches()
+    const wasDisabled = rec.enabled === false
+    await installPlugin({ sourceId, pluginName: rec.name, refresh: true })
+    if (wasDisabled) {
+      await togglePlugin(rec.name, false)
+    }
+    refreshed.push(rec.name)
+  }
+  return refreshed
+}
+
 /** Find one marketplace row by name. */
 export async function findMarketRow(sourceId, pluginName) {
   const { readMarketplace } = await import('./parser.js')

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, cpSync, copyFileSync, mkdirSync, writeFileSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, cpSync, copyFileSync, mkdirSync, writeFileSync, mkdtempSync, readFileSync, createWriteStream, rmSync } from 'node:fs'
 import { join, basename, resolve, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -6,8 +6,10 @@ import { promisify } from 'node:util'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, readState, writeState, safeRmDir, slugify } from './store.js'
 import { safeSegment, pluginPath } from './market.js'
-import { parsePluginRowFromDir, parseMarketplaceFromDisk, listSkills, listAgents, readPluginManifest, invalidateMarketplaceCache, formatDisplayName } from './parser.js'
+import { parsePluginRowFromDir, parseMarketplaceFromDisk, listSkills, listAgents, readPluginManifest, invalidateMarketplaceCache, invalidateParserCaches, formatDisplayName, normalizeVersion } from './parser.js'
 import { installUploadedSkills, takenSkillNames } from './skill-uploads.js'
+import { invalidateLocalIconCache } from './icons.js'
+import { refreshInstalledPluginsFromSource } from './install.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -47,21 +49,158 @@ export async function extractZip(zipPath, destDir) {
   await execFileAsync(tar, ['-xf', zipPath, '-C', destDir], { windowsHide: true })
 }
 
-// ponytail: base64-in-JSON upload (uniform with the all-JSON API, capped at ~22MB decoded);
-// switch to multipart/octet-stream streaming if large archives ever become a real use case.
-/** Persist an uploaded archive or SKILL.md for the path-based import flow. */
-export function saveUploadedZip(dataBase64, filename) {
-  if (!/\.(zip|tgz|tar\.gz)$/i.test(filename || '') && !/^skill\.md$/i.test(filename || '')) {
-    throw new Error('支持 .zip、.tgz、.tar.gz 压缩包或 SKILL.md 文件')
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+
+function uploadedTargetFilename(filename) {
+  const raw = String(filename || '')
+  if (!/\.(zip|tgz|tar\.gz)$/i.test(raw) && !/^skill\.md$/i.test(raw)) {
+    const error = new Error('支持 .zip、.tgz、.tar.gz 压缩包或 SKILL.md 文件')
+    error.status = 400
+    throw error
   }
-  const data = Buffer.from(String(dataBase64 || ''), 'base64')
-  if (data.length > 22 * 1024 * 1024) throw new Error('上传文件大小上限为 22MB')
-  const safe = String(filename || 'plugin.zip').replace(/[^a-zA-Z0-9._-]/g, '_') || 'plugin.zip'
+  return /^skill\.md$/i.test(raw)
+    ? 'SKILL.md'
+    : (raw.replace(/[^a-zA-Z0-9._-]/g, '_') || 'plugin.zip')
+}
+
+function createUploadFilePath(filename) {
+  const targetName = uploadedTargetFilename(filename)
+  sweepTemp()
   mkdirSync(TEMP_ROOT(), { recursive: true })
   const uploadDir = mkdtempSync(join(TEMP_ROOT(), 'upload-'))
-  const file = join(uploadDir, /^skill\.md$/i.test(filename) ? 'SKILL.md' : safe)
+  return { uploadDir, file: join(uploadDir, targetName) }
+}
+
+/** Persist an uploaded archive or SKILL.md from base64 JSON payload. */
+export function saveUploadedZip(dataBase64, filename) {
+  const targetName = uploadedTargetFilename(filename)
+  const data = Buffer.from(String(dataBase64 || ''), 'base64')
+  if (data.length > MAX_UPLOAD_BYTES) {
+    const error = new Error('上传文件超出 500MB 上限')
+    error.status = 413
+    throw error
+  }
+  const { file } = createUploadFilePath(targetName)
   writeFileSync(file, data)
   return file
+}
+
+/**
+ * Stream a raw application/octet-stream upload directly to disk with backpressure
+ * and incremental byte limit enforcement so large archives never buffer in V8 heap.
+ */
+export async function saveUploadedStream(req, filename, maxBytes = MAX_UPLOAD_BYTES) {
+  const targetName = uploadedTargetFilename(filename)
+  const declaredLength = Number(req?.headers?.['content-length'] || 0)
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    const error = new Error('上传文件超出 500MB 上限')
+    error.status = 413
+    throw error
+  }
+  try { req?.setTimeout?.(0) } catch {}
+  try { req?.socket?.setTimeout?.(0) } catch {}
+  const { uploadDir, file } = createUploadFilePath(targetName)
+  const writer = createWriteStream(file)
+  let received = 0
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false
+      let ended = false
+      let finished = false
+      const cleanupReqListeners = () => {
+        req.removeListener('data', onData)
+        req.removeListener('end', onEnd)
+        req.removeListener('error', onReqError)
+        req.removeListener('aborted', onAbort)
+        req.removeListener('close', onReqClose)
+      }
+      const closeWriter = () => new Promise((done) => {
+        if (writer.closed || typeof writer.once !== 'function') {
+          done()
+          return
+        }
+        let finishedClosing = false
+        const timer = setTimeout(() => {
+          if (finishedClosing) return
+          finishedClosing = true
+          writer.removeListener('close', onClosed)
+          done()
+        }, 300)
+        timer.unref?.()
+        const onClosed = () => {
+          if (finishedClosing) return
+          finishedClosing = true
+          clearTimeout(timer)
+          done()
+        }
+        writer.once('close', onClosed)
+        try { writer.destroy() } catch { onClosed() }
+      })
+      const fail = (err) => {
+        if (settled) return
+        settled = true
+        cleanupReqListeners()
+        writer.removeListener('finish', onWriterFinish)
+        writer.removeListener('error', fail)
+        writer.removeListener('close', onWriterClose)
+        writer.on('error', () => {})
+        try { req.pause?.() } catch {}
+        void closeWriter().then(() => reject(err))
+      }
+      const onData = (chunk) => {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+        received += buf.length
+        if (received > maxBytes) {
+          const error = new Error('上传文件超出 500MB 上限')
+          error.status = 413
+          fail(error)
+          return
+        }
+        if (!writer.write(buf)) {
+          try { req.pause?.() } catch {}
+          writer.once('drain', () => {
+            if (!settled) {
+              try { req.resume?.() } catch {}
+            }
+          })
+        }
+      }
+      const onEnd = () => {
+        ended = true
+        if (!settled) writer.end()
+      }
+      const onReqError = (err) => fail(err)
+      const onAbort = () => fail(Object.assign(new Error('上传已中断'), { status: 499 }))
+      const onReqClose = () => {
+        if (!ended && !req.complete && !req.readableEnded) {
+          onAbort()
+        }
+      }
+      const onWriterFinish = () => {
+        finished = true
+        if (writer.closed) onWriterClose()
+      }
+      const onWriterClose = () => {
+        if (settled || !finished) return
+        settled = true
+        cleanupReqListeners()
+        writer.removeListener('error', fail)
+        resolve()
+      }
+      writer.on('finish', onWriterFinish)
+      writer.on('close', onWriterClose)
+      writer.on('error', fail)
+      req.on('data', onData)
+      req.on('end', onEnd)
+      req.on('error', onReqError)
+      req.on('aborted', onAbort)
+      req.on('close', onReqClose)
+    })
+    return { file, uploadDir, bytes: received }
+  } catch (error) {
+    safeRmDir(uploadDir)
+    throw error
+  }
 }
 
 /**
@@ -257,20 +396,42 @@ export async function inspectLocalPlugin(rawPath) {
   const skills = entries.flatMap((e) => listSkills(e.dir))
   const agents = entries.flatMap((e) => listAgents(e.dir))
 
-  const duplicate = entries.find((e) => existsSync(join(sourceCacheDir('local'), safeSegment(e.row.name, 'plugin name'))))
-    || (kind === 'skills' ? entries.find((e) => (readState().uploadedSkills || []).some(record => record.name === e.row.name)) : undefined)
-  const localDest = duplicate ? join(sourceCacheDir('local'), duplicate.row.name) : join(sourceCacheDir('local'), cleanPluginName)
+  const localConflicts = kind === 'skills' ? [] : collectLocalConflicts(entries)
+  const suggestedLabel = kind === 'marketplace' ? marketSourceName(effectiveDir, fallbackName) : ''
   let exists = false
   let existingVersion = undefined
   let existingUpdatedAt = undefined
-  if (duplicate) {
+  if (kind === 'marketplace') {
+    // Only the same standalone market tab triggers immediate duplicate overwrite;
+    // overlaps with `local` are reported via `localConflicts` so the user can still
+    // pick an independent tab cleanly without false collision prompts.
+    const marketSlugId = `local-${slugify(suggestedLabel) || 'market'}`
+    const marketCache = sourceCacheDir(marketSlugId)
+    const hasMarket = readState().sources.some((s) => s.id === marketSlugId) && existsSync(marketCache)
+    if (hasMarket) {
+      exists = true
+      try {
+        existingUpdatedAt = statSync(marketCache).mtimeMs
+        const existingRows = parseMarketplaceFromDisk(marketSlugId, marketCache)
+        const matched = existingRows.find((r) => r.name === row.name) || existingRows[0]
+        existingVersion = normalizeVersion(matched?.version)
+      } catch {}
+    }
+  } else if (kind === 'skills') {
+    const duplicate = entries.find((e) => existsSync(join(sourceCacheDir('local'), safeSegment(e.row.name, 'plugin name'))))
+      || entries.find((e) => (readState().uploadedSkills || []).some(record => record.name === e.row.name))
+    if (duplicate) {
+      const localDest = join(sourceCacheDir('local'), safeSegment(duplicate.row.name, 'plugin name'))
+      exists = true
+      try {
+        existingUpdatedAt = statSync(localDest).mtimeMs
+        existingVersion = normalizeVersion(readPluginManifest(localDest)?.version)
+      } catch {}
+    }
+  } else if (localConflicts.length > 0) {
     exists = true
-    try {
-      const existingStat = statSync(localDest)
-      existingUpdatedAt = existingStat.mtimeMs
-      const existingManifest = readPluginManifest(localDest)
-      existingVersion = existingManifest?.version || '1.0.0'
-    } catch {}
+    existingVersion = localConflicts[0].existingVersion
+    existingUpdatedAt = localConflicts[0].existingUpdatedAt
   }
 
   return {
@@ -288,7 +449,8 @@ export async function inspectLocalPlugin(rawPath) {
     exists,
     existingVersion,
     existingUpdatedAt,
-    suggestedName: kind === 'marketplace' ? formatDisplayName(marketSourceName(effectiveDir, fallbackName)) : undefined,
+    localConflicts,
+    suggestedName: kind === 'marketplace' ? formatDisplayName(suggestedLabel) : undefined,
     // Whether the local tab is already named decides if this upload still has
     // to ask for a name, so inspect reports it instead of the dialog guessing.
     localTabName: String(readState().sources.find((source) => source.id === 'local')?.name || ''),
@@ -296,6 +458,29 @@ export async function inspectLocalPlugin(rawPath) {
     // collection with one clashing member must still offer the overwrite.
     takenSkillNames: kind === 'skills' ? entries.map((e) => e.row.name).filter((name) => names.has(name)) : [],
   }
+}
+
+function collectLocalConflicts(entries) {
+  const localDir = sourceCacheDir('local')
+  const conflicts = []
+  for (const e of entries) {
+    const dest = join(localDir, safeSegment(e.row.name, 'plugin name'))
+    if (!existsSync(dest)) continue
+    let existingUpdatedAt
+    let existingVersion
+    try {
+      existingUpdatedAt = statSync(dest).mtimeMs
+      existingVersion = normalizeVersion(readPluginManifest(dest)?.version)
+    } catch {}
+    conflicts.push({
+      name: e.row.name,
+      displayName: e.row.displayName || e.row.name,
+      existingVersion,
+      newVersion: normalizeVersion(e.row.version),
+      existingUpdatedAt,
+    })
+  }
+  return conflicts
 }
 
 /**
@@ -323,16 +508,128 @@ export async function importLocalSkills(rawPath, { overwrite = false, overwriteN
  * plugins are copied under the source cache and listed by the normal market
  * reader, so install/update/uninstall behave exactly like a Git source.
  */
-export async function importLocalMarketplace(rawPath, { sourceName = '', overwrite = false } = {}) {
+const PLUGIN_MANIFEST_RELATIVE = ['.codex-plugin/plugin.json', '.claude-plugin/plugin.json', 'plugin.json']
+
+function syncPluginManifestMetadata(destDir, row, { stripRootMarketplace = false } = {}) {
+  if (stripRootMarketplace) {
+    for (const relativePath of MARKETPLACE_MANIFESTS) {
+      const mPath = join(destDir, relativePath)
+      if (existsSync(mPath)) rmSync(mPath, { force: true })
+    }
+  }
+  const fields = {
+    name: row.name,
+    ...(row.displayName ? { displayName: row.displayName } : {}),
+    ...(row.version ? { version: row.version } : {}),
+    ...(row.description ? { description: row.description } : {}),
+    ...(row.author ? { author: row.author } : {}),
+    ...(row.homepage ? { homepage: row.homepage } : {}),
+    ...(row.category ? { category: row.category } : {}),
+  }
+  for (const rel of PLUGIN_MANIFEST_RELATIVE) {
+    const file = join(destDir, rel)
+    if (!existsSync(file)) continue
+    try {
+      const json = JSON.parse(readFileSync(file, 'utf8'))
+      if (!json || typeof json !== 'object' || Array.isArray(json)) continue
+      let changed = false
+      if (!json.name && row.name) { json.name = row.name; changed = true }
+      const hasVer = normalizeVersion(json.version)
+        || normalizeVersion(json.extensions?.['com.openai']?.version)
+        || normalizeVersion(json.interface?.version)
+      if (!hasVer && row.version) { json.version = row.version; changed = true }
+      if (!json.description && row.description) { json.description = row.description; changed = true }
+      if (!json.displayName && !json.interface?.displayName && row.displayName) { json.displayName = row.displayName; changed = true }
+      if (!json.author && !json.interface?.developerName && row.author) { json.author = row.author; changed = true }
+      if (!json.homepage && !json.interface?.websiteURL && row.homepage) { json.homepage = row.homepage; changed = true }
+      if (changed) writeFileSync(file, JSON.stringify(json, null, 2), 'utf8')
+      return
+    } catch {}
+  }
+  const out = join(destDir, '.claude-plugin', 'plugin.json')
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(out, JSON.stringify(fields, null, 2), 'utf8')
+}
+
+async function copyEntriesToLocalCache(entries, { overwrite = false, tempExtractDir = null, stripRootMarketplace = false } = {}) {
+  const localDir = sourceCacheDir('local')
+  mkdirSync(localDir, { recursive: true })
+  const clashing = []
+  for (const { row, dir } of entries) {
+    const cleanName = safeSegment(row.name, 'plugin name')
+    const destDir = resolve(localDir, cleanName)
+    const srcDir = resolve(dir)
+    if (destDir !== srcDir && (containsPath(destDir, srcDir) || containsPath(srcDir, destDir))) {
+      if (tempExtractDir) safeRmDir(tempExtractDir)
+      throw new Error('导入源与目标目录重叠，请从独立文件夹导入')
+    }
+    if (existsSync(destDir)) clashing.push(cleanName)
+  }
+  if (clashing.length > 0 && !overwrite) {
+    if (tempExtractDir) safeRmDir(tempExtractDir)
+    if (clashing.length === 1) throw new Error(`已存在同名插件「${clashing[0]}」`)
+    throw new Error(`本地插件标签中已存在同名插件：${clashing.join('、')}`)
+  }
+  const importedNames = []
+  try {
+    for (const { row, dir } of entries) {
+      const cleanName = safeSegment(row.name, 'plugin name')
+      const destDir = join(localDir, cleanName)
+      if (resolve(destDir) !== resolve(dir)) {
+        safeRmDir(destDir)
+        cpSync(dir, destDir, { recursive: true, force: true })
+      }
+      if (stripRootMarketplace) {
+        syncPluginManifestMetadata(destDir, row, { stripRootMarketplace: true })
+      }
+      importedNames.push(cleanName)
+    }
+  } finally {
+    if (tempExtractDir) safeRmDir(tempExtractDir)
+  }
+  invalidateMarketplaceCache('local')
+  invalidateParserCaches()
+  invalidateLocalIconCache('local')
+  if (overwrite && importedNames.length > 0) {
+    await refreshInstalledPluginsFromSource('local', importedNames)
+  }
+  return importedNames
+}
+
+/**
+ * Import an uploaded Claude/Codex marketplace locally. When `target === 'local'`,
+ * entries merge cleanly into the existing `local` tab as individual plugin folders
+ * without writing a root marketplace.json; otherwise plugins keep their manifest
+ * layout inside `market/local-<slug>/` as an independent tab.
+ */
+export async function importLocalMarketplace(rawPath, { sourceName = '', overwrite = false, target = '' } = {}) {
   const inspectRes = await inspectLocalPlugin(rawPath)
   if (!inspectRes.ok) throw new Error(inspectRes.error)
   if (inspectRes.kind !== 'marketplace') throw new Error('该内容不是插件市场')
   const { effectiveDir, tempExtractDir, entries } = inspectRes
+  const state = readState()
+
+  if (target === 'local') {
+    const localSource = state.sources.find((s) => s.id === 'local')
+    if (!localSource) {
+      if (tempExtractDir) safeRmDir(tempExtractDir)
+      throw new Error('尚未创建本地插件标签，请先上传单个本地插件或将其作为独立标签页添加')
+    }
+    await copyEntriesToLocalCache(entries, { overwrite, tempExtractDir, stripRootMarketplace: true })
+    return {
+      ok: true,
+      kind: 'marketplace',
+      target: 'local',
+      sourceId: 'local',
+      source: localSource,
+      plugins: entries.map((entry) => entry.row),
+    }
+  }
+
   const label = marketSourceName(effectiveDir, basename(effectiveDir))
   const name = String(sourceName || '').trim().slice(0, 30) || formatDisplayName(label)
   const sourceId = `local-${slugify(label) || 'market'}`
   const dest = sourceCacheDir(sourceId)
-  const state = readState()
   const existing = state.sources.find(source => source.id === sourceId)
   // Only a *new* tab can collide with an existing one. An overwrite reuses its
   // own tab, and the name it compares here is the manifest's, not whatever the
@@ -358,10 +655,10 @@ export async function importLocalMarketplace(rawPath, { sourceName = '', overwri
       // Keep each plugin on the path its manifest declares: a rewritten layout
       // (`plugins/<name>`) would break `./external_plugins/x` and `./`, and the
       // reader resolves sources against the copied manifest after a restart.
-      const target = pluginPath(dest, `./${row.source.replace(/^\.\//, '')}`)
-      mkdirSync(dirname(target), { recursive: true })
-      if (resolve(target) !== resolve(dest)) cpSync(dir, target, { recursive: true, force: true })
-      else copyTreeContents(dir, target)
+      const targetDir = pluginPath(dest, `./${row.source.replace(/^\.\//, '')}`)
+      mkdirSync(dirname(targetDir), { recursive: true })
+      if (resolve(targetDir) !== resolve(dest)) cpSync(dir, targetDir, { recursive: true, force: true })
+      else copyTreeContents(dir, targetDir)
     }
     // Carry the marketplace manifest itself so the standard reader finds the
     // same rows on the next start, not only during this upload.
@@ -388,6 +685,11 @@ export async function importLocalMarketplace(rawPath, { sourceName = '', overwri
     writeState(state)
   }
   invalidateMarketplaceCache(sourceId)
+  invalidateParserCaches()
+  invalidateLocalIconCache(sourceId)
+  if (overwrite) {
+    await refreshInstalledPluginsFromSource(sourceId, entries.map((entry) => entry.row.name))
+  }
   return { ok: true, kind: 'marketplace', sourceId, source: state.sources.find(source => source.id === sourceId), plugins: entries.map(entry => entry.row) }
 }
 
@@ -406,31 +708,7 @@ export async function importLocalPlugin({ path: rawPath, overwrite = false, sour
     throw new Error(`已存在同名插件「${cleanPluginName}」`)
   }
 
-  const localDir = sourceCacheDir('local')
-  mkdirSync(localDir, { recursive: true })
-  for (const { row, dir } of entries) {
-    const destDir = resolve(localDir, safeSegment(row.name, 'plugin name'))
-    const srcDir = resolve(dir)
-    const contains = (root, child) => {
-      const rel = relative(root, child)
-      return !isAbsolute(rel) && rel !== '..' && !rel.startsWith('..\\') && !rel.startsWith('../')
-    }
-    if (destDir !== srcDir && (contains(destDir, srcDir) || contains(srcDir, destDir))) {
-      if (tempExtractDir) safeRmDir(tempExtractDir)
-      throw new Error('导入源与目标目录重叠，请从独立文件夹导入')
-    }
-  }
-  try {
-    for (const { row, dir } of entries) {
-      const destDir = join(localDir, safeSegment(row.name, 'plugin name'))
-      if (resolve(destDir) !== resolve(dir)) {
-        safeRmDir(destDir)
-        cpSync(dir, destDir, { recursive: true, force: true })
-      }
-    }
-  } finally {
-    if (tempExtractDir) safeRmDir(tempExtractDir)
-  }
+  await copyEntriesToLocalCache(entries, { overwrite, tempExtractDir, stripRootMarketplace: false })
 
   // The tab is named once, on the first import. Later imports land in that
   // same tab: re-applying a name here would silently rename a tab the user
@@ -448,8 +726,6 @@ export async function importLocalPlugin({ path: rawPath, overwrite = false, sour
     state.sources.push(localSource)
     writeState(state)
   }
-
-  invalidateMarketplaceCache('local')
 
   return {
     ok: true,

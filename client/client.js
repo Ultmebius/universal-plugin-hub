@@ -1137,8 +1137,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	text-wrap: balance;
 }
 .cpm-btn {
-	height: 32px;
-	padding: 0 14px;
+	min-block-size: 32px;
+	padding: 6px 14px;
 	border-radius: var(--dsw-radius-md, 12px);
 	font-size: 13px;
 	cursor: pointer;
@@ -1150,27 +1150,37 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: center;
 	box-sizing: border-box;
 	line-height: 1;
-	transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.1s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.cpm-btn:focus, .cpm-btn:active {
+.cpm-btn:focus:not(:focus-visible), .cpm-btn:active {
 	outline: none;
+}
+.cpm-btn:focus-visible {
+	outline: 2px solid var(--cpm-accent);
+	outline-offset: 2px;
+}
+.cpm-btn:not(:disabled):active {
+	transform: scale(0.97);
 }
 .cpm-btn-primary {
 	background: var(--cpm-btn-primary-bg);
 	color: var(--cpm-btn-primary-text);
 	border: 1px solid transparent;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 .cpm-btn-primary:hover { background: var(--cpm-btn-primary-hover); }
 .cpm-btn-secondary {
 	background: var(--cpm-btn-secondary-bg);
 	color: var(--cpm-btn-secondary-text);
-	border: 1px solid rgba(0, 0, 0, 0.08);
+	border: 1px solid rgba(15, 23, 42, 0.1);
+	box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 .cpm-root.cpm-dark .cpm-btn-secondary,
 .cpm-dark .cpm-btn-secondary {
 	background: rgba(255, 255, 255, 0.08);
-	border: 1px solid rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.12);
 	color: #f4f4f5;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .cpm-btn-secondary:hover { background: var(--cpm-btn-secondary-hover); }
 .cpm-root.cpm-dark .cpm-btn-secondary:hover,
@@ -1757,40 +1767,65 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-dialog {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.48);
+	padding: 16px;
+	background: rgba(15, 23, 42, 0.38);
 	z-index: 10000;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	backdrop-filter: blur(4px);
-	-webkit-backdrop-filter: blur(4px);
+	overscroll-behavior: contain;
+	backdrop-filter: blur(8px) saturate(140%);
+	-webkit-backdrop-filter: blur(8px) saturate(140%);
+	animation: cpm-scrim-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.cpm-dark .cpm-dialog {
+	background: rgba(0, 0, 0, 0.62);
+}
+@keyframes cpm-scrim-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
 }
 .cpm-dialog-box {
 	background: var(--cpm-modal-bg);
-	border: 1px solid var(--cpm-border);
-	border-radius: var(--dsw-radius-lg, 16px);
+	border: 1px solid rgba(15, 23, 42, 0.09);
+	border-radius: var(--dsw-radius-lg, 18px);
 	padding: 22px 24px;
 	width: 440px;
-	max-width: 92vw;
+	max-width: 100%;
 	color: var(--cpm-text);
-	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(0, 0, 0, 0.08);
-	animation: cpm-dialog-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+	box-shadow:
+		0 24px 56px -12px rgba(15, 23, 42, 0.22),
+		0 8px 20px -6px rgba(15, 23, 42, 0.1),
+		inset 0 1px 0 rgba(255, 255, 255, 0.85);
+	overscroll-behavior: contain;
+	transform-origin: center 45%;
+	animation: cpm-dialog-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .cpm-dark .cpm-dialog-box {
-	background: #202023;
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+	background: #222226;
+	border: 1px solid rgba(255, 255, 255, 0.13);
+	box-shadow:
+		0 28px 64px -8px rgba(0, 0, 0, 0.72),
+		0 0 0 1px rgba(255, 255, 255, 0.04),
+		inset 0 1px 0 rgba(255, 255, 255, 0.09);
 	color: #f4f4f5;
 }
 @keyframes cpm-dialog-in {
-	from { opacity: 0; transform: scale(0.96); }
-	to { opacity: 1; transform: scale(1); }
+	from { opacity: 0; transform: translateY(6px) scale(0.975); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes cpm-dialog-fade {
+	from { opacity: 0; }
+	to { opacity: 1; }
 }
 .cpm-dialog-title {
-	font-size: 16px;
-	font-weight: 700;
-	margin-bottom: 12px;
+	font-size: 1.0625rem;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	line-height: 1.3;
+	margin: 0 0 12px;
 	color: var(--cpm-text);
+	text-wrap: balance;
 }
 .cpm-field { margin-bottom: 12px; }
 .cpm-field label {
@@ -1846,9 +1881,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-form-row:last-child { margin-bottom: 0; }
 .cpm-source-dialog-box {
 	width: 460px;
-	border-radius: var(--dsw-radius-lg, 16px);
+	max-width: 100%;
+	border-radius: var(--dsw-radius-lg, 20px);
 	padding: 22px 24px 20px 24px;
-	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22), 0 4px 16px rgba(0, 0, 0, 0.08);
 	/* The preview grows with the detected list, and the confirm buttons must not
 	   be pushed out of the viewport by a long one: cap the box and scroll it,
 	   then keep the action row pinned to the bottom edge. */
@@ -1859,6 +1894,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	scrollbar-width: thin;
 	scrollbar-color: var(--cpm-scroll-thumb) transparent;
 }
+.cpm-source-dialog-box .cpm-dialog-actions .cpm-btn {
+	min-block-size: 34px;
+	padding: 6px 16px;
+	border-radius: 10px;
+}
 .cpm-source-dialog-box > .cpm-dialog-actions {
 	position: sticky;
 	bottom: -20px;
@@ -1868,36 +1908,93 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	background: var(--cpm-modal-bg);
 }
 .cpm-dark .cpm-source-dialog-box > .cpm-dialog-actions {
-	background: #1c1c20;
+	background: #222226;
 }
 .cpm-dark .cpm-source-dialog-box {
-	background: #1c1c20;
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+	background: #222226;
+	border: 1px solid rgba(255, 255, 255, 0.13);
+	box-shadow:
+		0 28px 64px -8px rgba(0, 0, 0, 0.72),
+		0 0 0 1px rgba(255, 255, 255, 0.04),
+		inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 	.cpm-upload-dialog {
 		display: grid;
-		gap: 20px;
-		padding: 26px 24px 22px;
+		gap: 16px;
+		padding: 22px 24px 18px;
 		box-sizing: border-box;
 		max-height: calc(100dvh - 32px);
 		overflow-y: auto;
 	}
+	.cpm-upload-header {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin: 0;
+	}
 	.cpm-upload-dialog .cpm-dialog-title,
 	.cpm-upload-dialog .cpm-dialog-actions { margin: 0; }
+	.cpm-upload-subtitle {
+		margin: 0;
+		font-size: 0.8125rem;
+		line-height: 1.45;
+		color: var(--cpm-muted);
+		text-wrap: pretty;
+	}
+	/* Override sticky preview footer rules in upload phase so bottom padding is exact (18px). */
+	.cpm-source-dialog-box.cpm-upload-dialog > .cpm-dialog-actions {
+		position: static;
+		bottom: auto;
+		margin: 0;
+		padding: 0;
+		background: transparent;
+		gap: 10px;
+	}
 	.cpm-upload-dialog .cpm-dropzone {
 		width: 100%;
 		min-width: 0;
 		margin: 0;
-		padding: 24px 16px;
-		gap: 8px;
+		padding: 26px 20px 22px;
+		gap: 10px;
 		font: inherit;
 		color: inherit;
 		appearance: none;
+		border-radius: 14px;
+		corner-shape: var(--cpm-icon-corner-shape);
+		border: 1.5px dashed rgba(15, 23, 42, 0.22);
+		background: linear-gradient(180deg, rgba(248, 250, 252, 0.92) 0%, rgba(241, 245, 249, 0.78) 100%);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 1px 3px rgba(15, 23, 42, 0.04);
+		transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.2s ease, transform 0.12s cubic-bezier(0.2, 0.9, 0.3, 1);
 	}
-	.cpm-upload-dialog .cpm-dropzone-sub { line-height: 1.6; }
-	.cpm-upload-dialog .cpm-dropzone-icon { margin-bottom: 4px; }
-	.cpm-upload-dialog .cpm-dialog-actions { gap: 10px; padding-top: 4px; }
+	.cpm-dark .cpm-upload-dialog .cpm-dropzone {
+		border-color: rgba(255, 255, 255, 0.24);
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.025) 100%);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 2px 6px rgba(0, 0, 0, 0.22);
+	}
+	.cpm-upload-dialog .cpm-dropzone:not(:disabled):hover,
+	.cpm-upload-dialog .cpm-dropzone:not(:disabled).is-active {
+		border-color: var(--cpm-accent);
+		background: rgba(37, 99, 235, 0.05);
+		box-shadow: 0 8px 24px -10px rgba(37, 99, 235, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+	}
+	.cpm-dark .cpm-upload-dialog .cpm-dropzone:not(:disabled):hover,
+	.cpm-dark .cpm-upload-dialog .cpm-dropzone:not(:disabled).is-active {
+		border-color: var(--cpm-accent);
+		background: rgba(59, 130, 246, 0.12);
+		box-shadow: 0 10px 26px -10px rgba(59, 130, 246, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	}
+	.cpm-upload-dialog .cpm-dropzone:not(:disabled):active {
+		transform: scale(0.985);
+		transition-duration: 90ms;
+	}
+	.cpm-upload-dialog .cpm-dropzone-icon { margin-bottom: 2px; }
+	.cpm-upload-dialog .cpm-dropzone-title {
+		font-size: 0.875rem;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+		line-height: 1.4;
+	}
+	.cpm-upload-dialog .cpm-dropzone-sub { line-height: 1.5; }
 	/* The dropzone is the only control here that needs an outline of its own —
 	   it has no border to light up. */
 	.cpm-upload-dialog .cpm-dropzone:focus-visible {
@@ -1912,8 +2009,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	gap: 6px;
 	padding: 18px 14px;
 	margin-top: 12px;
-	border: 1.5px dashed var(--cpm-border);
-	border-radius: var(--dsw-radius-md, 12px);
+	border: 1.5px dashed rgba(15, 23, 42, 0.18);
+	border-radius: var(--dsw-radius-md, 14px);
 	background: var(--cpm-search-bg);
 	cursor: pointer;
 	transition: border-color .15s ease, background .15s ease;
@@ -1931,12 +2028,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
    The dark hover rule carries one more class, so it needs its own. */
 .cpm-dropzone:disabled,
 .cpm-dark .cpm-dropzone:disabled {
-	cursor: default;
+	cursor: wait;
 	border-color: var(--cpm-border);
 	background: var(--cpm-search-bg);
+	box-shadow: none;
 }
 .cpm-dropzone:disabled .cpm-dropzone-icon,
-.cpm-dark .cpm-dropzone:disabled .cpm-dropzone-icon { color: var(--cpm-muted); transform: none; }
+.cpm-dark .cpm-dropzone:disabled .cpm-dropzone-icon { color: var(--cpm-accent); transform: none; }
 .cpm-dropzone-icon {
 	color: var(--cpm-muted);
 	display: flex;
@@ -1957,23 +2055,156 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 11.5px;
 	color: var(--cpm-muted);
 }
+.cpm-dropzone-formats {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	margin-top: 2px;
+}
+.cpm-dropzone-format {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 6px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	font-size: 0.6875rem;
+	line-height: 1.5;
+	font-weight: 500;
+	color: var(--cpm-text-sub);
+	background: rgba(255, 255, 255, 0.88);
+	border: 1px solid rgba(15, 23, 42, 0.1);
+	box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
+}
+.cpm-dark .cpm-dropzone-format {
+	background: rgba(255, 255, 255, 0.07);
+	border-color: rgba(255, 255, 255, 0.12);
+	color: #d4d4d8;
+	box-shadow: none;
+}
+.cpm-upload-progress-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	width: 100%;
+	max-width: 268px;
+	margin-top: 4px;
+}
+.cpm-upload-progress-meta {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	font-size: 0.75rem;
+	line-height: 1.4;
+	color: var(--cpm-text-sub);
+	font-variant-numeric: tabular-nums;
+}
+.cpm-upload-progress {
+	appearance: none;
+	-webkit-appearance: none;
+	-moz-appearance: none;
+	display: block;
+	width: 100%;
+	height: 6px;
+	border: none;
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.1);
+	overflow: hidden;
+	container-type: inline-size;
+}
+.cpm-dark .cpm-upload-progress {
+	background: rgba(255, 255, 255, 0.12);
+}
+.cpm-upload-progress::-webkit-progress-bar {
+	background: rgba(15, 23, 42, 0.1);
+	border-radius: 999px;
+}
+.cpm-dark .cpm-upload-progress::-webkit-progress-bar {
+	background: rgba(255, 255, 255, 0.12);
+}
+.cpm-upload-progress::-webkit-progress-value {
+	background: var(--cpm-accent);
+	border-radius: 999px;
+	transition: inline-size 120ms linear;
+}
+.cpm-upload-progress::-moz-progress-bar {
+	background: var(--cpm-accent);
+	border-radius: 999px;
+}
+@keyframes cpm-upload-sweep {
+	0% { background-position: -125% 0; }
+	100% { background-position: 225% 0; }
+}
+.cpm-upload-progress:indeterminate::-webkit-progress-bar {
+	background-color: rgba(15, 23, 42, 0.1);
+	background-image: linear-gradient(90deg, transparent 0%, var(--cpm-accent) 45%, #60a5fa 60%, transparent 100%);
+	background-size: 55% 100%;
+	background-repeat: no-repeat;
+	animation: cpm-upload-sweep 1.35s ease-in-out infinite;
+}
+.cpm-dark .cpm-upload-progress:indeterminate::-webkit-progress-bar {
+	background-color: rgba(255, 255, 255, 0.12);
+}
+.cpm-upload-progress:indeterminate::-moz-progress-bar {
+	background-image: linear-gradient(90deg, transparent 0%, var(--cpm-accent) 45%, #60a5fa 60%, transparent 100%);
+	background-size: 55% 100%;
+	background-repeat: no-repeat;
+	animation: cpm-upload-sweep 1.35s ease-in-out infinite;
+}
+.cpm-upload-status {
+	margin-top: 8px;
+	font-size: 0.75rem;
+	line-height: 1.45;
+	color: var(--cpm-muted);
+	text-align: center;
+	min-height: 18px;
+}
+.cpm-upload-inline-progress {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 12px 0 4px;
+}
 .cpm-source-drag-overlay {
 	position: absolute;
 	inset: 0;
 	border-radius: inherit;
-	background: var(--cpm-modal-bg);
-	opacity: 0.96;
-	backdrop-filter: blur(12px);
-	-webkit-backdrop-filter: blur(12px);
+	background: rgba(248, 250, 255, 0.94);
+	backdrop-filter: blur(12px) saturate(160%);
+	-webkit-backdrop-filter: blur(12px) saturate(160%);
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
 	gap: 10px;
-	border: 2px dashed var(--cpm-accent);
+	padding: 24px;
 	z-index: 20;
 	pointer-events: none;
-	animation: cpm-dialog-in 0.15s ease;
+	animation: cpm-dialog-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.cpm-dark .cpm-source-drag-overlay {
+	background: rgba(34, 34, 38, 0.94);
+}
+.cpm-source-drag-overlay::before {
+	content: "";
+	position: absolute;
+	inset: 10px;
+	border: 2px dashed var(--cpm-accent);
+	border-radius: 13px;
+	background: rgba(37, 99, 235, 0.045);
+	pointer-events: none;
+}
+.cpm-dark .cpm-source-drag-overlay::before {
+	background: rgba(59, 130, 246, 0.09);
+}
+.cpm-source-drag-overlay .cpm-dropzone-icon {
+	position: relative;
+	color: var(--cpm-accent);
+}
+.cpm-dark .cpm-source-drag-overlay .cpm-dropzone-icon {
+	color: #93c5fd;
 }
 .cpm-local-preview-card {
 	display: flex;
@@ -2004,6 +2235,52 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	border: 1px solid var(--cpm-border);
 	border-radius: 8px;
 	margin: 10px 0 8px 0;
+}
+.cpm-local-dup-list {
+	list-style: none;
+	margin: 10px 0 8px;
+	padding: 4px;
+	max-height: 156px;
+	overflow-y: auto;
+	background: var(--cpm-modal-bg);
+	border: 1px solid var(--cpm-border);
+	border-radius: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.cpm-local-dup-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 6px 8px;
+	border-radius: 6px;
+	font-size: 12px;
+}
+.cpm-local-dup-item-name {
+	font-weight: 600;
+	color: var(--cpm-text);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.cpm-local-dup-item-vers {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	flex-shrink: 0;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	color: var(--cpm-muted);
+}
+.cpm-local-dup-item-new {
+	font-weight: 600;
+	color: #059669;
+}
+.cpm-dark .cpm-local-dup-item-new {
+	color: #34d399;
 }
 .cpm-btn-warning {
 	background: #d97706 !important;
@@ -2195,6 +2472,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex: 1;
 	min-width: 0;
 }
+.cpm-detect-name-row {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+}
 .cpm-detect-name {
 	font-size: 13px;
 	font-weight: 620;
@@ -2202,6 +2485,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	min-width: 0;
+}
+.cpm-detect-single .cpm-detect-name {
+	flex: 0 1 auto;
 }
 .cpm-detect-desc {
 	font-size: 11.5px;
@@ -2210,6 +2497,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	margin-top: 1px;
 }
 .cpm-detect-empty {
 	padding: 22px 12px;
@@ -2231,59 +2519,97 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-detect-flag {
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
 	font-size: 10.5px;
 	font-weight: 600;
-	padding: 2px 7px;
+	line-height: 1.25;
+	padding: 2px 7.5px;
 	border-radius: 999px;
 	background: rgba(217, 119, 6, 0.12);
 	border: 1px solid rgba(217, 119, 6, 0.35);
 	color: #b45309;
+	letter-spacing: 0.01em;
+}
+.cpm-detect-row .cpm-detect-flag {
+	margin-left: auto;
 }
 .cpm-dark .cpm-detect-flag {
 	color: #fbbf24;
 }
 .cpm-detect-flag-muted {
-	background: var(--cpm-pill-bg);
-	border-color: var(--cpm-pill-border);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+	background: rgba(15, 23, 42, 0.045);
+	border-color: rgba(15, 23, 42, 0.11);
 	color: var(--cpm-muted);
 	font-variant-numeric: tabular-nums;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 .cpm-dark .cpm-detect-flag-muted {
-	color: var(--cpm-muted);
+	background: rgba(255, 255, 255, 0.065);
+	border-color: rgba(255, 255, 255, 0.13);
+	color: #a1a1aa;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
-
+.cpm-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+.cpm-radio-fieldset {
+	border: 0;
+	padding: 0;
+	margin: 0 0 18px;
+	min-width: 0;
+}
+.cpm-radio-fieldset > legend {
+	padding: 0;
+	width: 100%;
+}
 .cpm-radio-group {
 	display: flex;
 	flex-direction: column;
-	gap: 9px;
+	gap: 8px;
 	margin-bottom: 18px;
+}
+.cpm-radio-fieldset .cpm-radio-group {
+	margin-bottom: 0;
 }
 .cpm-radio-card {
 	display: flex;
 	align-items: flex-start;
 	gap: 11px;
 	padding: 12px 14px;
-	border-radius: 10px;
+	border-radius: 11px;
 	background: var(--cpm-search-bg);
 	border: 1.5px solid var(--cpm-border);
 	cursor: pointer;
-	transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+	transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 	user-select: none;
 	position: relative;
 }
 .cpm-radio-card:hover {
 	background: var(--cpm-tab-hover);
-	border-color: rgba(59, 130, 246, 0.4);
-	transform: translateY(-1px);
+	border-color: rgba(59, 130, 246, 0.42);
 }
-.cpm-radio-card.is-selected {
-	background: rgba(59, 130, 246, 0.05);
+.cpm-radio-card:is(.is-selected, :has(> input:checked)) {
+	background: linear-gradient(180deg, rgba(59, 130, 246, 0.065) 0%, rgba(59, 130, 246, 0.025) 100%);
 	border-color: var(--cpm-accent, #3b82f6);
-	box-shadow: 0 0 0 1px var(--cpm-accent, #3b82f6), 0 4px 12px rgba(59, 130, 246, 0.1);
+	box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.28), 0 6px 16px -4px rgba(59, 130, 246, 0.14);
 }
-.cpm-dark .cpm-radio-card.is-selected {
-	background: rgba(59, 130, 246, 0.1);
-	box-shadow: 0 0 0 1px var(--cpm-accent, #3b82f6), 0 4px 14px rgba(0, 0, 0, 0.35);
+.cpm-dark .cpm-radio-card:is(.is-selected, :has(> input:checked)) {
+	background: linear-gradient(180deg, rgba(59, 130, 246, 0.13) 0%, rgba(59, 130, 246, 0.06) 100%);
+	box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.34), 0 8px 20px -6px rgba(0, 0, 0, 0.45);
+}
+.cpm-radio-card:has(> input:focus-visible) {
+	outline: 2px solid var(--cpm-accent, #3b82f6);
+	outline-offset: 2px;
 }
 .cpm-custom-radio {
 	width: 17px;
@@ -2295,10 +2621,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	justify-content: center;
 	flex-shrink: 0;
 	margin-top: 2px;
-	transition: all 0.15s ease;
+	transition: border-color 0.15s ease, background-color 0.15s ease;
 	background: transparent;
 }
-.cpm-custom-radio.checked {
+.cpm-custom-radio.checked,
+.cpm-radio-card:has(> input:checked) .cpm-custom-radio {
 	border-color: var(--cpm-accent, #3b82f6);
 	background: var(--cpm-accent, #3b82f6);
 }
@@ -2310,7 +2637,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	transform: scale(0);
 	transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.cpm-custom-radio.checked .cpm-custom-radio-inner {
+.cpm-custom-radio.checked .cpm-custom-radio-inner,
+.cpm-radio-card:has(> input:checked) .cpm-custom-radio-inner {
 	transform: scale(1);
 }
 .cpm-radio-card-content {
@@ -2321,12 +2649,31 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	min-width: 0;
 }
 .cpm-radio-card-title {
 	font-size: 13px;
 	font-weight: 600;
 	color: var(--cpm-text);
 	line-height: 1.4;
+}
+.cpm-conflict-pill {
+	margin-left: auto;
+	flex-shrink: 0;
+	font-size: 10.5px;
+	font-weight: 600;
+	line-height: 1.25;
+	padding: 2px 7px;
+	border-radius: 999px;
+	background: rgba(245, 158, 11, 0.12);
+	border: 1px solid rgba(245, 158, 11, 0.32);
+	color: #b45309;
+	font-variant-numeric: tabular-nums;
+}
+.cpm-dark .cpm-conflict-pill {
+	background: rgba(245, 158, 11, 0.16);
+	border-color: rgba(251, 191, 36, 0.32);
+	color: #fbbf24;
 }
 .cpm-radio-rec-badge {
 	font-size: 10px;
@@ -2341,22 +2688,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-size: 12px;
 	color: var(--cpm-muted);
 	margin-top: 3px;
-	line-height: 1.4;
+	line-height: 1.45;
 }
 .cpm-tag-preview {
-	display: inline-block;
-	padding: 1px 7px;
-	border-radius: 5px;
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 8px;
+	border-radius: 6px;
 	background: var(--cpm-pill-bg);
 	border: 1px solid var(--cpm-pill-border);
 	font-weight: 600;
 	color: var(--cpm-text);
-	margin-left: 4px;
+	margin-left: 5px;
 	font-size: 11.5px;
+	line-height: 1.45;
 }
 .cpm-source-custom-input {
 	margin-top: 8px;
-	border-radius: 7px;
+	border-radius: 8px;
 	padding: 7px 11px;
 	background: var(--cpm-bg);
 	font-size: 13px;
@@ -3977,6 +4326,84 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		transform: translateY(0) scale(1);
 	}
 }
+@media (prefers-reduced-motion: reduce) {
+	.cpm-dialog { animation-duration: 0.08s; }
+	.cpm-dialog-box, .cpm-source-drag-overlay { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
+	.cpm-btn, .cpm-dropzone, .cpm-dropzone-icon, .cpm-radio-card, .cpm-custom-radio {
+		transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+	}
+	.cpm-custom-radio-inner { transition: none; }
+	.cpm-btn:not(:disabled):active,
+	.cpm-upload-dialog .cpm-dropzone:not(:disabled):active,
+	.cpm-dropzone:hover .cpm-dropzone-icon,
+	.cpm-dropzone.is-active .cpm-dropzone-icon,
+	.cpm-radio-card:hover { transform: none; }
+	.cpm-upload-progress::-webkit-progress-value { transition: none; }
+	.cpm-upload-progress:indeterminate::-webkit-progress-bar { animation-duration: 10s; }
+	.cpm-upload-progress:indeterminate::-moz-progress-bar { animation-duration: 10s; }
+	.cpm-upload-dialog .cpm-spin-ring { animation-duration: 3s; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+	.cpm-dialog {
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+		background: rgba(0, 0, 0, 0.68);
+	}
+	.cpm-source-drag-overlay {
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+		background: var(--cpm-modal-bg);
+		opacity: 1;
+	}
+	.cpm-dialog-box, .cpm-source-dialog-box { border-color: var(--cpm-text-sub); }
+	.cpm-upload-dialog .cpm-dropzone { border-color: var(--cpm-text-sub); }
+}
+@media (forced-colors: active) {
+	.cpm-dialog-box, .cpm-source-dialog-box {
+		border: 1px solid CanvasText;
+		box-shadow: none;
+	}
+	.cpm-upload-dialog .cpm-dropzone {
+		border: 2px dashed ButtonBorder;
+		background: ButtonFace;
+		color: ButtonText;
+		box-shadow: none;
+	}
+	.cpm-upload-dialog .cpm-dropzone:is(:hover, :focus-visible, .is-active) {
+		border-color: Highlight;
+		outline-color: Highlight;
+	}
+	.cpm-upload-progress {
+		border: 1px solid ButtonBorder;
+		background: ButtonFace;
+	}
+	.cpm-upload-progress::-webkit-progress-value { background: Highlight; }
+	.cpm-upload-progress::-moz-progress-bar { background: Highlight; }
+	.cpm-btn {
+		border: 1px solid ButtonBorder;
+		box-shadow: none;
+	}
+	.cpm-radio-card {
+		border: 1.5px solid ButtonBorder;
+		background: ButtonFace;
+		color: ButtonText;
+		box-shadow: none;
+	}
+	.cpm-radio-card:is(.is-selected, :has(> input:checked)) {
+		border-color: Highlight;
+		box-shadow: inset 0 0 0 1px Highlight;
+	}
+	.cpm-radio-card:has(> input:focus-visible) {
+		outline: 2px solid Highlight;
+		outline-offset: 2px;
+	}
+	.cpm-detect-flag, .cpm-conflict-pill {
+		border: 1px solid ButtonBorder;
+		background: ButtonFace;
+		color: ButtonText;
+		box-shadow: none;
+	}
+}
 `;
 
 	function ensureCss() {
@@ -4060,7 +4487,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		});
 		let body = null;
 		try { body = await res.json(); } catch { /* no body */ }
-		if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+		if (!res.ok) {
+			const err = new Error((body && body.error) || `HTTP ${res.status}`);
+			err.status = res.status;
+			throw err;
+		}
 		if (body?.ok !== false && !body?.error && /^(POST|PUT|PATCH|DELETE)$/.test(options?.method || "") &&
 			/^\/(plugins|mcps)(\/|$)/.test(path) && !/\/(verify|oauth-status|inspect|tools\/toggle)$/.test(path)) {
 			document.dispatchEvent(new Event("uph-mcp-branding-changed"));
@@ -6288,6 +6719,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const skillsLoadFailed = useSkillsCatalog(state.sources.some(source => source.id === "skills-local"), setRows);
 		useWarmSkillIcons(rows?.["skills-local"], isDark);
 		const [addDialog, setAddDialog] = useState(false);
+		const addDialogBusyRef = useRef(false);
+		useEffect(() => {
+			if (!addDialog) addDialogBusyRef.current = false;
+		}, [addDialog]);
 		const [showAddMenu, setShowAddMenu] = useState(false);
 		const localSource = state.sources.find((s) => s.id === "local");
 		const hasLocalPlugins = typeof localSource?.pluginCount === "number" ? localSource.pluginCount > 0 : (rows?.local?.length || 0) > 0;
@@ -7683,7 +8118,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const onKey = (e) => {
 				if (e.key === "Escape") {
 					if (installFor) setInstallFor(null);
-					if (addDialog) setAddDialog(false);
+					if (addDialog && !addDialogBusyRef.current) setAddDialog(false);
 					if (confirmRemoveSource) setConfirmRemoveSource(null);
 					if (mcpDialog) setMcpDialog(false);
 				}
@@ -8228,7 +8663,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			addDialog && h(AddSourceDialog, {
 				isDark,
 				initialPhase: addDialog.initialPhase,
-				onCancel: () => setAddDialog(false),
+				onBusyChange: (v) => { addDialogBusyRef.current = !!v; },
+				onCancel: () => { if (!addDialogBusyRef.current) setAddDialog(false); },
 				onAdded: async (newSourceId, keepOpen) => {
 					if (!keepOpen) setAddDialog(false);
 					await refreshState();
@@ -8410,7 +8846,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Add Source Dialog (2-Step Naming) ──────────────────────────────
-	function AddSourceDialog({ onCancel, onAdded, showToast, isDark, initialPhase }) {
+	function AddSourceDialog({ onCancel, onAdded, showToast, isDark, initialPhase, onBusyChange }) {
+		const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 		const [url, setUrl] = useState("");
 		const [phase, setPhase] = useState(initialPhase || "url");
 		const [suggested, setSuggested] = useState("");
@@ -8419,13 +8856,69 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [normalizedUrl, setNormalizedUrl] = useState("");
 		const [repoLabel, setRepoLabel] = useState("");
 		const [pluginCount, setPluginCount] = useState(0);
-		const [busy, setBusy] = useState(false);
+		const [busy, setBusyState] = useState(false);
+		const [uploadProgress, setUploadProgress] = useState(null);
 		const [isDragging, setIsDragging] = useState(false);
 		const [localPreview, setLocalPreview] = useState(null);
 		const [localDuplicate, setLocalDuplicate] = useState(null);
 		const [localName, setLocalName] = useState("本地插件");
 		const customInputRef = useRef(null);
 		const uploadInputRef = useRef(null);
+		const stagedUploadIdRef = useRef(null);
+		const activeXhrRef = useRef(null);
+		const unmountedRef = useRef(false);
+		const busyRef = useRef(false);
+
+		const setBusy = (next) => {
+			const val = !!next;
+			busyRef.current = val;
+			if (!unmountedRef.current) setBusyState(val);
+			if (typeof onBusyChange === "function") onBusyChange(val);
+		};
+
+		const formatUploadBytes = (bytes) => {
+			const n = Number(bytes) || 0;
+			if (n < 1024) return `${n} B`;
+			if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+			return `${(n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+		};
+
+		const discardStagedUpload = (uploadId) => {
+			const id = uploadId || stagedUploadIdRef.current;
+			if (!id) return;
+			if (!uploadId || uploadId === stagedUploadIdRef.current) stagedUploadIdRef.current = null;
+			try {
+				Promise.resolve(api("/plugins/local/upload-cancel", {
+					method: "POST",
+					body: JSON.stringify({ uploadId: id }),
+				})).catch(() => {});
+			} catch {}
+		};
+
+		useEffect(() => () => {
+			unmountedRef.current = true;
+			if (activeXhrRef.current) {
+				try { activeXhrRef.current.abort(); } catch {}
+				activeXhrRef.current = null;
+			}
+			if (stagedUploadIdRef.current) discardStagedUpload(stagedUploadIdRef.current);
+			if (busyRef.current) {
+				busyRef.current = false;
+				if (typeof onBusyChange === "function") onBusyChange(false);
+			}
+		}, []);
+
+		useEffect(() => {
+			if (!busy) return;
+			if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+			const onKey = (e) => {
+				if (e.key !== "Escape") return;
+				e.preventDefault();
+				e.stopPropagation();
+			};
+			window.addEventListener("keydown", onKey, true);
+			return () => window.removeEventListener("keydown", onKey, true);
+		}, [busy]);
 
 		const isLocalPath = (str) => /^[a-zA-Z]:[\\/]|^\/|^file:\/\/|\.(zip|tgz|tar\.gz)$/i.test(String(str || "").trim().replace(/^["']|["']$/g, ""));
 
@@ -8443,13 +8936,44 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			plugin: { title: "发现插件", hint: "将加入本地插件标签" },
 		};
 
+		const formatVersionBadge = (version) => {
+			const raw = String(version ?? "").trim().replace(/^v(?=\d)/i, "");
+			return raw ? `v${raw}` : null;
+		};
+
+		const renderChoiceCard = ({ groupName, value, selected, onSelect, title, badge, desc, children }) => h("label", {
+			key: value,
+			className: "cpm-radio-card" + (selected ? " is-selected" : ""),
+			onClick: onSelect,
+		},
+			h("input", {
+				className: "cpm-sr-only",
+				type: "radio",
+				name: groupName,
+				value,
+				checked: selected,
+				onChange: onSelect,
+			}),
+			h("div", { className: "cpm-custom-radio" + (selected ? " checked" : ""), "aria-hidden": "true" },
+				h("div", { className: "cpm-custom-radio-inner" }),
+			),
+			h("div", { className: "cpm-radio-card-content" },
+				h("div", { className: "cpm-radio-card-header" },
+					h("div", { className: "cpm-radio-card-title" }, title),
+					badge || null,
+				),
+				desc && h("div", { className: "cpm-radio-card-desc" }, desc),
+				children || null,
+			),
+		);
+
 		// A dedicated class: .cpm-preview-header is already the hover card's
 		// layout row, and reusing it collapsed the title into two lines.
-		const previewHeader = (preview, kind) => {
+		const previewHeader = (preview, kind, hintOverride) => {
 			const meta = PREVIEW_TITLES[kind] || PREVIEW_TITLES.plugin;
 			return h("div", { className: "cpm-source-header cpm-detect-header", key: "header" },
 				h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title" }, meta.title),
-				h("div", { className: "cpm-detect-hint" }, meta.hint),
+				h("div", { className: "cpm-detect-hint" }, hintOverride || meta.hint),
 			);
 		};
 
@@ -8472,10 +8996,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const previewItem = (p, flag, muted) => h("li", { className: "cpm-detect-row", key: p.name },
 			h(PluginIcon, { plugin: p, isDark }),
 			h("div", { className: "cpm-detect-body" },
-				h("div", { className: "cpm-detect-name" }, p.displayName || p.name),
+				h("div", { className: "cpm-detect-name-row" },
+					h("div", { className: "cpm-detect-name" }, p.displayName || p.name),
+					flag && h("span", { className: "cpm-detect-flag" + (muted ? " cpm-detect-flag-muted" : "") }, flag),
+				),
 				h("div", { className: "cpm-detect-desc" }, p.description || "未提供描述"),
 			),
-			flag && h("span", { className: "cpm-detect-flag" + (muted ? " cpm-detect-flag-muted" : "") }, flag),
 		);
 		const previewCount = (items, noun) => `${items.length} 个${noun}`;
 		const previewMeta = (p) => {
@@ -8491,11 +9017,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const previewSingle = (p, flag, muted) => h("div", { className: "cpm-detect-single", key: "single" },
 			h(PluginIcon, { plugin: p, isDark }),
 			h("div", { className: "cpm-detect-body" },
-				h("div", { className: "cpm-detect-name" }, p.displayName || p.name),
+				h("div", { className: "cpm-detect-name-row" },
+					h("div", { className: "cpm-detect-name" }, p.displayName || p.name),
+					flag && h("span", { className: "cpm-detect-flag" + (muted ? " cpm-detect-flag-muted" : "") }, flag),
+				),
 				h("div", { className: "cpm-detect-desc" }, p.description || "未提供描述"),
 				previewMeta(p),
 			),
-			flag && h("span", { className: "cpm-detect-flag" + (muted ? " cpm-detect-flag-muted" : "") }, flag),
 		);
 		// One renderer for every preview body: the marketplace, a skill pack and a
 		// plugin folder differ only in nouns and in what each row calls a flag.
@@ -8533,7 +9061,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 
 		const handleInspectLocal = async (rawPath) => {
-			if (busy) {
+			if (busyRef.current) {
 				showToast("正在解析中", "请等待当前解析完成后再操作", { restart: false });
 				return;
 			}
@@ -8546,15 +9074,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					method: "POST",
 					body: JSON.stringify(payload)
 				});
+				if (unmountedRef.current) return;
 				if (!res.ok) {
 					showToast("无法解析导入内容", res.error || "请选择含 SKILL.md 的技能、Claude/Codex 插件或插件市场", { restart: false });
 					return;
 				}
 				await settleInspect(res, payload);
 			} catch (e) {
+				if (unmountedRef.current) return;
 				showToast("不符合规范，不可以上传", cleanError(e), { restart: false });
 			} finally {
-				setBusy(false);
+				if (!unmountedRef.current) setBusy(false);
 			}
 		};
 
@@ -8589,7 +9119,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					setPhase("local-duplicate");
 					return;
 				}
-				setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind, uploadName: uploadLabel(payload) });
+				setLocalPreview({
+					plugin: res.plugin,
+					plugins: res.plugins,
+					payload,
+					kind,
+					uploadName: uploadLabel(payload),
+					localTabName: res.localTabName || "",
+					localConflicts: res.localConflicts || [],
+				});
 				setPhase("local-preview");
 				return;
 			}
@@ -8598,7 +9136,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			// what was recognised. No sourceName is sent for these, so the tab keeps
 			// the name it was born with.
 			if (res.exists) {
-				setLocalDuplicate({ plugin: res.plugin, plugins: res.plugins, existingVersion: res.existingVersion, existingUpdatedAt: res.existingUpdatedAt, payload, kind });
+				setLocalDuplicate({
+					plugin: res.plugin,
+					plugins: res.plugins,
+					existingVersion: res.existingVersion,
+					existingUpdatedAt: res.existingUpdatedAt,
+					localTabName: res.localTabName || "",
+					payload,
+					kind,
+				});
 				setPhase("local-duplicate");
 			} else {
 				setLocalPreview({ plugin: res.plugin, plugins: res.plugins, payload, kind, uploadName: uploadLabel(payload), localTabName: res.localTabName });
@@ -8606,8 +9152,65 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
+		const inspectArchiveStream = (file) => new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			activeXhrRef.current = xhr;
+			xhr.open("POST", "/universal-plugin-hub/api/plugins/local/inspect?filename=" + encodeURIComponent(file.name || "plugin.zip"), true);
+			xhr.setRequestHeader("Content-Type", "application/octet-stream");
+			xhr.timeout = 0;
+			if (xhr.upload) {
+				xhr.upload.onprogress = (ev) => {
+					if (unmountedRef.current) return;
+					const total = ev.lengthComputable && ev.total > 0 ? ev.total : (file.size || 0);
+					const loaded = total > 0 ? Math.min(ev.loaded, total) : ev.loaded;
+					const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+					setUploadProgress({
+						stage: percent >= 100 ? "parsing" : "uploading",
+						loaded,
+						total,
+						percent,
+						filename: file.name,
+					});
+				};
+				xhr.upload.onload = () => {
+					if (unmountedRef.current) return;
+					setUploadProgress((prev) => ({
+						stage: "parsing",
+						loaded: file.size || prev?.total || 0,
+						total: file.size || prev?.total || 0,
+						percent: 100,
+						filename: file.name,
+					}));
+				};
+			}
+			const clearXhr = () => {
+				if (activeXhrRef.current === xhr) activeXhrRef.current = null;
+			};
+			xhr.onload = () => {
+				clearXhr();
+				let body = null;
+				try { body = JSON.parse(xhr.responseText || "null"); } catch {}
+				if (xhr.status >= 200 && xhr.status < 300) {
+					resolve(body || {});
+					return;
+				}
+				const err = new Error((body && body.error) || `HTTP ${xhr.status}`);
+				err.status = xhr.status;
+				reject(err);
+			};
+			xhr.onerror = () => {
+				clearXhr();
+				reject(new Error("上传连接中断，请检查网络或服务状态后重试"));
+			};
+			xhr.onabort = () => {
+				clearXhr();
+				reject(new Error("上传已取消"));
+			};
+			xhr.send(file);
+		});
+
 		const handleInspectLocalUpload = async (file) => {
-			if (busy) {
+			if (busyRef.current) {
 				showToast("正在解析中", "请等待当前解析完成后再操作", { restart: false });
 				return;
 			}
@@ -8615,31 +9218,68 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast("不支持的文件格式", "请选择 .zip、.tgz、.tar.gz 或 SKILL.md", { restart: false });
 				return;
 			}
-			if (file.size > 22 * 1024 * 1024) {
-				showToast("压缩包过大", "本地压缩包上限 22MB，请解压后重新打包上传", { restart: false });
+			if (file.size > MAX_UPLOAD_BYTES) {
+				showToast("超出 500MB 上限", `文件「${file.name}」（${formatUploadBytes(file.size)}）超出 500MB 上限，无法上传`, { restart: false, duration: 4500 });
 				return;
 			}
 			setBusy(true);
+			setUploadProgress({ stage: "uploading", loaded: 0, total: file.size || 0, percent: 0, filename: file.name });
 			try {
-				const data = await fileToBase64(file);
-				const payload = { data, filename: file.name };
-				const res = await api("/plugins/local/inspect", {
-					method: "POST",
-					body: JSON.stringify(payload)
-				});
+				let res;
+				let payload;
+				if (typeof XMLHttpRequest === "function") {
+					res = await inspectArchiveStream(file);
+					payload = res.uploadId ? { uploadId: res.uploadId, filename: file.name } : { filename: file.name };
+				} else {
+					const data = await fileToBase64(file);
+					if (unmountedRef.current) return;
+					setUploadProgress((prev) => ({
+						stage: "parsing",
+						loaded: file.size || prev?.total || 0,
+						total: file.size || prev?.total || 0,
+						percent: 100,
+						filename: file.name,
+					}));
+					payload = { data, filename: file.name };
+					res = await api("/plugins/local/inspect", {
+						method: "POST",
+						body: JSON.stringify(payload)
+					});
+					if (res?.uploadId) payload = { uploadId: res.uploadId, filename: file.name };
+				}
+				if (unmountedRef.current) {
+					if (res?.uploadId) discardStagedUpload(res.uploadId);
+					return;
+				}
 				if (!res.ok) {
 					showToast("无法解析导入内容", res.error || "请选择含 SKILL.md 的技能、Claude/Codex 插件或插件市场", { restart: false });
 					return;
 				}
+				if (res.uploadId) {
+					if (stagedUploadIdRef.current && stagedUploadIdRef.current !== res.uploadId) {
+						discardStagedUpload(stagedUploadIdRef.current);
+					}
+					stagedUploadIdRef.current = res.uploadId;
+				}
 				await settleInspect(res, payload);
 			} catch (e) {
-				showToast("不符合规范，不可以上传", cleanError(e), { restart: false });
+				if (unmountedRef.current) return;
+				const msg = cleanError(e);
+				if (e?.status === 413 || /超出\s*500\s*MB/i.test(msg)) {
+					showToast("超出 500MB 上限", `文件「${file.name}」${file.size > 0 ? `（${formatUploadBytes(file.size)}）` : ""}超出 500MB 上限，无法上传`, { restart: false, duration: 4500 });
+					return;
+				}
+				showToast("不符合规范，不可以上传", msg, { restart: false });
 			} finally {
-				setBusy(false);
+				if (!unmountedRef.current) {
+					setBusy(false);
+					setUploadProgress(null);
+				}
 			}
 		};
 
-		async function handleImportLocal(payload, overwrite, sourceName, kindOverride, overwriteNames) {
+		async function handleImportLocal(payload, overwrite, sourceName, kindOverride, overwriteNames, targetOverride) {
+			if (busyRef.current) return;
 			setBusy(true);
 			try {
 				// A pure skill package must not go through the plugin pipeline:
@@ -8656,11 +9296,21 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					method: "POST",
 					body: JSON.stringify(isSkillPackage
 						? { ...payload, overwrite, ...(overwriteNames?.length ? { overwriteNames } : {}) }
-						: { ...payload, overwrite, sourceName })
+						: { ...payload, overwrite, sourceName, ...(targetOverride ? { target: targetOverride } : {}) })
 				});
+				if (payload?.uploadId && payload.uploadId === stagedUploadIdRef.current) {
+					stagedUploadIdRef.current = null;
+				}
 				if (res.kind === "marketplace") {
-					showToast("插件市场已添加", `「${res.source?.name || localName}」已作为独立标签页加入`, { restart: false });
-					await onAdded(res.sourceId);
+					const mergedIntoLocal = res.target === "local" || targetOverride === "local";
+					const tabLabel = res.source?.name || localPreview?.localTabName || localDuplicate?.localTabName || localName;
+					showToast(
+						mergedIntoLocal ? "插件已加入本地标签" : "插件市场已添加",
+						mergedIntoLocal ? `「${tabLabel}」已导入 ${res.plugins?.length || 1} 个插件` : `「${tabLabel}」已作为独立标签页加入`,
+						{ restart: false },
+					);
+					await onAdded(res.sourceId || (mergedIntoLocal ? "local" : undefined));
+					if (unmountedRef.current) return;
 					setUrl("");
 					setPhase(initialPhase || "url");
 					setLocalPreview(null);
@@ -8671,6 +9321,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					const count = res.skills?.length || 1;
 					showToast("Skill 已导入", count > 1 ? `${count} 个 Skill 已加入 Skills 标签页` : `「${res.skills?.[0]?.name || ""}」已加入 Skills 标签页`, { restart: false });
 					await onAdded("skills-local");
+					if (unmountedRef.current) return;
 					setUrl("");
 					setPhase(initialPhase || "url");
 					setLocalPreview(null);
@@ -8679,14 +9330,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 				showToast("导入成功", res.plugins?.length > 1 ? `成功导入 ${res.plugins.length} 项插件 / Skills` : `成功导入「${res.plugin.displayName || res.plugin.name}」`, { restart: false });
 				await onAdded("local", true);
+				if (unmountedRef.current) return;
 				setUrl("");
 				setPhase(initialPhase || "url");
 				setLocalPreview(null);
 				setLocalDuplicate(null);
 			} catch (e) {
-				showToast("添加本地插件失败", cleanError(e), { restart: false });
+				if (unmountedRef.current) return;
+				const msg = cleanError(e);
+				if (e?.status === 410 || /上传缓存已过期/.test(msg)) {
+					if (payload?.uploadId && payload.uploadId === stagedUploadIdRef.current) {
+						stagedUploadIdRef.current = null;
+					}
+					setLocalPreview(null);
+					setLocalDuplicate(null);
+					setPhase(initialPhase || "url");
+					showToast("上传缓存已过期", "请重新选择文件上传", { restart: false });
+					return;
+				}
+				showToast("添加本地插件失败", msg, { restart: false });
 			} finally {
-				setBusy(false);
+				if (!unmountedRef.current) setBusy(false);
 			}
 		}
 
@@ -8769,7 +9433,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		const ensure = async (input) => {
-			if (busy) return;
+			if (busyRef.current) return;
 			const raw = (typeof input === "string" ? input : url).trim();
 			if (!raw) {
 				showToast("请输入地址或上传文件", "支持 Claude / Codex 仓库、插件 / Skills 文件夹及压缩包", { restart: false });
@@ -8782,6 +9446,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			setBusy(true);
 			try {
 				const body = await api("/sources/ensure", { method: "POST", body: JSON.stringify({ url: raw }) });
+				if (unmountedRef.current) return;
 				const finalRepoLabel = body.repoLabel || extractRepoLabel(raw);
 				const finalSuggested = computeSmartSuggestedName(raw, body.suggestedName);
 				setRepoLabel(finalRepoLabel);
@@ -8792,13 +9457,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				setPluginCount(body.pluginCount || 0);
 				setPhase("name");
 			} catch (e) {
+				if (unmountedRef.current) return;
 				showToast("校验失败", cleanError(e), { restart: false });
 			} finally {
-				setBusy(false);
+				if (!unmountedRef.current) setBusy(false);
 			}
 		};
 
 		const confirm = async () => {
+			if (busyRef.current) return;
 			const name = mode === "custom" ? customName.trim() : suggested;
 			if (!name) {
 				showToast("名称不能为空", "请输入或选择分类标签名", { restart: false });
@@ -8810,15 +9477,22 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					method: "POST",
 					body: JSON.stringify({ url: normalizedUrl || url.trim(), name }),
 				});
+				if (unmountedRef.current) return;
 				const count = res.pluginCount !== undefined ? res.pluginCount : pluginCount;
 				showToast("插件源已添加", `分类「${name}」已创建，成功导入 ${count} 个插件`, { restart: false });
 				await onAdded(res.source?.id);
 			} catch (e) {
+				if (unmountedRef.current) return;
 				showToast("添加源失败", cleanError(e), { restart: false });
 			} finally {
-				setBusy(false);
+				if (!unmountedRef.current) setBusy(false);
 			}
 		};
+
+		const inlineBusyProgress = () => busy && h("div", { className: "cpm-upload-inline-progress", key: "imp-prog" },
+			h("progress", { className: "cpm-upload-progress", "aria-label": "正在导入插件" }),
+			h("div", { className: "cpm-upload-status", role: "status", "aria-live": "polite", style: { marginTop: 0 } }, "正在导入文件，请勿关闭弹窗…"),
+		);
 
 		return h("div", { className: "cpm-dialog" },
 			h("div", {
@@ -8828,12 +9502,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					className: "cpm-dialog-box cpm-source-dialog-box" + (phase === "upload" ? " cpm-upload-dialog" : "") + (isDragging ? " is-dragging" : ""),
 				style: { position: "relative" },
 				onClick: (e) => e.stopPropagation(),
-				onDragOver: (e) => { e.preventDefault(); setIsDragging(true); },
+				onDragOver: (e) => { e.preventDefault(); if (!busyRef.current) setIsDragging(true); },
 				onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDragging(false); },
 				onDrop: (e) => {
 					e.preventDefault();
 					setIsDragging(false);
-					if (phase !== "upload") return;
+					if (phase !== "upload" || busyRef.current) return;
 					const file = e.dataTransfer?.files?.[0];
 					const text = e.dataTransfer?.getData("text/plain")?.trim();
 					const dropPath = file?.path || text;
@@ -8848,28 +9522,57 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				},
 			},
 				isDragging && phase === "upload" && h("div", { className: "cpm-source-drag-overlay" },
-					h("svg", { width: 36, height: 36, viewBox: "0 0 24 24", fill: "none", stroke: "var(--cpm-accent)", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-						h("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
-						h("polyline", { points: "17 8 12 3 7 8" }),
-						h("line", { x1: "12", y1: "3", x2: "12", y2: "15" })
-					),
-					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14 } }, "释放以解析插件 / Skills"),
-					h("div", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件、市场、Skills 和 SKILL.md")
+					h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
+					h("div", { className: "cpm-dropzone-title", style: { fontSize: 14, position: "relative" } }, "释放以解析插件 / Skills"),
+					h("div", { className: "cpm-dropzone-sub", style: { position: "relative" } }, "支持 Claude / Codex 插件、市场、Skills 和 SKILL.md")
 				),
 				phase === "upload" && [
-					h("div", { className: "cpm-dialog-title", id: "cpm-dialog-title", key: "title" }, "上传插件 / Skills"),
+					h("div", { className: "cpm-upload-header", key: "header" },
+						h("h2", { className: "cpm-dialog-title", id: "cpm-dialog-title" }, "上传插件 / Skills"),
+						h("p", { className: "cpm-upload-subtitle" }, "自动识别本地插件与独立 Skills"),
+					),
 					h("button", {
-						className: "cpm-dropzone",
+						className: "cpm-dropzone" + (busy ? " is-busy" : ""),
 						type: "button",
 						key: "dz",
-						style: { cursor: "pointer" },
+						autoFocus: true,
 						disabled: busy,
+						"aria-busy": busy ? "true" : undefined,
 						onClick: () => uploadInputRef.current && uploadInputRef.current.click(),
 					},
-						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" }, h(UploadDropIcon)),
-						h("span", { className: "cpm-dropzone-title" }, busy ? "正在解析…" : "拖入插件 / Skills，或点击上传"),
-						h("span", { className: "cpm-dropzone-sub" }, "支持 Claude / Codex 插件、插件市场和 Skills",
-							h("br"), ".zip / .tgz / .tar.gz / SKILL.md · 上限 22MB"),
+						h("span", { className: "cpm-dropzone-icon", "aria-hidden": "true" },
+							busy ? h("span", { className: "cpm-spin-ring", style: { width: 18, height: 18, borderWidth: 2 } }) : h(UploadDropIcon)
+						),
+						h("span", { className: "cpm-dropzone-title" }, busy
+							? (uploadProgress?.stage === "uploading" ? "正在流式上传文件…" : "正在解压并解析文件…")
+							: "拖入插件 / Skills，或点击上传"),
+						busy
+							? h("span", { className: "cpm-upload-progress-wrap" },
+								h("span", { className: "cpm-upload-progress-meta" },
+									h("span", null, uploadProgress?.stage === "uploading" && uploadProgress.total > 0
+										? `${formatUploadBytes(uploadProgress.loaded)} / ${formatUploadBytes(uploadProgress.total)}`
+										: (uploadProgress?.stage === "parsing"
+											? (uploadProgress.filename || "等待服务端完成解析")
+											: "正在校验本地路径与清单")),
+									h("span", null, uploadProgress?.stage === "uploading" && uploadProgress.total > 0
+										? `${uploadProgress.percent}%`
+										: "请勿关闭弹窗"),
+								),
+								uploadProgress?.stage === "uploading" && uploadProgress.total > 0
+									? h("progress", {
+										className: "cpm-upload-progress",
+										max: 100,
+										value: uploadProgress.percent,
+										"aria-label": "文件上传进度",
+									})
+									: h("progress", {
+										className: "cpm-upload-progress",
+										"aria-label": "正在解压与识别文件内容",
+									}),
+							)
+							: h("span", { className: "cpm-dropzone-formats" },
+								[".zip", ".tgz", ".tar.gz", "SKILL.md"].map((fmt) => h("span", { className: "cpm-dropzone-format", key: fmt }, fmt)),
+							),
 					),
 					h("input", {
 						key: "file",
@@ -8884,8 +9587,15 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							e.target.value = "";
 						},
 					}),
+					busy && h("div", { className: "cpm-upload-status", role: "status", "aria-live": "polite", key: "status" },
+						uploadProgress?.stage === "uploading"
+							? `正在上传${uploadProgress?.filename ? `「${uploadProgress.filename}」` : "文件"}，上传与解析完成前无法关闭…`
+							: uploadProgress?.stage === "parsing"
+								? "文件已上传，正在等待服务端解压与识别，请勿关闭弹窗…"
+								: "正在读取并解析本地内容，完成前无法关闭…"
+					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: onCancel }, "取消"),
 					),
 				],
 				phase === "url" && [
@@ -8911,50 +9621,64 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						),
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", disabled: busy, onClick: onCancel }, "取消"),
 						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? "正在解析…" : "下一步"),
 					),
 				],
 				phase === "local-preview" && localPreview && localPreview.kind === "marketplace" && [
-					previewHeader(localPreview, "marketplace"),
+					previewHeader(
+						localPreview,
+						"marketplace",
+						mode === "local" && localPreview.localTabName
+							? `检测到 marketplace 清单，将直接合并到「${localPreview.localTabName}」标签页`
+							: undefined,
+					),
 					previewBody(localPreview, {
-						noun: "插件", source: "导入后可逐个安装", ariaLabel: "市场中识别到的插件",
-						flagOf: () => null,
+						noun: "插件",
+						source: mode === "local" && localPreview.localTabName ? `加入「${localPreview.localTabName}」` : "导入后可逐个安装",
+						ariaLabel: "市场中识别到的插件",
+						muted: true,
+						flagOf: (p) => formatVersionBadge(p.version),
 					}),
-					h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "为这个市场起一个分类标签名"),
-					h("div", { className: "cpm-radio-group", key: "group" },
-						h("div", {
-							className: "cpm-radio-card" + (mode === "suggest" ? " is-selected" : ""),
-							onClick: () => setMode("suggest")
-						},
-							h("div", { className: "cpm-custom-radio" + (mode === "suggest" ? " checked" : "") },
-								h("div", { className: "cpm-custom-radio-inner" })
-							),
-							h("div", { className: "cpm-radio-card-content" },
-								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "使用系统建议简化名")
+					h("fieldset", { className: "cpm-radio-fieldset", key: "group" },
+						h("legend", { className: "cpm-source-prompt-label" },
+							localPreview.localTabName ? "选择该市场插件的添加方式" : "为这个市场起一个分类标签名",
+						),
+						h("div", { className: "cpm-radio-group" },
+							localPreview.localTabName && renderChoiceCard({
+								groupName: "cpm-market-mode",
+								value: "local",
+								selected: mode === "local",
+								onSelect: () => setMode("local"),
+								title: "加入本地插件标签",
+								badge: localPreview.localConflicts?.length > 0 && h(
+									"span",
+									{ className: "cpm-conflict-pill" },
+									`${localPreview.localConflicts.length} 项同名冲突`,
 								),
-								h("div", { className: "cpm-radio-card-desc" },
+								desc: ["直接合并到已有标签：", h("span", { className: "cpm-tag-preview", key: "tag" }, localPreview.localTabName)],
+							}),
+							renderChoiceCard({
+								groupName: "cpm-market-mode",
+								value: "suggest",
+								selected: mode === "suggest",
+								onSelect: () => setMode("suggest"),
+								title: "使用系统建议简化名",
+								desc: [
 									"分类标签名：",
 									// Only the market's own name: falling back to the local
 									// tab's label would show a name the server rejects as taken.
-									h("span", { className: "cpm-tag-preview" }, suggested || "（未提供，请自行命名）")
-								)
-							)
-						),
-						h("div", {
-							className: "cpm-radio-card" + (mode === "custom" ? " is-selected" : ""),
-							onClick: () => { setMode("custom"); if (customInputRef.current) customInputRef.current.focus(); }
-						},
-							h("div", { className: "cpm-custom-radio" + (mode === "custom" ? " checked" : "") },
-								h("div", { className: "cpm-custom-radio-inner" })
-							),
-							h("div", { className: "cpm-radio-card-content" },
-								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "我自己命名")
-								),
-								h("div", { className: "cpm-radio-card-desc" }, "自定义简短易记的分类导航标签名："),
-								h("div", { className: "cpm-input-wrap" },
+									h("span", { className: "cpm-tag-preview", key: "tag" }, suggested || "（未提供，请自行命名）"),
+								],
+							}),
+							renderChoiceCard({
+								groupName: "cpm-market-mode",
+								value: "custom",
+								selected: mode === "custom",
+								onSelect: () => { setMode("custom"); if (customInputRef.current) customInputRef.current.focus(); },
+								title: "我自己命名",
+								desc: "自定义简短易记的分类导航标签名：",
+								children: h("div", { className: "cpm-input-wrap" },
 									h("input", {
 										ref: customInputRef,
 										className: "cpm-input cpm-source-custom-input",
@@ -8966,16 +9690,47 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										onClick: (e) => e.stopPropagation(),
 									}),
 									h(ClearBtn, { value: customName, onClear: () => setCustomName("") }),
-								)
-							)
-						)
+								),
+							}),
+						),
 					),
+					inlineBusyProgress(),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: () => { discardStagedUpload(localPreview?.payload?.uploadId); setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
 						h("button", {
 							className: "cpm-btn cpm-btn-primary",
-							disabled: busy || (mode === "custom" ? !customName.trim() : !suggested),
-							onClick: () => handleImportLocal(localPreview.payload, false, mode === "custom" ? customName.trim() : suggested, "marketplace"),
+							disabled: busy || (mode === "custom" ? !customName.trim() : mode === "suggest" ? !suggested : false),
+							onClick: () => {
+								if (mode === "local") {
+									const conflicts = localPreview.localConflicts || [];
+									if (conflicts.length > 0) {
+										const lead = conflicts[0];
+										const matchedPlugin = (localPreview.plugins || []).find((p) => p.name === lead.name) || localPreview.plugin;
+										setLocalDuplicate({
+											plugin: {
+												...matchedPlugin,
+												name: lead.name,
+												displayName: lead.displayName || matchedPlugin?.displayName || lead.name,
+												version: lead.newVersion ?? matchedPlugin?.version,
+											},
+											plugins: localPreview.plugins,
+											conflicts,
+											existingVersion: lead.existingVersion,
+											existingUpdatedAt: lead.existingUpdatedAt,
+											localTabName: localPreview.localTabName,
+											target: "local",
+											payload: localPreview.payload,
+											kind: "marketplace",
+										});
+										setLocalPreview(null);
+										setPhase("local-duplicate");
+										return;
+									}
+									handleImportLocal(localPreview.payload, false, undefined, "marketplace", undefined, "local");
+									return;
+								}
+								handleImportLocal(localPreview.payload, false, mode === "custom" ? customName.trim() : suggested, "marketplace");
+							},
 						}, busy ? "正在导入…" : "确认添加"),
 					),
 				],
@@ -8992,8 +9747,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					// agents root, so one switch controls one command again.
 					localPreview.takenSkillNames?.length && h("div", { className: "cpm-source-prompt-label", key: "prompt", style: { color: "#d97706" } },
 						`已存在同名 Skill：${localPreview.takenSkillNames.join("、")}。覆盖后将使用你上传的这份`),
+					inlineBusyProgress(),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: () => { discardStagedUpload(localPreview?.payload?.uploadId); setLocalPreview(null); setPhase(initialPhase || "url"); } }, "取消"),
 						localPreview.takenSkillNames?.length
 							? h("button", {
 								className: "cpm-btn cpm-btn-primary",
@@ -9014,51 +9770,34 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					previewBody(localPreview, {
 						noun: "插件", ariaLabel: "识别到的插件", muted: true,
 						source: localPreview.localTabName ? `加入「${localPreview.localTabName}」` : "将新建本地插件标签",
-						flagOf: (p) => (p.version ? `v${p.version}` : null),
+						flagOf: (p) => formatVersionBadge(p.version),
 					}),
 					localPreview.localTabName
 						? null
-						: [
-							h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "请选择本地插件分类标签的显示名称："),
-							h("div", { className: "cpm-radio-group", key: "group" },
-								h("div", {
-									className: "cpm-radio-card" + (localName === "本地插件" ? " is-selected" : ""),
-									onClick: () => setLocalName("本地插件")
-								},
-									h("div", { className: "cpm-custom-radio" + (localName === "本地插件" ? " checked" : "") },
-										h("div", { className: "cpm-custom-radio-inner" })
-									),
-									h("div", { className: "cpm-radio-card-content" },
-										h("div", { className: "cpm-radio-card-header" },
-											h("div", { className: "cpm-radio-card-title" }, "使用中文名")
-										),
-										h("div", { className: "cpm-radio-card-desc" },
-											"分类标签名：",
-											h("span", { className: "cpm-tag-preview" }, "本地插件")
-										)
-									)
-								),
-								h("div", {
-									className: "cpm-radio-card" + (localName === "Local Plugins" ? " is-selected" : ""),
-									onClick: () => setLocalName("Local Plugins")
-								},
-									h("div", { className: "cpm-custom-radio" + (localName === "Local Plugins" ? " checked" : "") },
-										h("div", { className: "cpm-custom-radio-inner" })
-									),
-									h("div", { className: "cpm-radio-card-content" },
-										h("div", { className: "cpm-radio-card-header" },
-											h("div", { className: "cpm-radio-card-title" }, "使用英文名")
-										),
-										h("div", { className: "cpm-radio-card-desc" },
-											"分类标签名：",
-											h("span", { className: "cpm-tag-preview" }, "Local Plugins")
-										)
-									)
-								)
+						: h("fieldset", { className: "cpm-radio-fieldset", key: "group" },
+							h("legend", { className: "cpm-source-prompt-label" }, "请选择本地插件分类标签的显示名称："),
+							h("div", { className: "cpm-radio-group" },
+								renderChoiceCard({
+									groupName: "cpm-local-tab-name",
+									value: "本地插件",
+									selected: localName === "本地插件",
+									onSelect: () => setLocalName("本地插件"),
+									title: "使用中文名",
+									desc: ["分类标签名：", h("span", { className: "cpm-tag-preview", key: "tag" }, "本地插件")],
+								}),
+								renderChoiceCard({
+									groupName: "cpm-local-tab-name",
+									value: "Local Plugins",
+									selected: localName === "Local Plugins",
+									onSelect: () => setLocalName("Local Plugins"),
+									title: "使用英文名",
+									desc: ["分类标签名：", h("span", { className: "cpm-tag-preview", key: "tag" }, "Local Plugins")],
+								}),
 							),
-						],
+						),
+					inlineBusyProgress(),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: () => { discardStagedUpload(localPreview?.payload?.uploadId); setLocalPreview(null); setPhase(initialPhase || "url"); } }, "返回"),
 						h("button", {
 							className: "cpm-btn cpm-btn-primary",
 							disabled: busy,
@@ -9071,39 +9810,65 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("div", { className: "cpm-source-header-title", id: "cpm-dialog-title", style: { color: "#d97706" } }, "存在同名插件 / Skills"),
 						h("div", { className: "cpm-source-meta-row" },
 							h("span", { className: "cpm-source-repo-text" }, localDuplicate.plugin.name),
-							h("span", { className: "cpm-source-meta-sep" }, "·"),
-							h("span", { className: "cpm-source-count-text" }, `已安装版本: ${localDuplicate.existingVersion || '1.0.0'}`),
+							localDuplicate.localTabName && h("span", { className: "cpm-source-meta-sep" }, "·"),
+							localDuplicate.localTabName && h("span", { className: "cpm-source-count-text" }, `目标标签：${localDuplicate.localTabName}`),
+							formatVersionBadge(localDuplicate.existingVersion) && h("span", { className: "cpm-source-meta-sep" }, "·"),
+							formatVersionBadge(localDuplicate.existingVersion) && h("span", { className: "cpm-source-count-text" }, `已安装版本: ${formatVersionBadge(localDuplicate.existingVersion)}`),
 						),
 					),
 					h("div", { className: "cpm-local-dup-card", key: "info" },
-						h("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8 } },
-							h(PluginIcon, { plugin: localDuplicate.plugin, isDark }),
-							h("div", null,
-								h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)" } }, localDuplicate.plugin.displayName || localDuplicate.plugin.name),
-								h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)" } }, `标识：${localDuplicate.plugin.name}`),
-							),
+						localDuplicate.conflicts?.length > 1
+							? [
+								h("div", { key: "desc", style: { fontSize: 12.5, fontWeight: 600, color: "var(--cpm-text)", marginBottom: 4 } },
+									`「${localDuplicate.localTabName || "本地插件"}」中已存在 ${localDuplicate.conflicts.length} 个同名插件，覆盖更新将完整替换旧文件与已安装版本：`),
+								h("ul", { className: "cpm-local-dup-list", key: "clist" }, localDuplicate.conflicts.map((c) => {
+									const oldVer = formatVersionBadge(c.existingVersion) || "未声明";
+									const newVer = formatVersionBadge(c.newVersion) || "未声明";
+									return h("li", { className: "cpm-local-dup-item", key: c.name },
+										h("span", { className: "cpm-local-dup-item-name" }, c.displayName || c.name),
+										h("span", { className: "cpm-local-dup-item-vers" },
+											h("span", null, oldVer),
+											h("span", null, "→"),
+											h("span", { className: "cpm-local-dup-item-new" }, newVer),
+										),
+									);
+								})),
+							]
+							: [
+								h("div", { key: "top", style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8 } },
+									h(PluginIcon, { plugin: localDuplicate.plugin, isDark }),
+									h("div", null,
+										h("div", { style: { fontSize: 14, fontWeight: 700, color: "var(--cpm-text)" } }, localDuplicate.plugin.displayName || localDuplicate.plugin.name),
+										h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)" } }, `标识：${localDuplicate.plugin.name}`),
+									),
+								),
+								h("div", { className: "cpm-local-dup-grid", key: "grid" },
+									h("div", null,
+										h("div", { style: { color: "var(--cpm-muted)", fontSize: 11, marginBottom: 2 } }, "当前已安装版本"),
+										h("div", { style: { fontWeight: 600, color: "var(--cpm-text)", fontVariantNumeric: "tabular-nums" } }, formatVersionBadge(localDuplicate.existingVersion) || "未声明"),
+										localDuplicate.existingUpdatedAt && h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, new Date(localDuplicate.existingUpdatedAt).toLocaleDateString()),
+									),
+									h("div", null,
+										h("div", { style: { color: "var(--cpm-muted)", fontSize: 11, marginBottom: 2 } }, "新导入版本"),
+										h("div", { style: { fontWeight: 600, color: "#10b981", fontVariantNumeric: "tabular-nums" } }, formatVersionBadge(localDuplicate.plugin.version) || "未声明"),
+										h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, "准备覆盖"),
+									),
+								),
+							],
+						h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)", lineHeight: 1.4 } },
+							localDuplicate.target === "local"
+								? `「${localDuplicate.localTabName || "本地插件"}」中同名插件及其已安装副本将被新版完全覆盖更新，其余插件保持不变。`
+								: "覆盖更新将替换本次导入中所有同名插件 / Skills 的文件与已安装副本。",
 						),
-						h("div", { className: "cpm-local-dup-grid" },
-							h("div", null,
-								h("div", { style: { color: "var(--cpm-muted)", fontSize: 11, marginBottom: 2 } }, "当前已安装版本"),
-								h("div", { style: { fontWeight: 600, color: "var(--cpm-text)" } }, `v${localDuplicate.existingVersion || '1.0.0'}`),
-								localDuplicate.existingUpdatedAt && h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, new Date(localDuplicate.existingUpdatedAt).toLocaleDateString()),
-							),
-							h("div", null,
-								h("div", { style: { color: "var(--cpm-muted)", fontSize: 11, marginBottom: 2 } }, "新导入版本"),
-								h("div", { style: { fontWeight: 600, color: "#10b981" } }, `v${localDuplicate.plugin.version || '1.0.0'}`),
-								h("div", { style: { fontSize: 10.5, color: "var(--cpm-muted)", marginTop: 2 } }, "准备覆盖"),
-							),
-						),
-						h("div", { style: { fontSize: 11.5, color: "var(--cpm-muted)", lineHeight: 1.4 } }, "覆盖更新将替换本次导入中所有同名插件 / Skills 的文件。"),
-						localDuplicate.plugins?.length > 1 && h("ul", { style: { maxHeight: 160, overflowY: "auto", fontSize: 12 } }, localDuplicate.plugins.map((p) => h("li", { key: p.name }, p.displayName || p.name))),
+						!localDuplicate.conflicts?.length && localDuplicate.plugins?.length > 1 && h("ul", { className: "cpm-local-dup-list" }, localDuplicate.plugins.map((p) => h("li", { className: "cpm-local-dup-item", key: p.name }, h("span", { className: "cpm-local-dup-item-name" }, p.displayName || p.name), formatVersionBadge(p.version) && h("span", { className: "cpm-local-dup-item-vers" }, formatVersionBadge(p.version))))),
 					),
+					inlineBusyProgress(),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => { setLocalDuplicate(null); setPhase(initialPhase || "url"); } }, "取消"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: () => { discardStagedUpload(localDuplicate?.payload?.uploadId); setLocalDuplicate(null); setPhase(initialPhase || "url"); } }, "取消"),
 						h("button", {
 							className: "cpm-btn cpm-btn-warning",
 							disabled: busy,
-							onClick: () => handleImportLocal(localDuplicate.payload, true, undefined, localDuplicate.kind),
+							onClick: () => handleImportLocal(localDuplicate.payload, true, undefined, localDuplicate.kind, undefined, localDuplicate.target),
 						}, busy ? "正在覆盖…" : "覆盖更新"),
 					),
 				],
@@ -9125,38 +9890,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							h("span", { className: "cpm-source-count-text" }, `${pluginCount} 个可用插件`)
 						),
 					),
-					h("div", { className: "cpm-source-prompt-label", key: "prompt" }, "请选择或输入在顶部导航栏中的显示名称："),
-					h("div", { className: "cpm-radio-group", key: "group" },
-						h("div", {
-							className: "cpm-radio-card" + (mode === "suggest" ? " is-selected" : ""),
-							onClick: () => setMode("suggest")
-						},
-							h("div", { className: "cpm-custom-radio" + (mode === "suggest" ? " checked" : "") },
-								h("div", { className: "cpm-custom-radio-inner" })
-							),
-							h("div", { className: "cpm-radio-card-content" },
-								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "使用系统建议简化名")
-								),
-								h("div", { className: "cpm-radio-card-desc" },
-									"分类标签名：",
-									h("span", { className: "cpm-tag-preview" }, suggested)
-								)
-							)
-						),
-						h("div", {
-							className: "cpm-radio-card" + (mode === "custom" ? " is-selected" : ""),
-							onClick: () => { setMode("custom"); if (customInputRef.current) customInputRef.current.focus(); }
-						},
-							h("div", { className: "cpm-custom-radio" + (mode === "custom" ? " checked" : "") },
-								h("div", { className: "cpm-custom-radio-inner" })
-							),
-							h("div", { className: "cpm-radio-card-content" },
-								h("div", { className: "cpm-radio-card-header" },
-									h("div", { className: "cpm-radio-card-title" }, "我自己命名")
-								),
-								h("div", { className: "cpm-radio-card-desc" }, "自定义简短易记的分类导航标签名："),
-								h("div", { className: "cpm-input-wrap", },
+					h("fieldset", { className: "cpm-radio-fieldset", key: "group" },
+						h("legend", { className: "cpm-source-prompt-label" }, "请选择或输入在顶部导航栏中的显示名称："),
+						h("div", { className: "cpm-radio-group" },
+							renderChoiceCard({
+								groupName: "cpm-git-source-name",
+								value: "suggest",
+								selected: mode === "suggest",
+								onSelect: () => setMode("suggest"),
+								title: "使用系统建议简化名",
+								desc: ["分类标签名：", h("span", { className: "cpm-tag-preview", key: "tag" }, suggested)],
+							}),
+							renderChoiceCard({
+								groupName: "cpm-git-source-name",
+								value: "custom",
+								selected: mode === "custom",
+								onSelect: () => { setMode("custom"); if (customInputRef.current) customInputRef.current.focus(); },
+								title: "我自己命名",
+								desc: "自定义简短易记的分类导航标签名：",
+								children: h("div", { className: "cpm-input-wrap" },
 									h("input", {
 										ref: customInputRef,
 										className: "cpm-input cpm-source-custom-input",
@@ -9171,12 +9923,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										}
 									}),
 									h(ClearBtn, { value: customName, onClear: () => setCustomName("") }),
-								)
-							)
-						)
+								),
+							}),
+						),
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", onClick: () => setPhase("url") }, "上一步"),
+						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: () => setPhase("url") }, "上一步"),
 						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || (mode === "custom" && !customName.trim()), onClick: confirm }, busy ? "正在保存…" : "确认添加"),
 					),
 				],

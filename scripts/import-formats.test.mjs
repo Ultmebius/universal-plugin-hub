@@ -187,7 +187,7 @@ test('DSH Hub import formats', async (t) => {
       execFileSync(tar, ['-czf', archive, '-C', root, 'market-bundle'], { windowsHide: true })
       assert.equal((await inspectLocalPlugin(archive)).plugins.length, 2)
       await importLocalPlugin({ path: archive })
-      assert.equal((await inspectLocalPlugin(dir)).exists, true)
+      assert.equal((await inspectLocalPlugin(dir)).localConflicts.length, 2)
       await assert.rejects(importLocalPlugin({ path: dir }), /同名/)
       await importLocalPlugin({ path: dir, overwrite: true })
       const names = readMarketplace('local').map((r) => r.name)
