@@ -7,6 +7,8 @@ import { createServer } from 'node:http'
 import { performance } from 'node:perf_hooks'
 import { PNG } from 'pngjs'
 import { buildPluginIcons, getOrFetchIcon } from '../src/icons.js'
+import * as iconModule from '../src/icons.js'
+import * as parserModule from '../src/parser.js'
 import { mountRoutes } from '../src/routes.js'
 import { invalidateMarketplaceCache } from '../src/parser.js'
 import { installedDir, marketRoot, sourceCacheDir, writeState } from '../src/store.js'
@@ -179,8 +181,13 @@ test('HTTP caching (ETag / 304 / Cache-Control), O(1) /plugin-icon, LRU caches, 
 
       const resStale = await request(staleUrl)
       assert.equal(resStale.status, 200)
-      assert.equal(resStale.headers['Cache-Control'], 'public, max-age=604800')
+      assert.equal(resStale.headers['Cache-Control'], 'public, max-age=0, must-revalidate')
       assert.equal(resStale.headers['ETag'], etag)
+
+      const resStale304 = await request(staleUrl, { 'if-none-match': etag })
+      assert.equal(resStale304.status, 304)
+      assert.equal(resStale304.body?.length || 0, 0)
+      assert.equal(resStale304.headers['Cache-Control'], 'public, max-age=0, must-revalidate')
 
       const resUnver304 = await request(unversionedUrl, { 'if-none-match': `"other", ${etag}` })
       assert.equal(resUnver304.status, 304)
@@ -460,6 +467,96 @@ test('HTTP caching (ETag / 304 / Cache-Control), O(1) /plugin-icon, LRU caches, 
       } finally {
         await new Promise((resolve) => server.close(resolve))
       }
+    })
+
+    await t.test('shared parser discovery resolves manifest.name-derived entries and monorepo/root variants in O(1) without buildPluginIcons', async () => {
+      assert.equal(typeof parserModule.resolveMarketplacePluginDir, 'function', 'parser.js should expose resolveMarketplacePluginDir')
+
+      const previewsDir = join(marketRoot(), 'icons', 'previews')
+      rmSync(previewsDir, { recursive: true, force: true })
+      const siblingPng = makeTranslucentPng(512, 512)
+
+      // 1. Marketplace manifest entry without `r.name`, deriving name from dir/.claude-plugin/plugin.json
+      const derivedMkt = sourceCacheDir('derived-name-market')
+      write(join(derivedMkt, 'plugins', 'sib', 'assets', 'icon.png'), siblingPng)
+      const derivedDir = join(derivedMkt, 'plugins', 'nameless-folder')
+      write(join(derivedDir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'manifest-derived-name', description: 'derived' }))
+      write(join(derivedDir, 'assets', 'mark.svg'), svgA)
+      write(join(derivedMkt, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+        plugins: [
+          { name: 'sib', source: './plugins/sib' },
+          { source: './plugins/nameless-folder' },
+        ],
+      }))
+      invalidateMarketplaceCache('derived-name-market')
+
+      const resolvedDerived = await request(`/universal-plugin-hub/api/plugin-icon?sourceId=derived-name-market&name=manifest-derived-name&path=${encodeURIComponent('./assets/mark.svg')}`)
+      assert.equal(resolvedDerived.status, 200)
+      assert.deepEqual(resolvedDerived.body, svgA)
+      assert.equal(existsSync(previewsDir), false, 'must NOT scan sibling PNGs via buildPluginIcons')
+
+      // Updating marketplace.json on disk updates resolved plugin directory automatically
+      const v2Dir = join(derivedMkt, 'plugins', 'v2-folder')
+      write(join(v2Dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'manifest-derived-v2' }))
+      write(join(v2Dir, 'assets', 'mark.svg'), svgB)
+      write(join(derivedMkt, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+        plugins: [{ source: './plugins/v2-folder' }],
+      }))
+      const resolvedV2 = await request(`/universal-plugin-hub/api/plugin-icon?sourceId=derived-name-market&name=manifest-derived-v2&path=${encodeURIComponent('./assets/mark.svg')}`)
+      assert.equal(resolvedV2.status, 200)
+      assert.deepEqual(resolvedV2.body, svgB)
+
+      // 2. Monorepo folder whose manifest overrides folder name
+      const monoMkt = sourceCacheDir('mono-derived-market')
+      write(join(monoMkt, 'plugins', 'folder-alias', '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'mono-real-name' }))
+      write(join(monoMkt, 'plugins', 'folder-alias', 'icon.svg'), svgB)
+      const monoRes = await request(`/universal-plugin-hub/api/plugin-icon?sourceId=mono-derived-market&name=mono-real-name&path=icon.svg`)
+      assert.equal(monoRes.status, 200)
+      assert.deepEqual(monoRes.body, svgB)
+
+      // 3. Single standalone root plugin deriving name from manifest
+      const rootMkt = sourceCacheDir('standalone-derived-market')
+      write(join(rootMkt, 'plugin.json'), JSON.stringify({ name: 'root-custom-name' }))
+      write(join(rootMkt, 'assets', 'root.svg'), svgA)
+      const rootRes = await request(`/universal-plugin-hub/api/plugin-icon?sourceId=standalone-derived-market&name=root-custom-name&path=${encodeURIComponent('./assets/root.svg')}`)
+      assert.equal(rootRes.status, 200)
+      assert.deepEqual(rootRes.body, svgA)
+    })
+
+    await t.test('localIconMemory skips >256KB icons and enforces total byte cap', async () => {
+      assert.equal(typeof iconModule.getLocalIconCacheStats, 'function', 'icons.js should expose getLocalIconCacheStats')
+      iconModule.invalidateLocalIconCache()
+
+      const mktDir = sourceCacheDir('large-icon-market')
+      const smallFile = join(mktDir, 'plugins', 'small-p', 'icon.svg')
+      const largeFile = join(mktDir, 'plugins', 'big-p', 'icon.png')
+      const largePng = makeNoisyPng(320, 320, 777)
+      assert.ok(largePng.length > 256 * 1024 && largePng.length <= 2 * 1024 * 1024, `expected 256KB < size <= 2MB, got ${largePng.length}`)
+
+      write(smallFile, svgA)
+      write(largeFile, largePng)
+      write(join(mktDir, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+        plugins: [
+          { name: 'small-p', source: './plugins/small-p' },
+          { name: 'big-p', source: './plugins/big-p' },
+        ],
+      }))
+
+      const smallRes = await request('/universal-plugin-hub/api/plugin-icon?sourceId=large-icon-market&name=small-p&path=icon.svg')
+      assert.equal(smallRes.status, 200)
+      const statsAfterSmall = iconModule.getLocalIconCacheStats()
+      assert.equal(statsAfterSmall.size, 1)
+      assert.equal(statsAfterSmall.bytes, svgA.length)
+      assert.equal(statsAfterSmall.maxItemBytes, 256 * 1024)
+      assert.equal(statsAfterSmall.maxTotalBytes, 32 * 1024 * 1024)
+
+      const bigRes = await request('/universal-plugin-hub/api/plugin-icon?sourceId=large-icon-market&name=big-p&path=icon.png')
+      assert.equal(bigRes.status, 200)
+      assert.deepEqual(bigRes.body, largePng)
+      const statsAfterBig = iconModule.getLocalIconCacheStats()
+      assert.equal(statsAfterBig.size, 1, '>256KB local icon must not be added to localIconMemory')
+      assert.equal(statsAfterBig.bytes, svgA.length, '>256KB local icon must not increase localIconMemoryBytes')
+      assert.ok(statsAfterBig.bytes <= statsAfterBig.maxTotalBytes)
     })
   } finally {
     globalThis.fetch = oldFetch

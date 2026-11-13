@@ -14,10 +14,42 @@ import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, installedDir } from './store.js'
 import { safeSegment, pluginPath, sourceRepositoryDir } from './market.js'
 import { parseAgentDefinition } from './agents-map.js'
-import { buildPluginIcons } from './icons.js'
+import { buildPluginIcons, touchLru, setLru } from './icons.js'
 
 const DIR_PARSER_CACHE = new Map()
 const DIR_PARSER_CACHE_TTL = 20000 // 20s TTL for file scanning
+const VALID_PLUGIN_NAME = /^[a-z0-9][a-z0-9._-]*$/i
+const MANIFEST_CANDIDATE_PARTS = [
+  ['.claude-plugin', 'marketplace.json'],
+  ['.agents', 'plugins', 'marketplace.json'],
+  ['marketplace.json'],
+  ['claude-plugins.json'],
+  ['registry.json'],
+  ['plugins.json'],
+  ['catalog.json'],
+  ['market.json'],
+  ['mcp-servers.json'],
+  ['servers.json'],
+  ['index.json'],
+  ['.well-known', 'agent-card.json'],
+]
+const MONO_DIRS = ['plugins', 'skills', 'packages', 'tools', 'extensions']
+const ROOT_PLUGIN_MARKER_PARTS = [
+  ['SKILL.md'],
+  ['skills'],
+  ['commands'],
+  ['agents'],
+  ['hooks'],
+  ['mcp.json'],
+  ['.mcp.json'],
+  ['server.json'],
+  ['.claude-plugin', 'plugin.json'],
+  ['.codex-plugin', 'plugin.json'],
+  ['plugin.json'],
+  ['.cursor', 'rules'],
+  ['.cursorrules'],
+  ['package.json'],
+]
 
 export function invalidateParserCaches() {
   DIR_PARSER_CACHE.clear()
@@ -83,10 +115,10 @@ function readPluginShortDescription(dir) {
   } catch { return '' }
 }
 
-function normalizeRow(row, sourceId, dir) {
+function normalizeRow(row, sourceId, dir, { skipIcons = false } = {}) {
   if (!row) return null
   const name = typeof row.name === 'string' ? row.name : (typeof row.identifier === 'string' ? row.identifier : '')
-  if (!name || !/^[a-z0-9][a-z0-9._-]*$/i.test(name)) return null
+  if (!name || !VALID_PLUGIN_NAME.test(name)) return null
   const cleanName = name.toLowerCase()
 
   const author = row.author && typeof row.author === 'object'
@@ -118,21 +150,25 @@ function normalizeRow(row, sourceId, dir) {
     source,
     local: typeof source === 'string' && (source === './' || source.startsWith('./')),
     lspServers: row.lspServers || undefined,
-    icons: buildPluginIcons(row, { sourceId, name: cleanName, dir, source }),
+    ...(skipIcons ? {} : { icons: buildPluginIcons(row, { sourceId, name: cleanName, dir, source }) }),
   }
 }
 
 const MARKETPLACE_CACHE = new Map()
 const MARKETPLACE_SELECTION_CACHE = new Map()
+const PLUGIN_DIR_INDEX_CACHE = new Map()
+const PLUGIN_DIR_INDEX_LIMIT = 64
 const MARKETPLACE_CACHE_TTL = 30000 // 30 seconds
 
 export function invalidateMarketplaceCache(sourceId) {
   if (sourceId) {
     MARKETPLACE_CACHE.delete(sourceId)
     MARKETPLACE_SELECTION_CACHE.delete(sourceId)
+    PLUGIN_DIR_INDEX_CACHE.delete(sourceId)
   } else {
     MARKETPLACE_CACHE.clear()
     MARKETPLACE_SELECTION_CACHE.clear()
+    PLUGIN_DIR_INDEX_CACHE.clear()
   }
 }
 
@@ -164,7 +200,30 @@ export function readMarketplace(sourceId, names) {
   return rows
 }
 
-export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
+function resolveMcpDict(content) {
+  if (!content || typeof content !== 'object') return null
+  if (content.mcpServers && typeof content.mcpServers === 'object') return content.mcpServers
+  if (content.servers && typeof content.servers === 'object') return content.servers
+  return null
+}
+
+function resolveCaseAEntryDir(sourceId, cache, r) {
+  const source = r.source?.source === 'local' ? r.source.path : r.source
+  let dir = typeof source === 'string' && source.startsWith('./') ? pluginPath(cache, source) : null
+  if (source && typeof source === 'object' && r.name) {
+    dir = sourceRepositoryDir(cache, source) || pluginContentDir(sourceId, r.name, source, false)
+  }
+  return { source, dir }
+}
+
+function hasExplicitRootPlugin(cache) {
+  return existsSync(join(cache, '.codex-plugin', 'plugin.json'))
+    || existsSync(join(cache, '.claude-plugin', 'plugin.json'))
+    || existsSync(join(cache, 'SKILL.md'))
+    || existsSync(join(cache, 'skill.md'))
+}
+
+function resolveDirPluginInfo(entryDir, fallbackName, { includeMetadata = true } = {}) {
   const rootSkill = existsSync(join(entryDir, 'SKILL.md')) || existsSync(join(entryDir, 'skill.md'))
   const hasSkill = rootSkill || existsSync(join(entryDir, 'skills')) || existsSync(join(entryDir, 'commands'))
   const hasManifest = existsSync(join(entryDir, '.codex-plugin', 'plugin.json')) || existsSync(join(entryDir, '.claude-plugin', 'plugin.json')) || existsSync(join(entryDir, 'plugin.json')) || existsSync(join(entryDir, 'package.json'))
@@ -172,7 +231,7 @@ export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
   const hasAgents = existsSync(join(entryDir, 'agents'))
   if (!hasSkill && !hasManifest && !hasMcp && !hasAgents) return null
 
-  let displayName = formatDisplayName(fallbackName)
+  let displayName = includeMetadata ? formatDisplayName(fallbackName) : ''
   let description = ''
   let version = '1.0.0'
   let author = undefined
@@ -181,52 +240,258 @@ export function parsePluginRowFromDir(entryDir, fallbackName, sourceId) {
   const manifest = readPluginManifest(entryDir, false)
   if (manifest) {
     if (manifest.name) name = manifest.name
-    displayName = manifest.displayName || formatDisplayName(name)
-    if (manifest.description) description = manifest.description
-    if (manifest.version) version = manifest.version
-    if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author?.name
+    if (includeMetadata) {
+      displayName = manifest.displayName || formatDisplayName(name)
+      if (manifest.description) description = manifest.description
+      if (manifest.version) version = manifest.version
+      if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author?.name
+    }
   } else if (rootSkill) {
     try {
       const raw = readFileSync(join(entryDir, existsSync(join(entryDir, 'SKILL.md')) ? 'SKILL.md' : 'skill.md'), 'utf8')
       const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
       const meta = match ? parseYaml(match[1]) : null
       if (typeof meta?.name === 'string') name = meta.name
-      displayName = formatDisplayName(name)
-      description = extractMdDescription(raw)
+      if (includeMetadata) {
+        displayName = formatDisplayName(name)
+        description = extractMdDescription(raw)
+      }
     } catch {}
-  } else if (existsSync(join(entryDir, 'README.md'))) {
+  } else if (includeMetadata && existsSync(join(entryDir, 'README.md'))) {
     try { description = extractMdDescription(readFileSync(join(entryDir, 'README.md'), 'utf8')) } catch {}
   }
 
-  return normalizeRow({
-    ...manifest,
-    name,
-    displayName,
-    description,
-    version,
-    author,
-    source: `./${fallbackName}`,
-  }, sourceId, entryDir)
+  return { name, displayName, description, version, author, manifest }
 }
 
-export function parseMarketplaceFromDisk(sourceId, cache, names) {
-  // 1. Check Multi-Plugin Manifest Candidates
-  const manifestCandidates = [
-    join(cache, '.claude-plugin', 'marketplace.json'),
-    join(cache, '.agents', 'plugins', 'marketplace.json'),
-    join(cache, 'marketplace.json'),
-    join(cache, 'claude-plugins.json'),
-    join(cache, 'registry.json'),
-    join(cache, 'plugins.json'),
-    join(cache, 'catalog.json'),
-    join(cache, 'market.json'),
-    join(cache, 'mcp-servers.json'),
-    join(cache, 'servers.json'),
-    join(cache, 'index.json'),
-    join(cache, '.well-known', 'agent-card.json'),
-  ]
+function resolveStandaloneRootInfo(cache, sourceId, { includeMetadata = true } = {}) {
+  if (!ROOT_PLUGIN_MARKER_PARTS.some((parts) => existsSync(join(cache, ...parts)))) return null
+  let name = sourceId
+  let displayName = includeMetadata ? formatDisplayName(sourceId) : ''
+  let description = ''
+  let version = '1.0.0'
+  let author = undefined
 
-  for (const manifestPath of manifestCandidates) {
+  const manifest = readPluginManifest(cache)
+  if (manifest) {
+    if (manifest.name) name = manifest.name
+    if (includeMetadata) {
+      if (manifest.displayName) displayName = manifest.displayName
+      if (manifest.description) description = manifest.description
+      if (manifest.version) version = manifest.version
+      if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author.name
+    }
+  } else if (includeMetadata && existsSync(join(cache, 'SKILL.md'))) {
+    try {
+      description = extractMdDescription(readFileSync(join(cache, 'SKILL.md'), 'utf8'))
+    } catch {}
+  } else if (includeMetadata && existsSync(join(cache, 'README.md'))) {
+    try {
+      description = extractMdDescription(readFileSync(join(cache, 'README.md'), 'utf8'))
+    } catch {}
+  }
+  return { name, displayName, description, version, author, manifest }
+}
+
+export function parsePluginRowFromDir(entryDir, fallbackName, sourceId, options = {}) {
+  const info = resolveDirPluginInfo(entryDir, fallbackName, { includeMetadata: true })
+  if (!info) return null
+
+  return normalizeRow({
+    ...info.manifest,
+    name: info.name,
+    displayName: info.displayName,
+    description: info.description,
+    version: info.version,
+    author: info.author,
+    source: `./${fallbackName}`,
+  }, sourceId, entryDir, options)
+}
+
+function indexManifestPluginDirs(sourceId, cache, content) {
+  if (!content || typeof content !== 'object') return null
+  if (Array.isArray(content.plugins)) {
+    const entries = new Map()
+    for (const r of content.plugins) {
+      if (!r || typeof r !== 'object') continue
+      if (r.source?.source === 'local' && (typeof r.source.path !== 'string' || !r.source.path.startsWith('./'))) continue
+      const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
+      let rawName = ''
+      if (typeof r.name === 'string') {
+        rawName = r.name
+      } else {
+        const manifest = r.name === undefined && dir ? readPluginManifest(dir, false) : null
+        if (r.name === undefined && typeof manifest?.name === 'string') rawName = manifest.name
+        else rawName = typeof r.identifier === 'string' ? r.identifier : ''
+      }
+      if (!rawName || !VALID_PLUGIN_NAME.test(rawName)) continue
+      const cleanName = rawName.toLowerCase()
+      if (!entries.has(cleanName)) entries.set(cleanName, dir)
+    }
+    if (entries.size > 0) return entries
+  }
+  if (Array.isArray(content)) {
+    const entries = new Map()
+    for (const r of content) {
+      if (!r || typeof r !== 'object') continue
+      const rawName = typeof r.name === 'string' ? r.name : (typeof r.identifier === 'string' ? r.identifier : '')
+      if (!rawName || !VALID_PLUGIN_NAME.test(rawName)) continue
+      const source = r.source?.source === 'local' ? r.source.path : (r.source || './')
+      if (r.source?.source === 'local' && (typeof source !== 'string' || !source.startsWith('./'))) continue
+      const cleanName = rawName.toLowerCase()
+      if (!entries.has(cleanName)) entries.set(cleanName, pluginContentDir(sourceId, cleanName, source, false))
+    }
+    if (entries.size > 0) return entries
+  }
+  const mcpDict = resolveMcpDict(content)
+  if (mcpDict) {
+    const entries = new Map()
+    for (const srvName of Object.keys(mcpDict)) {
+      if (!VALID_PLUGIN_NAME.test(srvName)) continue
+      const cleanName = srvName.toLowerCase()
+      if (!entries.has(cleanName)) entries.set(cleanName, cache)
+    }
+    if (entries.size > 0) return entries
+  }
+  return null
+}
+
+function monoSubRootStamp(cache) {
+  return MONO_DIRS.map((sub) => {
+    try {
+      const info = statSync(join(cache, sub))
+      return info.isDirectory() ? String(info.mtimeMs) : ''
+    } catch { return '' }
+  }).join('|')
+}
+
+function indexMonoPluginDirs(cache) {
+  const entries = new Map()
+  for (const sub of MONO_DIRS) {
+    const subRoot = join(cache, sub)
+    if (!existsSync(subRoot)) continue
+    try {
+      for (const entry of readdirSync(subRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const dir = join(subRoot, entry.name)
+        const info = resolveDirPluginInfo(dir, entry.name, { includeMetadata: false })
+        if (info && typeof info.name === 'string' && VALID_PLUGIN_NAME.test(info.name)) {
+          const cleanName = info.name.toLowerCase()
+          if (!entries.has(cleanName)) entries.set(cleanName, dir)
+        }
+      }
+    } catch {}
+  }
+  return entries
+}
+
+/**
+ * Resolve one plugin's directory in O(1) sharing the exact manifest/directory
+ * discovery precedence of `parseMarketplaceFromDisk` without scanning sibling
+ * artwork (`buildPluginIcons`) or unrelated plugins.
+ */
+export function resolveMarketplacePluginDir(sourceId, pluginName) {
+  safeSegment(sourceId, 'source id')
+  const targetName = safeSegment(pluginName, 'plugin name').toLowerCase()
+  const cache = sourceCacheDir(sourceId)
+  if (!existsSync(cache)) {
+    PLUGIN_DIR_INDEX_CACHE.delete(sourceId)
+    return null
+  }
+
+  const cached = PLUGIN_DIR_INDEX_CACHE.get(sourceId)
+  if (cached) {
+    if (cached.manifestPath) {
+      try {
+        const info = statSync(cached.manifestPath)
+        if (info.isFile() && info.mtimeMs === cached.mtimeMs && info.size === cached.size) {
+          touchLru(PLUGIN_DIR_INDEX_CACHE, sourceId, cached)
+          return cached.entries.get(targetName) || null
+        }
+      } catch {}
+      PLUGIN_DIR_INDEX_CACHE.delete(sourceId)
+    } else if (cached.monoStamp !== undefined) {
+      if (monoSubRootStamp(cache) === cached.monoStamp) {
+        touchLru(PLUGIN_DIR_INDEX_CACHE, sourceId, cached)
+        return cached.entries.get(targetName) || null
+      }
+      PLUGIN_DIR_INDEX_CACHE.delete(sourceId)
+    }
+  }
+
+  // 1. Check Multi-Plugin Manifest Candidates
+  for (const parts of MANIFEST_CANDIDATE_PARTS) {
+    const manifestPath = join(cache, ...parts)
+    let info
+    try { info = statSync(manifestPath) } catch { continue }
+    if (!info.isFile()) continue
+    try {
+      const content = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const entries = indexManifestPluginDirs(sourceId, cache, content)
+      if (entries) {
+        setLru(PLUGIN_DIR_INDEX_CACHE, PLUGIN_DIR_INDEX_LIMIT, sourceId, {
+          manifestPath, mtimeMs: info.mtimeMs, size: info.size, entries,
+        })
+        return entries.get(targetName) || null
+      }
+    } catch {}
+  }
+
+  // 2. Local source direct subdirectories discovery
+  if (sourceId === 'local') {
+    const direct = join(cache, targetName)
+    if (existsSync(direct)) {
+      const info = resolveDirPluginInfo(direct, targetName, { includeMetadata: false })
+      if (info && typeof info.name === 'string' && VALID_PLUGIN_NAME.test(info.name) && info.name.toLowerCase() === targetName) return direct
+    }
+    try {
+      for (const entry of readdirSync(cache, { withFileTypes: true })) {
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          const dir = join(cache, entry.name)
+          const info = resolveDirPluginInfo(dir, entry.name, { includeMetadata: false })
+          if (info && typeof info.name === 'string' && VALID_PLUGIN_NAME.test(info.name) && info.name.toLowerCase() === targetName) return dir
+        }
+      }
+    } catch {}
+    return null
+  }
+
+  // 3. Explicit root plugin manifests / SKILL.md
+  if (hasExplicitRootPlugin(cache)) {
+    const info = resolveDirPluginInfo(cache, sourceId, { includeMetadata: false })
+    if (info && typeof info.name === 'string' && VALID_PLUGIN_NAME.test(info.name)) {
+      return info.name.toLowerCase() === targetName ? cache : null
+    }
+  }
+
+  // 4. Monorepo subdirectories (direct path check first, then indexed scan)
+  for (const sub of MONO_DIRS) {
+    const direct = join(cache, sub, targetName)
+    if (existsSync(direct)) {
+      const info = resolveDirPluginInfo(direct, targetName, { includeMetadata: false })
+      if (info && typeof info.name === 'string' && VALID_PLUGIN_NAME.test(info.name) && info.name.toLowerCase() === targetName) return direct
+    }
+  }
+  const monoEntries = indexMonoPluginDirs(cache)
+  if (monoEntries.size > 0) {
+    setLru(PLUGIN_DIR_INDEX_CACHE, PLUGIN_DIR_INDEX_LIMIT, sourceId, {
+      monoStamp: monoSubRootStamp(cache), entries: monoEntries,
+    })
+    return monoEntries.get(targetName) || null
+  }
+
+  // 5. Single Standalone Root Plugin Repository
+  const rootInfo = resolveStandaloneRootInfo(cache, sourceId, { includeMetadata: false })
+  if (rootInfo && typeof rootInfo.name === 'string' && VALID_PLUGIN_NAME.test(rootInfo.name)) {
+    return rootInfo.name.toLowerCase() === targetName ? cache : null
+  }
+  return null
+}
+
+export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
+  // 1. Check Multi-Plugin Manifest Candidates
+  for (const parts of MANIFEST_CANDIDATE_PARTS) {
+    const manifestPath = join(cache, ...parts)
     if (existsSync(manifestPath)) {
       try {
         const content = JSON.parse(readFileSync(manifestPath, 'utf8'))
@@ -234,11 +499,7 @@ export function parseMarketplaceFromDisk(sourceId, cache, names) {
         if (Array.isArray(content.plugins)) {
           let skipped = false
           const rows = content.plugins.map((r) => {
-            const source = r.source?.source === 'local' ? r.source.path : r.source
-            let dir = typeof source === 'string' && source.startsWith('./') ? pluginPath(cache, source) : null
-            if (source && typeof source === 'object' && r.name) {
-              dir = sourceRepositoryDir(cache, source) || pluginContentDir(sourceId, r.name, source, false)
-            }
+            const { dir } = resolveCaseAEntryDir(sourceId, cache, r)
             if (names && typeof r.name === 'string' && !names.has(r.name.toLowerCase())) {
               skipped = true
               return null
@@ -247,21 +508,19 @@ export function parseMarketplaceFromDisk(sourceId, cache, names) {
             return normalizeRow({ ...manifest, ...r,
               displayName: r.displayName || r.interface?.displayName || manifest?.displayName,
               description: r.description || r.interface?.shortDescription || manifest?.description,
-            }, sourceId, dir)
+            }, sourceId, dir, options)
           }).filter(Boolean)
           if (rows.length > 0) return rows
           // Preserve manifest precedence and discovery fallbacks on a miss.
-          if (skipped) return parseMarketplaceFromDisk(sourceId, cache)
+          if (skipped) return parseMarketplaceFromDisk(sourceId, cache, undefined, options)
         }
         // Case B: Direct array of plugin descriptors
         if (Array.isArray(content)) {
-          const rows = content.map((r) => normalizeRow(r, sourceId)).filter(Boolean)
+          const rows = content.map((r) => normalizeRow(r, sourceId, undefined, options)).filter(Boolean)
           if (rows.length > 0) return rows
         }
         // Case C: MCP Servers dictionary (mcpServers or servers object)
-        const mcpDict = (content.mcpServers && typeof content.mcpServers === 'object')
-          ? content.mcpServers
-          : ((content.servers && typeof content.servers === 'object') ? content.servers : null)
+        const mcpDict = resolveMcpDict(content)
         if (mcpDict) {
           const rows = []
           for (const [srvName, srvCfg] of Object.entries(mcpDict)) {
@@ -272,7 +531,7 @@ export function parseMarketplaceFromDisk(sourceId, cache, names) {
               author: srvCfg.author || content.author || 'MCP',
               category: 'mcp',
               source: './',
-            }, sourceId))
+            }, sourceId, undefined, options))
           }
           if (rows.filter(Boolean).length > 0) return rows.filter(Boolean)
         }
@@ -289,7 +548,7 @@ export function parseMarketplaceFromDisk(sourceId, cache, names) {
       try {
         for (const entry of readdirSync(cache, { withFileTypes: true })) {
           if (entry.isDirectory() && !entry.name.startsWith('.')) {
-            const row = parsePluginRowFromDir(join(cache, entry.name), entry.name, 'local')
+            const row = parsePluginRowFromDir(join(cache, entry.name), entry.name, 'local', options)
             if (row) localRows.push(row)
           }
         }
@@ -299,25 +558,20 @@ export function parseMarketplaceFromDisk(sourceId, cache, names) {
   }
 
   // Explicit plugin manifests describe the whole package, including its skills.
-  if (existsSync(join(cache, '.codex-plugin', 'plugin.json')) || existsSync(join(cache, '.claude-plugin', 'plugin.json'))) {
-    const row = parsePluginRowFromDir(cache, sourceId, sourceId)
-    if (row) return [{ ...row, source: './' }]
-  }
-  if (existsSync(join(cache, 'SKILL.md')) || existsSync(join(cache, 'skill.md'))) {
-    const row = parsePluginRowFromDir(cache, sourceId, sourceId)
+  if (hasExplicitRootPlugin(cache)) {
+    const row = parsePluginRowFromDir(cache, sourceId, sourceId, options)
     if (row) return [{ ...row, source: './' }]
   }
 
   // 3. Monorepo subdirectories auto-discovery (plugins/*, skills/*, packages/*, tools/*, extensions/*)
-  const monoDirs = ['plugins', 'skills', 'packages', 'tools', 'extensions']
   const monoRows = []
-  for (const sub of monoDirs) {
+  for (const sub of MONO_DIRS) {
     const subRoot = join(cache, sub)
     if (existsSync(subRoot)) {
       try {
         for (const entry of readdirSync(subRoot, { withFileTypes: true })) {
           if (entry.isDirectory()) {
-            const row = parsePluginRowFromDir(join(subRoot, entry.name), entry.name, sourceId)
+            const row = parsePluginRowFromDir(join(subRoot, entry.name), entry.name, sourceId, options)
             if (row) {
               row.source = `./${sub}/${entry.name}`
               monoRows.push(row)
@@ -330,69 +584,17 @@ export function parseMarketplaceFromDisk(sourceId, cache, names) {
   if (monoRows.filter(Boolean).length > 0) return monoRows.filter(Boolean)
 
   // 3. Single Standalone Root Plugin Repository
-  const rootSkillMd = join(cache, 'SKILL.md')
-  const rootSkillsDir = join(cache, 'skills')
-  const rootCommandsDir = join(cache, 'commands')
-  const rootAgentsDir = join(cache, 'agents')
-  const rootHooksDir = join(cache, 'hooks')
-  const rootMcp = join(cache, 'mcp.json')
-  const rootDotMcp = join(cache, '.mcp.json')
-  const rootServerJson = join(cache, 'server.json')
-  const rootPluginJson = join(cache, '.claude-plugin', 'plugin.json')
-  const rootCodexPluginJson = join(cache, '.codex-plugin', 'plugin.json')
-  const rootDirectPluginJson = join(cache, 'plugin.json')
-  const rootCursorRules = join(cache, '.cursor', 'rules')
-  const rootCursorRulesFile = join(cache, '.cursorrules')
-  const rootPkgJson = join(cache, 'package.json')
-
-  const isRootPlugin = existsSync(rootSkillMd)
-    || existsSync(rootSkillsDir)
-    || existsSync(rootCommandsDir)
-    || existsSync(rootAgentsDir)
-    || existsSync(rootHooksDir)
-    || existsSync(rootMcp)
-    || existsSync(rootDotMcp)
-    || existsSync(rootServerJson)
-    || existsSync(rootPluginJson)
-    || existsSync(rootCodexPluginJson)
-    || existsSync(rootDirectPluginJson)
-    || existsSync(rootCursorRules)
-    || existsSync(rootCursorRulesFile)
-    || existsSync(rootPkgJson)
-
-  if (isRootPlugin) {
-    let name = sourceId
-    let displayName = formatDisplayName(sourceId)
-    let description = ''
-    let version = '1.0.0'
-    let author = undefined
-
-    const manifest = readPluginManifest(cache)
-    if (manifest) {
-      if (manifest.name) name = manifest.name
-      if (manifest.displayName) displayName = manifest.displayName
-      if (manifest.description) description = manifest.description
-      if (manifest.version) version = manifest.version
-      if (manifest.author) author = typeof manifest.author === 'string' ? manifest.author : manifest.author.name
-    } else if (existsSync(rootSkillMd)) {
-      try {
-        description = extractMdDescription(readFileSync(rootSkillMd, 'utf8'))
-      } catch {}
-    } else if (existsSync(join(cache, 'README.md'))) {
-      try {
-        description = extractMdDescription(readFileSync(join(cache, 'README.md'), 'utf8'))
-      } catch {}
-    }
-
+  const rootInfo = resolveStandaloneRootInfo(cache, sourceId, { includeMetadata: true })
+  if (rootInfo) {
     return [normalizeRow({
-      ...manifest,
-      name,
-      displayName,
-      description,
-      version,
-      author,
+      ...rootInfo.manifest,
+      name: rootInfo.name,
+      displayName: rootInfo.displayName,
+      description: rootInfo.description,
+      version: rootInfo.version,
+      author: rootInfo.author,
       source: './',
-    }, sourceId, cache)].filter(Boolean)
+    }, sourceId, cache, options)].filter(Boolean)
   }
 
   return []

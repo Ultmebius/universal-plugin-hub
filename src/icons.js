@@ -12,6 +12,8 @@ const MEMORY_LIMIT = 256
 const PREVIEW_MEMORY_LIMIT = 512
 const FAILURES_LIMIT = 256
 const LOCAL_ICON_MEMORY_LIMIT = 512
+const LOCAL_ICON_MAX_CACHE_BYTES = 256 * 1024
+const LOCAL_ICON_MEMORY_MAX_BYTES = 32 * 1024 * 1024
 const memory = new Map()
 const pending = new Map()
 const failures = new Map()
@@ -19,6 +21,7 @@ const bundledCache = new Map()
 const bundledPending = new Map()
 const localIconMemory = new Map()
 const localIconPending = new Map()
+let localIconMemoryBytes = 0
 const bundledIconRoot = new URL('../assets/fluent-3d/', import.meta.url)
 const bundledIconFiles = new Map(Object.values(JSON.parse(readFileSync(new URL('manifest.json', bundledIconRoot), 'utf8')).icons).map(icon => [icon.url, icon.file]))
 
@@ -67,10 +70,43 @@ export function readLocalIcon(root, path) {
   return { buffer, contentType }
 }
 
+function deleteLocalIconEntry(key) {
+  const existing = localIconMemory.get(key)
+  if (!existing) return false
+  localIconMemoryBytes = Math.max(0, localIconMemoryBytes - existing.buffer.length)
+  return localIconMemory.delete(key)
+}
+
+function setLocalIconEntry(key, entry) {
+  const size = entry.buffer.length
+  if (size > LOCAL_ICON_MAX_CACHE_BYTES) return entry
+  deleteLocalIconEntry(key)
+  while (
+    localIconMemory.size > 0
+    && (localIconMemory.size >= LOCAL_ICON_MEMORY_LIMIT || localIconMemoryBytes + size > LOCAL_ICON_MEMORY_MAX_BYTES)
+  ) {
+    deleteLocalIconEntry(localIconMemory.keys().next().value)
+  }
+  localIconMemory.set(key, entry)
+  localIconMemoryBytes += size
+  return entry
+}
+
+/** Snapshot local icon cache entry count and retained bytes. */
+export function getLocalIconCacheStats() {
+  return {
+    size: localIconMemory.size,
+    bytes: localIconMemoryBytes,
+    maxItemBytes: LOCAL_ICON_MAX_CACHE_BYTES,
+    maxTotalBytes: LOCAL_ICON_MEMORY_MAX_BYTES,
+  }
+}
+
 /**
  * Resolve, verify containment, and read/cache a local icon asynchronously.
  * Always validates directory traversal containment and current file stat so
  * removed or out-of-bounds files fail immediately instead of hitting cache.
+ * Skips caching payloads above 256 KB and caps total retained memory at 32 MB.
  */
 export async function readLocalIconCached(root, path, scopeParts = []) {
   const candidate = pluginPath(root, path)
@@ -93,7 +129,7 @@ export async function readLocalIconCached(root, path, scopeParts = []) {
     const contentType = imageContentType(buffer)
     if (!contentType) throw new Error('Unsupported icon content')
     const entry = { buffer, contentType, etag: computeEtag(buffer), fileVersion }
-    return setLru(localIconMemory, LOCAL_ICON_MEMORY_LIMIT, key, entry)
+    return setLocalIconEntry(key, entry)
   })()
   localIconPending.set(key, task)
   try { return await task } finally { localIconPending.delete(key) }
@@ -103,12 +139,13 @@ export async function readLocalIconCached(root, path, scopeParts = []) {
 export function invalidateLocalIconCache(sourceId) {
   if (!sourceId) {
     localIconMemory.clear()
+    localIconMemoryBytes = 0
     return
   }
   const prefix = JSON.stringify([sourceId])
   const head = prefix.slice(0, -1) + ','
-  for (const key of localIconMemory.keys()) {
-    if (key.startsWith(head)) localIconMemory.delete(key)
+  for (const key of [...localIconMemory.keys()]) {
+    if (key.startsWith(head)) deleteLocalIconEntry(key)
   }
 }
 
