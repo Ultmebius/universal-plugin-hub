@@ -25,8 +25,9 @@ docs/
 # 锁文件（让用户自行生成）
 package-lock.json
 
-# 本地 Claude 配置
+# 本地 Claude / Codex 临时目录
 .claude/
+.codex-remote-attachments/
 
 # 本地提示词与输出风格
 /DSH-Harness-输出风格.md
