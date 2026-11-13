@@ -71,6 +71,198 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			|| String(form.oauthScope || "") !== String(baseline.oauthScope || "");
 	}
 
+	function isKvSensitive(kind, key, value) {
+		if (kind === "header") {
+			// Empty header key submits as "Authorization", so treat blank header keys as sensitive until named.
+			const effectiveKey = String(key || "").trim() || "Authorization";
+			return isLikelySecretHeader(effectiveKey, value);
+		}
+		return isLikelySecretEnv(key, value);
+	}
+
+	function makeKvRow(kind, id, key = "", value = "") {
+		const sensitive = isKvSensitive(kind, key, value);
+		return {
+			_id: id,
+			key: key != null ? String(key) : "",
+			value: value != null ? String(value) : "",
+			isSecret: sensitive,
+			secretToggleable: sensitive,
+			userToggledSecret: false,
+		};
+	}
+
+	function updateKvRow(kind, row, patch) {
+		const next = { ...row, ...patch };
+		if (Object.hasOwn(patch, "key") || Object.hasOwn(patch, "value")) {
+			const sensitive = isKvSensitive(kind, next.key, next.value);
+			if (!sensitive) {
+				return { ...next, isSecret: false, secretToggleable: false, userToggledSecret: false };
+			}
+			return {
+				...next,
+				secretToggleable: true,
+				isSecret: row.userToggledSecret ? !!row.isSecret : true,
+			};
+		}
+		return next;
+	}
+
+	function toggleKvSecret(row) {
+		if (!row?.secretToggleable) return row;
+		return { ...row, isSecret: !row.isSecret, userToggledSecret: true };
+	}
+
+	function KeyValueEditor({ kind, rows, keyPlaceholder, valuePlaceholder, onChange, onToggleSecret }) {
+		const idPrefix = kind === "header" ? "h" : "e";
+		return h("div", { className: "cpm-mcp-card-box" },
+			rows.map((item, idx) => h("div", { key: item._id || idx, className: "cpm-mcp-list-item" },
+				h("input", {
+					className: "cpm-mcp-input",
+					style: { width: 140, flexShrink: 0 },
+					placeholder: keyPlaceholder,
+					value: item.key,
+					onChange: (e) => {
+						const updated = [...rows];
+						updated[idx] = updateKvRow(kind, updated[idx], { key: e.target.value });
+						onChange(updated);
+					},
+				}),
+				h("div", { className: "cpm-mcp-pw-wrap" },
+					h("input", {
+						type: (item.secretToggleable && item.isSecret) ? "password" : "text",
+						className: "cpm-mcp-input",
+						style: item.secretToggleable ? { paddingRight: 32 } : undefined,
+						placeholder: valuePlaceholder,
+						value: item.value,
+						onChange: (e) => {
+							const updated = [...rows];
+							updated[idx] = updateKvRow(kind, updated[idx], { value: e.target.value });
+							onChange(updated);
+						},
+					}),
+					item.secretToggleable && h("button", {
+						type: "button",
+						className: "cpm-mcp-pw-btn",
+						"aria-label": item.isSecret ? "显示值" : "隐藏值",
+						onClick: () => {
+							const updated = [...rows];
+							updated[idx] = toggleKvSecret(updated[idx]);
+							onToggleSecret(updated);
+						},
+					}, item.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
+				),
+				h("button", {
+					type: "button",
+					className: "cpm-mcp-del-btn",
+					onClick: () => onChange(rows.filter((_, i) => i !== idx)),
+				}, h(IconClose, { size: 13 })),
+			)),
+			h("button", {
+				type: "button",
+				className: "cpm-mcp-add-btn",
+				onClick: () => onChange([...rows, makeKvRow(kind, `${idPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, "", "")]),
+			}, h(IconPlus, { size: 12 }), "Add"),
+		);
+	}
+
+	function McpConnectionStatus({ status, statusMessage, lastResult, serverName, transport, url, command, args }) {
+		const [diagHover, setDiagHover] = useState(false);
+		const activeStatus = status || "untested";
+		useEffect(() => {
+			if (activeStatus !== "success" && activeStatus !== "error" && diagHover) setDiagHover(false);
+		}, [activeStatus, diagHover]);
+		if (activeStatus === "untested") return null;
+		const httpStatus = typeof lastResult?.statusCode === "number"
+			? lastResult.statusCode
+			: (typeof lastResult?.status === "number" ? lastResult.status : undefined);
+		const toolsCount = typeof lastResult?.toolsCount === "number"
+			? lastResult.toolsCount
+			: (Array.isArray(lastResult?.tools) ? lastResult.tools.length : undefined);
+		const toolsSuffix = typeof toolsCount === "number" ? ` (${toolsCount} tools)` : "";
+		const canInspect = activeStatus === "success" || activeStatus === "error";
+		return h("div", {
+			style: { position: "relative", display: "inline-flex", alignItems: "center", outline: "none" },
+			tabIndex: canInspect ? 0 : undefined,
+			onMouseEnter: () => setDiagHover(true),
+			onMouseLeave: () => setDiagHover(false),
+			onFocus: canInspect ? () => setDiagHover(true) : undefined,
+			onBlur: canInspect ? () => setDiagHover(false) : undefined,
+		},
+			activeStatus === "testing" && h("div", {
+				className: "cpm-mcp-status-pill",
+				style: { background: "rgba(245, 158, 11, 0.12)", color: "#f59e0b", cursor: "default" },
+			},
+				h("span", { className: "cpm-spin-ring", style: { width: 8, height: 8, borderWidth: 1.5 } }),
+				"Testing...",
+			),
+			activeStatus === "success" && h("div", {
+				className: "cpm-mcp-status-pill",
+				style: { background: "rgba(16, 185, 129, 0.12)", color: "#10b981", cursor: "default" },
+			},
+				h("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#10b981" } }),
+				"Connected",
+			),
+			activeStatus === "error" && h("div", {
+				className: "cpm-mcp-status-pill",
+				style: { background: "rgba(239, 68, 68, 0.12)", color: "#ef4444", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default" },
+			},
+				h("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#ef4444", flexShrink: 0 } }),
+				statusMessage || "Connection failed",
+			),
+			diagHover && canInspect && h("div", { className: "cpm-mcp-diag-popover" },
+				activeStatus === "success" && h(React.Fragment, null,
+					h("div", { className: "cpm-mcp-diag-header is-success" },
+						h("span", null, `✓ Connected successfully · ${(lastResult && lastResult.duration != null) ? `${lastResult.duration}ms` : "OK"}`),
+						h("span", { style: { fontSize: 11, opacity: 0.8 } }, String(httpStatus || "200")),
+					),
+					h("div", { className: "cpm-mcp-diag-body" },
+						h("div", { className: "cpm-mcp-diag-grid" },
+							h("div", { className: "cpm-mcp-diag-item" },
+								h("span", { className: "cpm-mcp-diag-k" }, "SERVER"),
+								h("span", { className: "cpm-mcp-diag-v" }, serverName || lastResult?.server || ""),
+							),
+							h("div", { className: "cpm-mcp-diag-item" },
+								h("span", { className: "cpm-mcp-diag-k" }, "TRANSPORT"),
+								h("span", { className: "cpm-mcp-diag-v" }, transport === "stdio" ? "stdio" : "http"),
+							),
+							h("div", { className: "cpm-mcp-diag-endpoint" },
+								transport === "stdio"
+									? `Local stdio: ${[command, args].filter(Boolean).join(" ") || "process active"}${toolsSuffix}`
+									: `HTTP ${url || lastResult?.endpoint || "endpoint"} → tools/list${toolsSuffix}`,
+							),
+						),
+					),
+				),
+				activeStatus === "error" && h(React.Fragment, null,
+					h("div", { className: "cpm-mcp-diag-header is-error" },
+						h("span", null, `✕ ${httpStatus ? `Server returned ${httpStatus}` : "Connection failed"}`),
+						httpStatus && h("span", { style: { fontSize: 11, opacity: 0.8 } }, `${httpStatus}`),
+					),
+					h("div", { className: "cpm-mcp-diag-body" },
+						h("div", { className: "cpm-mcp-diag-desc" }, lastResult?.errorDetails || statusMessage || "Error POSTing to endpoint"),
+						h("div", { className: "cpm-mcp-diag-grid" },
+							h("div", { className: "cpm-mcp-diag-item" },
+								h("span", { className: "cpm-mcp-diag-k" }, "SERVER"),
+								h("span", { className: "cpm-mcp-diag-v" }, serverName || lastResult?.server || ""),
+							),
+							h("div", { className: "cpm-mcp-diag-item" },
+								h("span", { className: "cpm-mcp-diag-k" }, "TRANSPORT"),
+								h("span", { className: "cpm-mcp-diag-v" }, transport === "stdio" ? "stdio" : "http"),
+							),
+							h("div", { className: "cpm-mcp-diag-endpoint" },
+								h("div", { className: "cpm-mcp-diag-k", style: { marginBottom: 3 } }, "FAILED REQUEST"),
+								transport === "stdio"
+									? `stdio command failed: ${[command, args].filter(Boolean).join(" ") || "default execution"}`
+									: `POST ${url || lastResult?.endpoint || "endpoint"} → tools/list`,
+							),
+						),
+					),
+				),
+			),
+		);
+	}
+
 	// A persisted change and a live one are different outcomes. The write answers
 	// `scheduled` with a token because applying it can restart this plugin, so
 	// the real result is read back from /apply-status instead of being assumed.
@@ -152,13 +344,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 	function OauthFields({ form, onChange, idPrefix }) {
 		if (form.oauth !== "custom") return null;
-		const update = (patch) => onChange({ ...form, ...patch, status: "untested" });
 		const input = (label, key, placeholder, type = "text") => h("div", { className: "cpm-mcp-row" },
 			h("label", { className: "cpm-mcp-label", htmlFor: `${idPrefix}-${key}` }, label),
 			h("div", { className: "cpm-mcp-control" }, h("input", {
 				id: `${idPrefix}-${key}`, className: "cpm-mcp-input", type,
 				value: form[key] || "", placeholder, autoComplete: "off",
-				onChange: (event) => update({ [key]: event.target.value }),
+				onChange: (event) => onChange({ [key]: event.target.value }),
 			})),
 		);
 		return h(React.Fragment, null,
@@ -198,7 +389,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			if (notify) callbacks.current.onCancel?.();
 		}, [userMcp, verifyPath]);
 		const cancel = useCallback(() => cancelPending(true), [cancelPending]);
-		const formFingerprint = JSON.stringify(form, (key, value) => ["testing", "saving", "status", "statusMessage", "lastResult", "oauthSessionId", "diagHover", "oauthBaseline"].includes(key) ? undefined : value);
+		const formFingerprint = mcpFormFingerprint(form);
 		useEffect(() => {
 			if (pendingRef.current || startingRef.current) void cancelPending(false);
 		}, [formFingerprint, cancelPending]);
@@ -279,6 +470,61 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 		return { pending, start, cancel };
+	}
+
+	const FORM_UI_KEYS = new Set(["testing", "saving", "status", "statusMessage", "lastResult", "oauthBaseline", "isSecret", "secretToggleable", "userToggledSecret"]);
+	function mcpFormFingerprint(form) {
+		return JSON.stringify(form, (key, value) => FORM_UI_KEYS.has(key) ? undefined : value);
+	}
+
+	function useConnectionProbe({ form, verifyPath, onSuccess, onError, onAbort }) {
+		const controllerRef = useRef(null);
+		const opRef = useRef(0);
+		const callbacks = useRef({ onSuccess, onError, onAbort });
+		callbacks.current = { onSuccess, onError, onAbort };
+		const abort = useCallback(() => {
+			opRef.current += 1;
+			const ctrl = controllerRef.current;
+			controllerRef.current = null;
+			if (ctrl) {
+				ctrl.abort();
+				callbacks.current.onAbort?.();
+			}
+		}, []);
+		const formFingerprint = mcpFormFingerprint(form);
+		useEffect(() => {
+			abort();
+		}, [formFingerprint, abort]);
+		useEffect(() => abort, [abort]);
+		const start = async (payload) => {
+			abort();
+			const op = ++opRef.current;
+			const controller = new AbortController();
+			controllerRef.current = controller;
+			try {
+				const response = await window.fetch("/universal-plugin-hub/api" + verifyPath, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ ...payload, probeOnly: true }),
+					signal: controller.signal,
+				});
+				const result = await response.json();
+				if (op !== opRef.current) return;
+				if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+				if (result && result.ok === false) {
+					await callbacks.current.onError?.(result);
+				} else {
+					await callbacks.current.onSuccess?.(result);
+				}
+			} catch (error) {
+				if (op === opRef.current && error.name !== "AbortError") {
+					await callbacks.current.onError?.({ ok: false, message: error.message, errorDetails: error.message });
+				}
+			} finally {
+				if (op === opRef.current) controllerRef.current = null;
+			}
+		};
+		return { start, abort };
 	}
 	const useSafeLayoutEffect = typeof useLayoutEffect === "function" ? useLayoutEffect : useEffect;
 
@@ -3533,13 +3779,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-mcp-diag-header.is-error {
 	background: rgba(239, 68, 68, 0.1);
 	color: #ef4444;
-}
-.cpm-mcp-diag-header.is-neutral {
-	background: rgba(0, 0, 0, 0.03);
-	color: var(--cpm-text);
-}
-.cpm-dark .cpm-mcp-diag-header.is-neutral {
-	background: rgba(255, 255, 255, 0.04);
 }
 .cpm-mcp-diag-body {
 	padding: 10px 12px;
@@ -10175,9 +10414,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			oauthScope: initial.oauthScope || "",
 			command: initial.command || "",
 			args: Array.isArray(initial.args) ? JSON.stringify(initial.args) : (initial.args || ""),
-			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => ({ _id: `hi_${i}`, key: k, value: String(v), isSecret: isLikelySecretHeader(k, v) })),
-			envList: Object.entries(initial.env || {}).map(([k, v], i) => ({ _id: `ei_${i}`, key: k, value: String(v), isSecret: isLikelySecretEnv(k, v) })),
+			headersList: Object.entries(initial.headers || {}).map(([k, v], i) => makeKvRow("header", `hi_${i}`, k, String(v))),
+			envList: Object.entries(initial.env || {}).map(([k, v], i) => makeKvRow("env", `ei_${i}`, k, String(v))),
 		} : { name: "", transport: "stdio", url: "", oauth: "none", oauthClientId: "", oauthClientSecret: "", oauthHasClientSecret: false, oauthCallbackPort: "", oauthScope: "", command: "", args: "", headersList: [], envList: [] });
+		const [oauthBaseline, setOauthBaseline] = useState(() => initial ? {
+			name: initial.name || "",
+			url: initial.url || "",
+			oauth: initial.oauth || "none",
+			oauthClientId: initial.oauthClientId || "",
+			oauthCallbackPort: initial.oauthCallbackPort ?? "",
+			oauthScope: initial.oauthScope || "",
+			oauthAuthenticated: initial.oauthAuthenticated === true,
+		} : null);
+		const [connState, setConnState] = useState({ status: "untested", statusMessage: "", lastResult: null });
 		const [testing, setTesting] = useState(false);
 		const [saving, setSaving] = useState(false);
 		const [confirmDelete, setConfirmDelete] = useState(false);
@@ -10196,7 +10445,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			window.addEventListener("keydown", onKey, true);
 			return () => window.removeEventListener("keydown", onKey, true);
 		}, [confirmDelete]);
-		const upd = (patch) => setForm((prev) => ({ ...prev, ...patch }));
+		const upd = (patch) => {
+			setForm((prev) => ({ ...prev, ...patch }));
+			setConnState((prev) => prev.status === "untested" ? prev : { status: "untested", statusMessage: "", lastResult: null });
+		};
 		const argsJsonError = (s) => {
 			const t = String(s || "").trim();
 			if (!t) return null;
@@ -10253,40 +10505,112 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		const cleanMcpError = (err) => cleanMcpErrorText(err);
+		const verifyPath = owner ? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify` : "/mcps/verify";
+		const toProbeErrorState = (err) => {
+			const msg = cleanMcpError(err?.message || err);
+			const httpStatus = typeof err?.statusCode === "number"
+				? err.statusCode
+				: (typeof err?.status === "number" ? err.status : undefined);
+			return {
+				status: "error",
+				statusMessage: msg,
+				lastResult: {
+					ok: false,
+					message: msg,
+					status: httpStatus,
+					server: err?.server || form.name.trim(),
+					transport: form.transport,
+					endpoint: form.url || form.command || "",
+					errorDetails: err?.message || err?.errorDetails || msg,
+				},
+			};
+		};
+		const connProbe = useConnectionProbe({
+			form,
+			verifyPath,
+			onSuccess: (res) => {
+				setConnState({ status: "success", statusMessage: res.message || "Connected", lastResult: res });
+				if (form.transport === "http" && form.oauth !== "none") {
+					setOauthBaseline({
+						name: form.name.trim(),
+						url: form.url.trim(),
+						oauth: form.oauth,
+						oauthClientId: form.oauthClientId,
+						oauthCallbackPort: form.oauthCallbackPort,
+						oauthScope: form.oauthScope,
+						oauthAuthenticated: true,
+					});
+				}
+			},
+			onError: (err) => {
+				setConnState(toProbeErrorState(err));
+				if (err?.authExpired) {
+					setOauthBaseline((prev) => prev ? { ...prev, oauthAuthenticated: false } : prev);
+				}
+			},
+			onAbort: () => {
+				setTesting(false);
+			},
+		});
 		// The payload that was actually sent for verification. A finished OAuth
 		// handshake must save exactly that configuration, not whatever the form
 		// holds by the time the browser comes back.
 		const verifiedPayloadRef = useRef(null);
 		const oauthFlow = useOauthVerification({
 			form,
-			verifyPath: owner ? `/plugins/${encodeURIComponent(owner)}/connectors/${encodeURIComponent(form.name.trim())}/verify` : "/mcps/verify",
+			verifyPath,
 			userMcp: !owner,
 			onFinished: async (res) => {
-				showToast(res.ok ? "验证成功" : "验证失败", res.message || (res.ok ? "MCP 服务连接正常" : "请检查配置后重试"), { restart: false });
-				// A finished sign-in is the whole point of the OAuth mode, so
-				// register the connector now. Otherwise the dialog reopens on
-				// `None` and the user has to save a second time.
 				const verified = verifiedPayloadRef.current;
-				if (res.ok && verified?.transport === "http" && verified.oauth !== "none") await save(verified);
+				if (res.ok && verified?.transport === "http" && verified.oauth !== "none") {
+					if (typeof setOauthBaseline === "function") {
+						setOauthBaseline({
+							name: String(verified.name || "").trim(),
+							url: String(verified.url || "").trim(),
+							oauth: verified.oauth || "none",
+							oauthClientId: verified.oauthClientId || "",
+							oauthCallbackPort: verified.oauthCallbackPort ?? "",
+							oauthScope: verified.oauthScope || "",
+							oauthAuthenticated: true,
+						});
+					}
+					if (typeof setConnState === "function") setConnState({ status: "success", statusMessage: res.message || "验证成功", lastResult: res });
+					await save(verified);
+					return;
+				}
+				if (!res.ok) {
+					if (typeof setConnState === "function" && typeof toProbeErrorState === "function") {
+						setConnState(toProbeErrorState(res));
+					} else {
+						showToast("验证失败", res.message || "请检查配置后重试", { restart: false });
+					}
+				}
 			},
-			onError: (err) => showToast("验证失败", cleanMcpError(err), { restart: false }),
+			onCancel: () => setConnState({ status: "untested", statusMessage: "", lastResult: null }),
+			onError: (err) => setConnState(toProbeErrorState(err)),
 		});
 		const test = async () => {
 			if (!form.name.trim()) {
 				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
 				return;
 			}
+			const isLogin = needsOAuthLogin(form, oauthBaseline, form.name);
 			const payload = buildPayload();
 			verifiedPayloadRef.current = payload;
 			setTesting(true);
+			setConnState({ status: "testing", statusMessage: "", lastResult: null });
 			try {
-				await oauthFlow.start(payload);
+				if (isLogin) {
+					await oauthFlow.start(payload);
+				} else {
+					await connProbe.start(payload);
+				}
 			} finally {
 				setTesting(false);
 			}
 		};
 
-		const save = async (payload, quiet = false) => {
+		const save = async (payload) => {
 			const data = payload || buildPayload();
 			if (!data.name) {
 				showToast("请输入名称", "为这个 MCP 服务起一个名字，如 github、notion", { restart: false });
@@ -10388,58 +10712,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					form.transport === "http" && h("div", { className: "cpm-mcp-row cpm-mcp-row-top" },
 						h("div", { className: "cpm-mcp-label" }, "Headers"),
 						h("div", { className: "cpm-mcp-control" },
-							h("div", { className: "cpm-mcp-card-box" },
-								form.headersList.map((hItem, idx) => {
-									return h("div", { key: hItem._id || idx, className: "cpm-mcp-list-item" },
-										h("input", {
-											className: "cpm-mcp-input",
-											style: { width: 140, flexShrink: 0 },
-											placeholder: "Authorization",
-											value: hItem.key,
-											onChange: (e) => {
-												const updated = [...form.headersList];
-												updated[idx] = { ...updated[idx], key: e.target.value };
-												upd({ headersList: updated });
-											},
-										}),
-										h("div", { className: "cpm-mcp-pw-wrap" },
-											h("input", {
-												type: hItem.isSecret ? "password" : "text",
-												className: "cpm-mcp-input",
-												style: { paddingRight: 32 },
-												placeholder: "Bearer ...",
-												value: hItem.value,
-												onChange: (e) => {
-													const updated = [...form.headersList];
-													updated[idx] = { ...updated[idx], value: e.target.value };
-													upd({ headersList: updated });
-												},
-											}),
-											h("button", {
-												type: "button",
-												className: "cpm-mcp-pw-btn",
-												onClick: () => {
-													const updated = [...form.headersList];
-													updated[idx] = { ...updated[idx], isSecret: !updated[idx].isSecret };
-													upd({ headersList: updated });
-												},
-											}, hItem.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
-										),
-										h("button", {
-											type: "button",
-											className: "cpm-mcp-del-btn",
-											onClick: () => {
-												upd({ headersList: form.headersList.filter((_, i) => i !== idx) });
-											},
-										}, h(IconClose, { size: 13 })),
-									);
-								}),
-								h("button", {
-									type: "button",
-									className: "cpm-mcp-add-btn",
-									onClick: () => upd({ headersList: [...form.headersList, { _id: `h_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: true }] }),
-								}, h(IconPlus, { size: 12 }), "Add"),
-							),
+							h(KeyValueEditor, {
+								kind: "header",
+								rows: form.headersList,
+								keyPlaceholder: "Authorization",
+								valuePlaceholder: "Bearer ...",
+								onChange: (rows) => upd({ headersList: rows }),
+								onToggleSecret: (rows) => setForm((prev) => ({ ...prev, headersList: rows })),
+							}),
 						),
 					),
 					form.transport === "http" && h("div", { className: "cpm-mcp-row" },
@@ -10494,58 +10774,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					form.transport === "stdio" && h("div", { className: "cpm-mcp-row cpm-mcp-row-top" },
 						h("div", { className: "cpm-mcp-label" }, "Environment variables"),
 						h("div", { className: "cpm-mcp-control" },
-							h("div", { className: "cpm-mcp-card-box" },
-								form.envList.map((eItem, idx) => {
-									return h("div", { key: eItem._id || idx, className: "cpm-mcp-list-item" },
-										h("input", {
-											className: "cpm-mcp-input",
-											style: { width: 140, flexShrink: 0 },
-											placeholder: "KEY_NAME",
-											value: eItem.key,
-											onChange: (e) => {
-												const updated = [...form.envList];
-												updated[idx] = { ...updated[idx], key: e.target.value };
-												upd({ envList: updated });
-											},
-										}),
-										h("div", { className: "cpm-mcp-pw-wrap" },
-											h("input", {
-												type: eItem.isSecret ? "password" : "text",
-												className: "cpm-mcp-input",
-												style: { paddingRight: 32 },
-												placeholder: "Value",
-												value: eItem.value,
-												onChange: (e) => {
-													const updated = [...form.envList];
-													updated[idx] = { ...updated[idx], value: e.target.value };
-													upd({ envList: updated });
-												},
-											}),
-											h("button", {
-												type: "button",
-												className: "cpm-mcp-pw-btn",
-												onClick: () => {
-													const updated = [...form.envList];
-													updated[idx] = { ...updated[idx], isSecret: !updated[idx].isSecret };
-													upd({ envList: updated });
-												},
-											}, eItem.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
-										),
-										h("button", {
-											type: "button",
-											className: "cpm-mcp-del-btn",
-											onClick: () => {
-												upd({ envList: form.envList.filter((_, i) => i !== idx) });
-											},
-										}, h(IconClose, { size: 13 })),
-									);
-								}),
-								h("button", {
-									type: "button",
-									className: "cpm-mcp-add-btn",
-									onClick: () => upd({ envList: [...form.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: false }] }),
-								}, h(IconPlus, { size: 12 }), "Add"),
-							),
+							h(KeyValueEditor, {
+								kind: "env",
+								rows: form.envList,
+								keyPlaceholder: "KEY_NAME",
+								valuePlaceholder: "Value",
+								onChange: (rows) => upd({ envList: rows }),
+								onToggleSecret: (rows) => setForm((prev) => ({ ...prev, envList: rows })),
+							}),
 						),
 					),
 				),
@@ -10555,29 +10791,40 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					// from a misclick. Only user-added servers can be deleted — a
 					// plugin's connector belongs to the plugin, which re-registers it
 					// on every enable, so deleting it here would come straight back.
-					initial && !owner
-						? h("button", {
+					h("div", { style: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 } },
+						initial && !owner && h("button", {
 							type: "button",
 							className: "cpm-mcp-footer-del",
 							// Accessible name only — the user asked for no tooltip here.
 							"aria-label": "删除这个 MCP",
 							disabled: testing || saving || !!oauthFlow.pending,
 							onClick: () => setConfirmDelete(true),
-						}, h(IconTrash, { size: 15 }))
-						: h("div", { style: { flex: 1 } }),
-					initial && !owner ? h("div", { style: { flex: 1 } }) : null,
-					h("button", {
-						className: "cpm-btn cpm-btn-secondary",
-						disabled: testing || saving || (form.transport === "stdio" && !!argsError),
-						onClick: test,
-					}, testing ? "测试中…" : (oauthFlow.pending ? "等待授权…" : (
-						needsOAuthLogin(form, initial, form.name) ? "登录并连接" : "测试连接"
-					))),
-					h("button", {
-						className: "cpm-btn cpm-btn-primary",
-						disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
-						onClick: () => save(),
-					}, saving ? "保存中…" : "保存并启用"),
+						}, h(IconTrash, { size: 15 })),
+						h(McpConnectionStatus, {
+							status: connState.status,
+							statusMessage: connState.statusMessage,
+							lastResult: connState.lastResult,
+							serverName: form.name.trim() || initial?.name || "",
+							transport: form.transport,
+							url: form.url,
+							command: form.command,
+							args: form.args,
+						}),
+					),
+					h("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+						h("button", {
+							className: "cpm-btn cpm-btn-secondary",
+							disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
+							onClick: test,
+						}, oauthFlow.pending ? "等待授权…" : (testing ? "测试中…" : (
+							needsOAuthLogin(form, oauthBaseline, form.name) ? "登录并连接" : "测试连接"
+						))),
+						h("button", {
+							className: "cpm-btn cpm-btn-primary",
+							disabled: testing || saving || !!oauthFlow.pending || (form.transport === "stdio" && !!argsError),
+							onClick: () => save(),
+						}, saving ? "保存中…" : "保存并启用"),
+					),
 				),
 			),
 			confirmDelete && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmDelete(false)) },
@@ -11165,7 +11412,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [togglingConn, setTogglingConn] = useState(null);
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [authDialog, setAuthDialog] = useState(null);
-		const [diagHover, setDiagHover] = useState(false);
 		const [expandedConnectors, setExpandedConnectors] = useState({});
 		const [connectorToolsData, setConnectorToolsData] = useState(() => {
 			// Zero-latency instant seed from memory/localStorage cache
@@ -11223,6 +11469,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		}, [record?.name]);
 
+		const updateAuthDialog = (patch) => setAuthDialog((prev) => prev
+			? { ...prev, ...patch, status: "untested", statusMessage: "", lastResult: null }
+			: null);
 		const buildAuthPayload = () => {
 			const headers = {};
 			for (const item of authDialog?.headersList || []) {
@@ -11262,13 +11511,66 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			...prev, testing: false, status: "error", statusMessage: message,
 			lastResult: { ok: false, message, status: 500, server: prev.connectorName, transport: prev.transport, endpoint: prev.url, errorDetails: message },
 		} : null);
+		const authVerifyPath = `/plugins/${encodeURIComponent(record?.name || "")}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`;
+		const connProbe = useConnectionProbe({
+			form: authDialog,
+			verifyPath: authVerifyPath,
+			onSuccess: (res) => setAuthDialog((prev) => prev ? {
+				...prev,
+				testing: false,
+				status: "success",
+				statusMessage: res.message || "Connected",
+				lastResult: res,
+				oauthBaseline: prev.transport === "http" && prev.oauth !== "none"
+					? {
+						name: prev.connectorName,
+						url: prev.url,
+						oauth: prev.oauth,
+						oauthClientId: prev.oauthClientId,
+						oauthCallbackPort: prev.oauthCallbackPort,
+						oauthScope: prev.oauthScope,
+						oauthAuthenticated: true,
+					}
+					: prev.oauthBaseline,
+			} : null),
+			onError: (err) => setAuthDialog((prev) => {
+				if (!prev) return null;
+				const rawMsg = err?.message || err;
+				const msg = typeof cleanMcpErrorText === "function" ? cleanMcpErrorText(rawMsg) : String(rawMsg || "操作失败");
+				const httpStatus = typeof err?.statusCode === "number"
+					? err.statusCode
+					: (typeof err?.status === "number" ? err.status : undefined);
+				return {
+					...prev,
+					testing: false,
+					status: "error",
+					statusMessage: msg,
+					lastResult: {
+						ok: false,
+						message: msg,
+						status: httpStatus,
+						server: err?.server || prev.connectorName,
+						transport: prev.transport,
+						endpoint: prev.url || prev.command || "",
+						errorDetails: err?.message || err?.errorDetails || msg,
+					},
+					oauthBaseline: err?.authExpired && prev.oauthBaseline
+						? { ...prev.oauthBaseline, oauthAuthenticated: false }
+						: prev.oauthBaseline,
+				};
+			}),
+			onAbort: () => setAuthDialog((prev) => prev && prev.testing ? { ...prev, testing: false, status: "untested", statusMessage: "", lastResult: null } : prev),
+		});
 		const oauthFlow = useOauthVerification({
 			form: authDialog,
-			verifyPath: `/plugins/${encodeURIComponent(record?.name || "")}/connectors/${encodeURIComponent(authDialog?.connectorName || "")}/verify`,
+			verifyPath: authVerifyPath,
 			onFinished: async (res) => {
+				const verified = verifiedPayloadRef.current;
+				const autoSave = !!(res.ok && verified?.transport === "http" && verified.oauth !== "none");
 				setAuthDialog((prev) => prev ? {
 					...prev,
 					testing: false,
+					saving: autoSave ? true : prev.saving,
 					status: res.ok ? "success" : "error",
 					statusMessage: res.message || (res.ok ? "验证成功" : "验证失败"),
 					lastResult: res,
@@ -11285,42 +11587,58 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						: prev.oauthBaseline,
 				} : null);
 				// A successful sign-in is also the moment the connector becomes
-				// usable, so register it right away. Leaving that to the Save
-				// button is what made a completed sign-in reopen as `None`.
-				// A failure here is a save problem and must not read as a failed
-				// verification, so it stays out of the polling error path.
-				const verified = verifiedPayloadRef.current;
-				if (res.ok && verified?.transport === "http" && verified.oauth !== "none") {
+				// usable, so register it right away and close the dialog cleanly.
+				if (autoSave) {
+					const connName = res.server || verified.name || (typeof verifiedConnectorRef !== "undefined" ? verifiedConnectorRef.current : "") || "";
 					try {
 						const saved = await persistAuthDialog(verified);
 						if (saved?.ok === false) {
-							showToast("保存失败", saved.error || "配置校验未通过，请检查填写内容", { restart: false });
+							setAuthDialog((prev) => prev ? { ...prev, saving: false } : null);
+							if (typeof showToast === "function") showToast("保存失败", saved.error || "配置校验未通过，请检查填写内容", { restart: false });
 							return;
 						}
 						await refreshState();
-						if (res.server) await loadConnectorTools(res.server);
+						if (connName) await loadConnectorTools(connName);
+						if (typeof showApplicationToast === "function") {
+							void showApplicationToast(showToast, saved, "配置成功", `已成功保存 ${connName} 认证信息并注册为可用 MCP 服务`);
+						}
+						if (typeof closeAuthDialog === "function") closeAuthDialog();
 					} catch (error) {
-						showToast("保存失败", cleanMcpError(error), { restart: false });
+						setAuthDialog((prev) => prev ? { ...prev, saving: false } : null);
+						const msg = typeof cleanMcpErrorText === "function" ? cleanMcpErrorText(error) : (error?.message || String(error));
+						if (typeof showToast === "function") showToast("保存失败", msg, { restart: false });
 					}
 				}
 			},
-			onCancel: () => setAuthDialog((prev) => prev ? { ...prev, testing: false, status: "untested", statusMessage: "" } : null),
+			onCancel: () => setAuthDialog((prev) => prev ? { ...prev, testing: false, status: "untested", statusMessage: "", lastResult: null } : null),
 			onError: (error) => setAuthError(error.message),
 		});
 		const closeAuthDialog = useCallback(() => {
 			setAuthDialog(null);
+			connProbe.abort();
 			void oauthFlow.cancel();
-		}, [oauthFlow.cancel]);
+		}, [connProbe.abort, oauthFlow.cancel]);
 		// Which configuration the running verification was started with. The
 		// dialog can be edited while the browser is open, so the auto-save after
 		// a finished sign-in must persist the verified one, not the latest form.
 		const verifiedPayloadRef = useRef(null);
+		const verifiedConnectorRef = useRef("");
 		const runAuthTest = async () => {
 			if (!authDialog) return;
+			const isLogin = needsOAuthLogin(authDialog, authDialog.oauthBaseline, authDialog.connectorName);
 			const payload = buildAuthPayload();
 			verifiedPayloadRef.current = payload;
-			setAuthDialog((prev) => prev ? { ...prev, testing: true, status: "testing", statusMessage: "" } : null);
-			await oauthFlow.start(payload);
+			verifiedConnectorRef.current = authDialog.connectorName || "";
+			setAuthDialog((prev) => prev ? { ...prev, testing: true, status: "testing", statusMessage: "", lastResult: null } : null);
+			try {
+				if (isLogin) {
+					await oauthFlow.start(payload);
+				} else {
+					await connProbe.start(payload);
+				}
+			} finally {
+				setAuthDialog((prev) => prev && prev.testing ? { ...prev, testing: false } : prev);
+			}
 		};
 
 		const autoLoadConnectorTools = useCallback((_owner, name) => loadConnectorTools(name), [loadConnectorTools]);
@@ -11643,22 +11961,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const existingHeaders = (connObj && typeof connObj === "object" && connObj.headers) ? connObj.headers : {};
 			const headerEntries = Object.entries(existingHeaders)
 				.filter(([_, v]) => typeof v === "string" && !hasUnresolvedVarPlaceholder(v) && v.trim().length > 0)
-				.map(([k, v], i) => ({
-					_id: `h_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
-					key: (k === "Authorization" || k === "authorization") ? "" : k,
-					value: v != null ? String(v) : "",
-					isSecret: isLikelySecretHeader(k, v),
-				}));
+				.map(([k, v], i) => makeKvRow("header", `h_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`, (k === "Authorization" || k === "authorization") ? "" : k, v != null ? String(v) : ""));
 
 			const existingEnv = (connObj && typeof connObj === "object" && connObj.env) ? connObj.env : {};
 			const envEntries = Object.entries(existingEnv)
 				.filter(([_, v]) => typeof v === "string" && !hasUnresolvedVarPlaceholder(v) && v.trim().length > 0)
-				.map(([k, v], i) => ({
-					_id: `e_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
-					key: k,
-					value: v != null ? String(v) : "",
-					isSecret: isLikelySecretEnv(k, v),
-				}));
+				.map(([k, v], i) => makeKvRow("env", `e_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`, k, v != null ? String(v) : ""));
 
 			const isHttpOnly = !!(connObj && (connObj.url || isRemoteTransport(connObj.type)) && !connObj.command);
 			const isStdioOnly = !!(connObj && (connObj.command || connObj.type === "stdio") && !connObj.url);
@@ -12118,64 +12426,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						authDialog.transport === "http" && h("div", { className: "cpm-mcp-row cpm-mcp-row-top" },
 							h("div", { className: "cpm-mcp-label" }, "Headers"),
 							h("div", { className: "cpm-mcp-control" },
-								h("div", { className: "cpm-mcp-card-box" },
-									authDialog.headersList.map((hItem, idx) => {
-										return h("div", { key: hItem._id || idx, className: "cpm-mcp-list-item" },
-											h("input", {
-												className: "cpm-mcp-input",
-												style: { width: 140, flexShrink: 0 },
-												placeholder: "Authorization",
-												value: hItem.key,
-												onChange: (e) => {
-													const updated = [...authDialog.headersList];
-													updated[idx] = { ...updated[idx], key: e.target.value };
-													setAuthDialog({ ...authDialog, headersList: updated, status: "untested" });
-												},
-											}),
-											h("div", { className: "cpm-mcp-pw-wrap" },
-												h("input", {
-													type: hItem.isSecret ? "password" : "text",
-													className: "cpm-mcp-input",
-													style: { paddingRight: 32 },
-													placeholder: "Bearer ...",
-													value: hItem.value,
-													onChange: (e) => {
-														const updated = [...authDialog.headersList];
-														updated[idx] = { ...updated[idx], value: e.target.value };
-														setAuthDialog({ ...authDialog, headersList: updated, status: "untested" });
-													},
-												}),
-												h("button", {
-													type: "button",
-													className: "cpm-mcp-pw-btn",
-													onClick: () => {
-														const updated = [...authDialog.headersList];
-														updated[idx] = { ...updated[idx], isSecret: !updated[idx].isSecret };
-														setAuthDialog({ ...authDialog, headersList: updated });
-													},
-												}, hItem.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
-											),
-											h("button", {
-												type: "button",
-												className: "cpm-mcp-del-btn",
-												onClick: () => {
-													const updated = authDialog.headersList.filter((_, i) => i !== idx);
-													setAuthDialog({ ...authDialog, headersList: updated, status: "untested" });
-												},
-											}, h(IconClose, { size: 13 })),
-										);
-									}),
-									h("button", {
-										type: "button",
-										className: "cpm-mcp-add-btn",
-										onClick: () => {
-											setAuthDialog({
-												...authDialog,
-												headersList: [...authDialog.headersList, { _id: `h_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: true }],
-											});
-										},
-									}, h(IconPlus, { size: 12 }), "Add"),
-								),
+								h(KeyValueEditor, {
+									kind: "header",
+									rows: authDialog.headersList,
+									keyPlaceholder: "Authorization",
+									valuePlaceholder: "Bearer ...",
+									onChange: (rows) => updateAuthDialog({ headersList: rows }),
+									onToggleSecret: (rows) => setAuthDialog((prev) => prev ? { ...prev, headersList: rows } : null),
+								}),
 							),
 						),
 
@@ -12190,7 +12448,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 											{ label: "Streamable HTTP", value: "http" },
 											{ label: "Local (stdio)", value: "stdio" },
 										],
-									onChange: (val) => setAuthDialog({ ...authDialog, transport: val, status: "untested" }),
+									onChange: (val) => updateAuthDialog({ transport: val }),
 								}),
 							),
 						),
@@ -12202,7 +12460,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									className: "cpm-mcp-input",
 									placeholder: "https://...",
 									value: authDialog.url,
-									onChange: (e) => setAuthDialog({ ...authDialog, url: e.target.value, status: "untested" }),
+									onChange: (e) => updateAuthDialog({ url: e.target.value }),
 								}),
 							),
 						),
@@ -12214,7 +12472,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									className: "cpm-mcp-input",
 									placeholder: "node / npx / python ...",
 									value: authDialog.command || "",
-									onChange: (e) => setAuthDialog({ ...authDialog, command: e.target.value, status: "untested" }),
+									onChange: (e) => updateAuthDialog({ command: e.target.value }),
 								}),
 							),
 						),
@@ -12229,7 +12487,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										style: { fontFamily: (authDialog.args && authDialog.args.trim().length > 0) ? "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" : "inherit" },
 										placeholder: '["arg1", "arg2"]',
 										value: authDialog.args,
-										onChange: (e) => setAuthDialog({ ...authDialog, args: e.target.value, status: "untested" }),
+										onChange: (e) => updateAuthDialog({ args: e.target.value }),
 									}),
 									h("div", { className: "cpm-mcp-field-error-wrapper" + (argsError ? " is-visible" : "") },
 										h("div", { className: "cpm-mcp-field-error-inner" },
@@ -12248,64 +12506,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						authDialog.transport === "stdio" && h("div", { className: "cpm-mcp-row cpm-mcp-row-top" },
 							h("div", { className: "cpm-mcp-label" }, "Environment variables"),
 							h("div", { className: "cpm-mcp-control" },
-								h("div", { className: "cpm-mcp-card-box" },
-									authDialog.envList.map((eItem, idx) => {
-										return h("div", { key: eItem._id || idx, className: "cpm-mcp-list-item" },
-											h("input", {
-												className: "cpm-mcp-input",
-												style: { width: 140, flexShrink: 0 },
-												placeholder: "KEY_NAME",
-												value: eItem.key,
-												onChange: (e) => {
-													const updated = [...authDialog.envList];
-													updated[idx] = { ...updated[idx], key: e.target.value };
-													setAuthDialog({ ...authDialog, envList: updated, status: "untested" });
-												},
-											}),
-											h("div", { className: "cpm-mcp-pw-wrap" },
-												h("input", {
-													type: eItem.isSecret ? "password" : "text",
-													className: "cpm-mcp-input",
-													style: { paddingRight: 32 },
-													placeholder: "Value",
-													value: eItem.value,
-													onChange: (e) => {
-														const updated = [...authDialog.envList];
-														updated[idx] = { ...updated[idx], value: e.target.value };
-														setAuthDialog({ ...authDialog, envList: updated, status: "untested" });
-													},
-												}),
-												h("button", {
-													type: "button",
-													className: "cpm-mcp-pw-btn",
-													onClick: () => {
-														const updated = [...authDialog.envList];
-														updated[idx] = { ...updated[idx], isSecret: !updated[idx].isSecret };
-														setAuthDialog({ ...authDialog, envList: updated });
-													},
-												}, eItem.isSecret ? h(IconEye, { size: 14 }) : h(IconEyeOff, { size: 14 })),
-											),
-											h("button", {
-												type: "button",
-												className: "cpm-mcp-del-btn",
-												onClick: () => {
-													const updated = authDialog.envList.filter((_, i) => i !== idx);
-													setAuthDialog({ ...authDialog, envList: updated, status: "untested" });
-												},
-											}, h(IconClose, { size: 13 })),
-										);
-									}),
-									h("button", {
-										type: "button",
-										className: "cpm-mcp-add-btn",
-										onClick: () => {
-											setAuthDialog({
-												...authDialog,
-												envList: [...authDialog.envList, { _id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, key: "", value: "", isSecret: false }],
-											});
-										},
-									}, h(IconPlus, { size: 12 }), "Add"),
-								),
+								h(KeyValueEditor, {
+									kind: "env",
+									rows: authDialog.envList,
+									keyPlaceholder: "KEY_NAME",
+									valuePlaceholder: "Value",
+									onChange: (rows) => updateAuthDialog({ envList: rows }),
+									onToggleSecret: (rows) => setAuthDialog((prev) => prev ? { ...prev, envList: rows } : null),
+								}),
 							),
 						),
 
@@ -12319,11 +12527,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										{ label: "Auto-register (dynamic client registration)", value: "auto_register" },
 										{ label: "Bring your own client", value: "custom" },
 									],
-									onChange: (val) => setAuthDialog({ ...authDialog, oauth: val, status: "untested" }),
+									onChange: (val) => updateAuthDialog({ oauth: val }),
 								}),
 							),
 						),
-						h(OauthFields, { form: authDialog, onChange: setAuthDialog, idPrefix: "edit-mcp" }),
+						h(OauthFields, { form: authDialog, onChange: updateAuthDialog, idPrefix: "edit-mcp" }),
 						oauthFlow.pending && h(OauthPendingCard, { pending: oauthFlow.pending, onCancel: oauthFlow.cancel }),
 					),
 
@@ -12331,109 +12539,30 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						h("div", {
 							style: { display: "flex", alignItems: "center", minWidth: 0, flex: 1 },
 						},
-							h("div", {
-								style: { position: "relative", display: "inline-flex", alignItems: "center" },
-								onMouseEnter: () => setDiagHover(true),
-								onMouseLeave: () => setDiagHover(false),
-							},
-								authDialog.status === "untested" && h("div", {
-									className: "cpm-mcp-status-pill",
-									style: { background: "rgba(161, 161, 170, 0.08)", color: "var(--cpm-muted)", cursor: "default" },
-								},
-									h("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "currentColor", opacity: 0.6 } }),
-									"Not tested"
-								),
-
-								authDialog.status === "testing" && h("div", {
-									className: "cpm-mcp-status-pill",
-									style: { background: "rgba(245, 158, 11, 0.12)", color: "#f59e0b", cursor: "default" },
-								},
-									h("span", { className: "cpm-spin-ring", style: { width: 8, height: 8, borderWidth: 1.5 } }),
-									"Testing..."
-								),
-
-								authDialog.status === "success" && h("div", {
-									className: "cpm-mcp-status-pill",
-									style: { background: "rgba(16, 185, 129, 0.12)", color: "#10b981", cursor: "default" },
-								},
-									h("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#10b981" } }),
-									"Connected"
-								),
-
-								authDialog.status === "error" && h("div", {
-									className: "cpm-mcp-status-pill",
-									style: { background: "rgba(239, 68, 68, 0.12)", color: "#ef4444", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default" },
-								},
-									h("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#ef4444", flexShrink: 0 } }),
-									authDialog.statusMessage || "Connection failed"
-								),
-
-								diagHover && (authDialog.status === "success" || authDialog.status === "error") && h("div", { className: "cpm-mcp-diag-popover" },
-									authDialog.status === "success" && h(React.Fragment, null,
-										h("div", { className: "cpm-mcp-diag-header is-success" },
-											h("span", null, `✓ Connected successfully · ${(authDialog.lastResult && authDialog.lastResult.duration != null) ? `${authDialog.lastResult.duration}ms` : "OK"}`),
-											h("span", { style: { fontSize: 11, opacity: 0.8 } }, "200"),
-										),
-										h("div", { className: "cpm-mcp-diag-body" },
-											h("div", { className: "cpm-mcp-diag-grid" },
-												h("div", { className: "cpm-mcp-diag-item" },
-													h("span", { className: "cpm-mcp-diag-k" }, "SERVER"),
-													h("span", { className: "cpm-mcp-diag-v" }, authDialog.connectorName),
-												),
-												h("div", { className: "cpm-mcp-diag-item" },
-													h("span", { className: "cpm-mcp-diag-k" }, "TRANSPORT"),
-													h("span", { className: "cpm-mcp-diag-v" }, authDialog.transport === "stdio" ? "stdio" : "http"),
-												),
-												h("div", { className: "cpm-mcp-diag-endpoint" },
-													authDialog.transport === "stdio"
-														? `Local stdio: ${[authDialog.command, authDialog.args].filter(Boolean).join(" ") || "process active"}`
-														: `HTTP ${authDialog.url || "endpoint"} → tools/list`
-												),
-											),
-										),
-									),
-
-									authDialog.status === "error" && h(React.Fragment, null,
-										h("div", { className: "cpm-mcp-diag-header is-error" },
-											h("span", null, `✕ ${authDialog.lastResult?.status ? `Server returned ${authDialog.lastResult.status}` : "Connection failed"}`),
-											authDialog.lastResult?.status && h("span", { style: { fontSize: 11, opacity: 0.8 } }, `${authDialog.lastResult.status}`),
-										),
-										h("div", { className: "cpm-mcp-diag-body" },
-											h("div", { className: "cpm-mcp-diag-desc" }, authDialog.lastResult?.errorDetails || authDialog.statusMessage || "Error POSTing to endpoint"),
-											h("div", { className: "cpm-mcp-diag-grid" },
-												h("div", { className: "cpm-mcp-diag-item" },
-													h("span", { className: "cpm-mcp-diag-k" }, "SERVER"),
-													h("span", { className: "cpm-mcp-diag-v" }, authDialog.connectorName),
-												),
-												h("div", { className: "cpm-mcp-diag-item" },
-													h("span", { className: "cpm-mcp-diag-k" }, "TRANSPORT"),
-													h("span", { className: "cpm-mcp-diag-v" }, authDialog.transport === "stdio" ? "stdio" : "http"),
-												),
-												h("div", { className: "cpm-mcp-diag-endpoint" },
-													h("div", { className: "cpm-mcp-diag-k", style: { marginBottom: 3 } }, "FAILED REQUEST"),
-													authDialog.transport === "stdio"
-														? `stdio command failed: ${[authDialog.command, authDialog.args].filter(Boolean).join(" ") || "default execution"}`
-														: `POST ${authDialog.url || "endpoint"} → tools/list`
-												),
-											),
-										),
-									),
-								),
-							),
+							h(McpConnectionStatus, {
+								status: authDialog.status,
+								statusMessage: authDialog.statusMessage,
+								lastResult: authDialog.lastResult,
+								serverName: authDialog.connectorName,
+								transport: authDialog.transport,
+								url: authDialog.url,
+								command: authDialog.command,
+								args: authDialog.args,
+							}),
 						),
 
 						h("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
 							h("button", {
 								className: "cpm-btn cpm-btn-secondary",
-								disabled: authDialog.testing || authDialog.saving || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
+								disabled: authDialog.testing || authDialog.saving || !!oauthFlow.pending || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
 								onClick: runAuthTest,
-							}, authDialog.testing ? (oauthFlow.pending ? "等待授权…" : "测试中…") : (
+							}, oauthFlow.pending ? "等待授权…" : (authDialog.testing ? "测试中…" : (
 								needsOAuthLogin(authDialog, authDialog.oauthBaseline, authDialog.connectorName) ? "登录并连接" : "测试连接"
-							)),
+							))),
 
 							h("button", {
 								className: "cpm-btn cpm-btn-primary",
-								disabled: authDialog.saving || authDialog.testing || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
+								disabled: authDialog.saving || authDialog.testing || !!oauthFlow.pending || (authDialog.transport === "stdio" && !!getArgsJsonError(authDialog.args)),
 								onClick: async () => {
 									setAuthDialog((prev) => prev ? { ...prev, saving: true } : null);
 									try {
@@ -12447,8 +12576,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										void showApplicationToast(showToast, res, "配置成功", `已成功保存 ${authDialog.connectorName} 认证信息并注册为可用 MCP 服务`);
 										closeAuthDialog();
 									} catch (err) {
-										showToast("保存失败", err.message);
-										setAuthDialog((prev) => prev ? { ...prev, saving: false, status: "error", statusMessage: err.message } : null);
+										const rawMsg = err?.message || err;
+										const msg = typeof cleanMcpErrorText === "function" ? cleanMcpErrorText(rawMsg) : String(rawMsg || "保存失败");
+										const httpStatus = typeof err?.statusCode === "number"
+											? err.statusCode
+											: (typeof err?.status === "number" ? err.status : undefined);
+										showToast("保存失败", msg, { restart: false });
+										setAuthDialog((prev) => prev ? {
+											...prev,
+											saving: false,
+											status: "error",
+											statusMessage: msg,
+											lastResult: {
+												ok: false,
+												message: msg,
+												status: httpStatus,
+												server: err?.server || prev.connectorName,
+												transport: prev.transport,
+												endpoint: prev.url || prev.command || "",
+												errorDetails: err?.message || err?.errorDetails || msg,
+											},
+										} : null);
 									}
 								},
 							}, authDialog.saving ? "保存中…" : "保存并启用"),

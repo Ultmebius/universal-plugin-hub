@@ -1,10 +1,18 @@
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync, realpathSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { runInNewContext } from 'node:vm'
+import { parse } from 'acorn'
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 
 const root = mkdtempSync(join(tmpdir(), 'uph-codex-claude-compat-'))
 const prevHome = process.env.DSH_HOME
@@ -728,4 +736,444 @@ test('lifecycle fidelity: auto-enabled toggle preserves ${PLUGIN_ROOT} templates
   } finally {
     unmount()
   }
+})
+
+test('probeOnly verifies OAuth connectors non-interactively without pending browser card or saving state', { timeout: 30000 }, async (t) => {
+  const validTokens = new Set()
+  let rejectAllTokens = false
+  const body = (req) => new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+  const server = createServer(async (req, res) => {
+    const reqUrl = new URL(req.url || '/', 'http://localhost')
+    if (reqUrl.pathname === '/.well-known/oauth-protected-resource') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+        resource: `http://127.0.0.1:${server.address().port}/mcp`,
+        authorization_servers: [`http://127.0.0.1:${server.address().port}`],
+      }))
+      return
+    }
+    if (reqUrl.pathname === '/.well-known/oauth-authorization-server') {
+      const issuer = `http://127.0.0.1:${server.address().port}`
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+        issuer,
+        authorization_endpoint: `${issuer}/authorize`,
+        token_endpoint: `${issuer}/token`,
+        registration_endpoint: `${issuer}/register`,
+        code_challenge_methods_supported: ['S256'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
+        response_types_supported: ['code'],
+        token_endpoint_auth_methods_supported: ['none'],
+      }))
+      return
+    }
+    if (reqUrl.pathname === '/mcp') {
+      const token = (req.headers.authorization || '').replace(/^Bearer /, '')
+      if (rejectAllTokens || !validTokens.has(token)) {
+        res.writeHead(401, {
+          'WWW-Authenticate': `Bearer resource_metadata="http://127.0.0.1:${server.address().port}/.well-known/oauth-protected-resource"`,
+        }).end()
+        return
+      }
+      if (req.method === 'DELETE') { res.writeHead(200).end(); return }
+      const parsedBody = req.method === 'POST' ? JSON.parse(await body(req)) : undefined
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+      const mcp = new Server({ name: 'probe-oauth-test', version: '1.0.0' }, { capabilities: { tools: {} } })
+      mcp.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [{ name: 'search', inputSchema: { type: 'object', properties: {} } }, { name: 'fetch', inputSchema: { type: 'object', properties: {} } }] }))
+      await mcp.connect(transport)
+      res.on('close', () => { void mcp.close() })
+      await transport.handleRequest(req, res, parsedBody)
+      return
+    }
+    res.writeHead(404).end()
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+
+  const url = `http://127.0.0.1:${server.address().port}/mcp`
+  const plugin = 'probe-oauth-plugin'
+  const connName = 'remote-oauth'
+  const target = store.installedDir(plugin)
+  mkdirSync(target, { recursive: true })
+  write(join(target, '.mcp.json'), { mcpServers: { [connName]: { type: 'http', url } } })
+  const hub = store.readState()
+  store.writeState({ ...hub, plugins: [...hub.plugins.filter(p => p.name !== plugin), { name: plugin, sourceId: 'local' }] })
+
+  // 1. Missing tokens + probeOnly -> immediate non-pending failure with authExpired: true, WITHOUT mutating mcp-tools-state
+  const stateKey = `${plugin}::${connName}`
+  const unauthed = await install.verifyConnectorAuth(plugin, connName, {
+    transport: 'http', url, oauth: 'auto_register', probeOnly: true,
+  }, { pluginOwned: true })
+  assert.equal(unauthed.pending, undefined)
+  assert.equal(unauthed.ok, false)
+  assert.equal(unauthed.mode, 'probe')
+  assert.equal(unauthed.authExpired, true)
+  assert.equal(install.readMcpToolsState()[stateKey]?.verifiedRemoteConfig, undefined, 'unauthed probeOnly must not persist verifiedRemoteConfig')
+
+  // 2. Valid tokens + probeOnly -> connects non-interactively, reports toolsCount, NEVER returns pending or saves state
+  const tok = `tok-${randomUUID()}`
+  validTokens.add(tok)
+  const key = oauthConfig.oauthCredentialKey(plugin, connName, url, 'auto_register')
+  oauthStore.allowOAuthRecordWrites(key)
+  oauthStore.writeOAuthRecord(key, {
+    clientInformation: { client_id: 'dyn-client', redirect_uris: [] },
+    tokens: { access_token: tok, token_type: 'Bearer' },
+  })
+
+  const probed = await install.verifyConnectorAuth(plugin, connName, {
+    transport: 'http', url, oauth: 'auto_register', probeOnly: true,
+  }, { pluginOwned: true })
+  assert.equal(probed.pending, undefined)
+  assert.equal(probed.ok, true, probed.message)
+  assert.equal(probed.mode, 'probe')
+  assert.equal(probed.toolsCount, 2)
+  assert.equal(install.getConnectorEntry(plugin, connName), null, 'probeOnly must never register or enable the connector')
+  assert.equal(install.readMcpToolsState()[stateKey]?.verifiedRemoteConfig, undefined, 'probeOnly on draft/disabled connector must not write verifiedRemoteConfig')
+
+  // 3. Previously saved (disabled) OAuth connector retains verifiedRemoteConfig even when probeOnly draft fails
+  assert.equal((await install.enableConnector(plugin, connName, { transport: 'http', url, oauth: 'auto_register' }, { pluginOwned: true })).ok, true)
+  install.toggleConnector(plugin, connName, false)
+  assert.equal(install.installedDetails().find(p => p.name === plugin)?.connectors.find(c => c.name === connName)?.oauthAuthenticated, true)
+
+  rejectAllTokens = true
+  const expired = await install.verifyConnectorAuth(plugin, connName, {
+    transport: 'http', url: `${url}?draft=1`, oauth: 'auto_register', probeOnly: true,
+  }, { pluginOwned: true })
+  assert.equal(expired.pending, undefined)
+  assert.equal(expired.ok, false)
+  assert.equal(expired.authExpired, true)
+  assert.doesNotMatch(expired.message, /node\.exe/i)
+  assert.equal(
+    install.installedDetails().find(p => p.name === plugin)?.connectors.find(c => c.name === connName)?.oauthAuthenticated,
+    true,
+    'failed probeOnly on disabled connector must not wipe previously saved verifiedRemoteConfig',
+  )
+
+  // 4. stdio verification must never write bogus HTTP verifiedRemoteConfig fingerprints
+  const stdioKey = `${plugin}::stdio-tool`
+  await install.verifyConnectorAuth(plugin, 'stdio-tool', { transport: 'stdio', command: 'nonexistent-bin-xyz' }, { pluginOwned: true })
+  assert.equal(install.readMcpToolsState()[stdioKey]?.verifiedRemoteConfig, undefined, 'stdio verification must not write verifiedRemoteConfig')
+
+  // 5. Missing custom OAuth client error directs users to 「登录并连接」, not 「测试连接」
+  const customBlocked = await install.probeConnectorAuth(plugin, connName, {
+    transport: 'http', url, oauth: 'custom', oauthClientId: 'cid-123',
+  }, { pluginOwned: true })
+  assert.equal(customBlocked.ok, false)
+  assert.match(customBlocked.error, /登录并连接/)
+  assert.doesNotMatch(customBlocked.error, /测试连接/)
+})
+
+test('client KeyValueEditor masks only sensitive headers/envs and hides eye button on non-secret rows', () => {
+  const start = clientSource.indexOf('function isKvSensitive(')
+  assert.ok(start >= 0, 'client.js should define isKvSensitive helper')
+  const end = clientSource.indexOf('function KeyValueEditor(', start)
+  assert.ok(end > start, 'client.js should define shared KeyValueEditor component')
+
+  const baseStart = clientSource.indexOf('function hasUnresolvedVarPlaceholder(')
+  const baseEnd = clientSource.indexOf('function cleanMcpErrorText(', baseStart)
+  const kvCtx = {}
+  runInNewContext(
+    clientSource.slice(baseStart, baseEnd) + '\n' + clientSource.slice(start, end) +
+    '\nglobalThis.kv = { makeKvRow, updateKvRow, toggleKvSecret, isKvSensitive };',
+    kvCtx,
+  )
+
+  // Loaded non-secret header (`x-exa-source`) -> plaintext, NO eye icon
+  const plainHeader = kvCtx.kv.makeKvRow('header', 'h1', 'x-exa-source', 'agent-plugin')
+  assert.equal(plainHeader.isSecret, false)
+  assert.equal(plainHeader.secretToggleable, false)
+
+  // Loaded secret header (`Authorization`) -> masked, WITH eye icon
+  const secretHeader = kvCtx.kv.makeKvRow('header', 'h2', 'Authorization', 'Bearer tok')
+  assert.equal(secretHeader.isSecret, true)
+  assert.equal(secretHeader.secretToggleable, true)
+
+  // + Add blank header (represents Authorization placeholder) -> masked WITH eye until non-secret key typed
+  const blankHeader = kvCtx.kv.makeKvRow('header', 'h3', '', '')
+  assert.equal(blankHeader.isSecret, true)
+  assert.equal(blankHeader.secretToggleable, true)
+  const typedPlainHeader = kvCtx.kv.updateKvRow('header', blankHeader, { key: 'x-custom' })
+  assert.equal(typedPlainHeader.isSecret, false)
+  assert.equal(typedPlainHeader.secretToggleable, false)
+  const typedSecretHeader = kvCtx.kv.updateKvRow('header', typedPlainHeader, { key: 'x-api-key' })
+  assert.equal(typedSecretHeader.isSecret, true)
+  assert.equal(typedSecretHeader.secretToggleable, true)
+
+  // Loaded & + Add env rows: plaintext & NO eye for non-secret; auto-mask + eye when sensitive key/value typed
+  const plainEnv = kvCtx.kv.makeKvRow('env', 'e1', 'CCC_WAIT_MS', '1200000')
+  assert.equal(plainEnv.isSecret, false)
+  assert.equal(plainEnv.secretToggleable, false)
+  const blankEnv = kvCtx.kv.makeKvRow('env', 'e2', '', '')
+  assert.equal(blankEnv.isSecret, false)
+  assert.equal(blankEnv.secretToggleable, false)
+  const typedSecretEnv = kvCtx.kv.updateKvRow('env', blankEnv, { key: 'GITHUB_TOKEN', value: 'ghp_123' })
+  assert.equal(typedSecretEnv.isSecret, true)
+  assert.equal(typedSecretEnv.secretToggleable, true)
+
+  // Revealing via eye survives value edits; secret value prefix still flags secret even under non-secret key; clearing both hides eye
+  const revealed = kvCtx.kv.toggleKvSecret(typedSecretEnv)
+  assert.equal(revealed.isSecret, false)
+  assert.equal(revealed.secretToggleable, true)
+  const editedRevealed = kvCtx.kv.updateKvRow('env', revealed, { value: 'ghp_456' })
+  assert.equal(editedRevealed.isSecret, false)
+  assert.equal(editedRevealed.secretToggleable, true)
+  const renamedWithSecretVal = kvCtx.kv.updateKvRow('env', editedRevealed, { key: 'APP_MODE' })
+  assert.equal(renamedWithSecretVal.secretToggleable, true)
+  const renamedPlain = kvCtx.kv.updateKvRow('env', renamedWithSecretVal, { value: 'production' })
+  assert.equal(renamedPlain.isSecret, false)
+  assert.equal(renamedPlain.secretToggleable, false)
+
+  // AST check: AddMcpDialog & authDialog use shared KeyValueEditor which gates pw-btn on secretToggleable
+  const ast = parse(clientSource, { ecmaVersion: 'latest' })
+  const findFn = (node, name) => {
+    if (node?.type === 'FunctionDeclaration' && node.id?.name === name) return node
+    for (const val of Object.values(node || {})) {
+      for (const child of Array.isArray(val) ? val : [val]) {
+        if (child && typeof child === 'object') {
+          const hit = findFn(child, name)
+          if (hit) return hit
+        }
+      }
+    }
+  }
+  const kvNode = findFn(ast, 'KeyValueEditor')
+  assert.ok(kvNode)
+  const kvSrc = clientSource.slice(kvNode.start, kvNode.end)
+  assert.match(kvSrc, /item\.secretToggleable\s*&&/)
+  assert.match(kvSrc, /cpm-mcp-pw-btn/)
+  const addNode = findFn(ast, 'AddMcpDialog')
+  const manageNode = findFn(ast, 'ManagePageContent')
+  for (const [label, fnNode] of [['AddMcpDialog', addNode], ['ManagePageContent', manageNode]]) {
+    const src = clientSource.slice(fnNode.start, fnNode.end)
+    assert.match(src, /h\(KeyValueEditor,\s*\{\s*kind:\s*"header"/, `${label} should use KeyValueEditor for headers`)
+    assert.match(src, /h\(KeyValueEditor,\s*\{\s*kind:\s*"env"/, `${label} should use KeyValueEditor for env vars`)
+  }
+  assert.doesNotMatch(clientSource, /headersList\.map\(/, 'client.js should not retain duplicated inline headersList editor')
+})
+
+test('AddMcpDialog and authDialog separate probe vs OAuth login and share McpConnectionStatus', async () => {
+  const ast = parse(clientSource, { ecmaVersion: 'latest' })
+  const findFn = (node, name) => {
+    if (node?.type === 'FunctionDeclaration' && node.id?.name === name) return node
+    for (const val of Object.values(node || {})) {
+      for (const child of Array.isArray(val) ? val : [val]) {
+        if (child && typeof child === 'object') {
+          const hit = findFn(child, name)
+          if (hit) return hit
+        }
+      }
+    }
+  }
+  const statusFn = findFn(ast, 'McpConnectionStatus')
+  assert.ok(statusFn, 'client.js should extract shared McpConnectionStatus component')
+  const statusSrc = clientSource.slice(statusFn.start, statusFn.end)
+  assert.match(statusSrc, /cpm-mcp-status-pill/)
+  assert.match(statusSrc, /cpm-mcp-diag-popover/)
+
+  // Render McpConnectionStatus with react-test-renderer: untested must render nothing by default
+  const req = createRequire(import.meta.url)
+  const React = req('react')
+  const { create, act } = req('react-test-renderer')
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  const statusCtx = { ...React, React, h: React.createElement }
+  runInNewContext(statusSrc + '\nglobalThis.McpConnectionStatus = McpConnectionStatus;', statusCtx)
+  let tree
+  await act(async () => {
+    tree = create(React.createElement(statusCtx.McpConnectionStatus, { status: 'untested', serverName: 'codegraph', transport: 'stdio' }))
+  })
+  assert.equal(tree.toJSON(), null, 'McpConnectionStatus must stay hidden while untested')
+
+  await act(async () => {
+    tree.update(React.createElement(statusCtx.McpConnectionStatus, { status: 'testing', serverName: 'codegraph', transport: 'stdio' }))
+  })
+  assert.match(JSON.stringify(tree.toJSON()), /Testing\.\.\./)
+  assert.equal(tree.toJSON().props.tabIndex, undefined, 'spinner pill must not be keyboard-focusable')
+
+  // publicSession from OAuth polling returns string status ('success'/'error') alongside numeric statusCode and tools array
+  await act(async () => {
+    tree.update(React.createElement(statusCtx.McpConnectionStatus, {
+      status: 'success',
+      statusMessage: 'Connected',
+      lastResult: { ok: true, status: 'success', statusCode: 200, duration: 42, tools: [{ name: 'search' }, { name: 'fetch' }, { name: 'read' }], endpoint: 'https://mcp.exa.ai/mcp' },
+      serverName: 'exa',
+      transport: 'http',
+      url: 'https://mcp.exa.ai/mcp',
+    }))
+  })
+  assert.match(JSON.stringify(tree.toJSON()), /Connected/)
+  assert.equal(tree.toJSON().props.tabIndex, 0, 'completed status pill should support keyboard focus')
+  await act(async () => { tree.toJSON().props.onMouseEnter() })
+  const successPop = JSON.stringify(tree.toJSON())
+  assert.match(successPop, /42ms/)
+  assert.match(successPop, /3 tools/)
+  assert.match(successPop, /"200"/)
+  assert.doesNotMatch(successPop, /"success"/, 'popover must render numeric HTTP code rather than publicSession state string')
+  await act(async () => { tree.toJSON().props.onMouseLeave() })
+
+  // Keyboard focus opens diagnostic popover; error status string ('error') must not render as "Server returned error"
+  await act(async () => {
+    tree.update(React.createElement(statusCtx.McpConnectionStatus, {
+      status: 'error',
+      statusMessage: '连接失败',
+      lastResult: { ok: false, status: 'error', statusCode: 401, message: 'Unauthorized' },
+      serverName: 'exa',
+      transport: 'http',
+      url: 'https://mcp.exa.ai/mcp',
+    }))
+  })
+  await act(async () => { tree.toJSON().props.onFocus() })
+  const errWithCode = JSON.stringify(tree.toJSON())
+  assert.match(errWithCode, /Server returned 401/)
+  assert.doesNotMatch(errWithCode, /Server returned error/)
+  await act(async () => { tree.toJSON().props.onBlur() })
+
+  await act(async () => {
+    tree.update(React.createElement(statusCtx.McpConnectionStatus, {
+      status: 'error',
+      statusMessage: '连接超时',
+      lastResult: { ok: false, status: 'error', message: '连接超时' },
+      serverName: 'exa',
+      transport: 'http',
+      url: 'https://mcp.exa.ai/mcp',
+    }))
+  })
+  await act(async () => { tree.toJSON().props.onFocus() })
+  const errNoCode = JSON.stringify(tree.toJSON())
+  assert.match(errNoCode, /Connection failed/)
+  assert.doesNotMatch(errNoCode, /Server returned error/)
+
+  await act(async () => {
+    tree.update(React.createElement(statusCtx.McpConnectionStatus, { status: 'untested', serverName: 'exa', transport: 'http' }))
+  })
+  assert.equal(tree.toJSON(), null, 'Editing fields after a probe hides the pill again until re-tested')
+  await act(async () => { tree.unmount() })
+
+  // OauthFields must emit pure field patches without injecting dead `status: "untested"` or spreading stale closures
+  const oauthFieldsFn = findFn(ast, 'OauthFields')
+  const oauthFieldsSrc = clientSource.slice(oauthFieldsFn.start, oauthFieldsFn.end)
+  const patches = []
+  const fieldCtx = { ...React, React, h: React.createElement }
+  runInNewContext(oauthFieldsSrc + '\nglobalThis.OauthFields = OauthFields;', fieldCtx)
+  let fieldsTree
+  await act(async () => {
+    fieldsTree = create(React.createElement(fieldCtx.OauthFields, {
+      form: { oauth: 'custom', oauthClientId: 'old-id', url: 'https://mcp.exa.ai/mcp' },
+      onChange: (patch) => patches.push(patch),
+      idPrefix: 'test-mcp',
+    }))
+  })
+  const firstInput = fieldsTree.root.findAllByType('input')[0]
+  await act(async () => { firstInput.props.onChange({ target: { value: 'new-id' } }) })
+  assert.deepEqual(structuredClone(patches), [{ oauthClientId: 'new-id' }], 'OauthFields must pass incremental patch only')
+  await act(async () => { fieldsTree.unmount() })
+
+  const addFn = findFn(ast, 'AddMcpDialog')
+  const addSrc = clientSource.slice(addFn.start, addFn.end)
+  assert.match(addSrc, /h\(McpConnectionStatus\b/, 'AddMcpDialog should render shared McpConnectionStatus in bottom-left')
+  assert.match(addSrc, /useConnectionProbe\(/, 'AddMcpDialog should use non-interactive probe hook for 测试连接')
+  assert.match(addSrc, /h\(KeyValueEditor\b/, 'AddMcpDialog should use shared KeyValueEditor')
+  assert.match(addSrc, /if \(isLogin\)[\s\S]*oauthFlow\.start\(payload\)[\s\S]*else[\s\S]*connProbe\.start\(payload\)/)
+  assert.doesNotMatch(addSrc, /const save = async \(payload,\s*quiet\s*=/, 'AddMcpDialog save must not keep unused quiet parameter')
+
+  // AddMcpDialog oauthFlow.onFinished must mark oauthBaseline authenticated even if post-OAuth save fails
+  const addStart = addSrc.indexOf('onFinished: async (res) => {')
+  const addEnd = addSrc.indexOf('onCancel:', addStart)
+  const addBaselines = []
+  const addCallbacks = runInNewContext('({' + addSrc.slice(addStart, addEnd) + '})', {
+    verifiedPayloadRef: { current: { name: 'exa', transport: 'http', url: 'https://mcp.exa.ai/mcp', oauth: 'auto_register' } },
+    setOauthBaseline: (val) => addBaselines.push(val),
+    setConnState: () => {},
+    save: async () => {},
+    showToast: () => {},
+    toProbeErrorState: (e) => ({ status: 'error', statusMessage: e.message }),
+  })
+  await addCallbacks.onFinished({ ok: true, message: 'ok' })
+  assert.equal(addBaselines.length, 1, 'AddMcpDialog must update oauthBaseline when OAuth finishes')
+  assert.equal(addBaselines[0].oauthAuthenticated, true)
+
+  // PluginDetail authDialog: all fields must reset via functional update (zero stale spread `{ ...authDialog, ... }`)
+  const manageFn = findFn(ast, 'ManagePageContent')
+  const manageSrc = clientSource.slice(manageFn.start, manageFn.end)
+  assert.doesNotMatch(manageSrc, /setAuthDialog\(\s*\{\s*\.\.\.authDialog/, 'PluginDetail must not spread stale authDialog snapshot on edits')
+  assert.match(manageSrc, /updateAuthDialog\(/, 'PluginDetail should funnel authDialog form edits through unified updater')
+
+  // PluginDetail authDialog onFinished: locks `saving: true` during async save, unlocks on error, falls back to verifiedConnectorRef when res.server omitted
+  const detailStart = clientSource.indexOf('const closeAuthDialog = ', clientSource.indexOf('function PluginDetail('))
+  const pluginStart = clientSource.lastIndexOf('onFinished: async (res) => {', detailStart)
+  const pluginEnd = clientSource.indexOf('onCancel:', pluginStart)
+  let closed = false
+  let toasted = null
+  const loadedTools = []
+  const pluginSaves = []
+  const dialogTransitions = []
+  let resolveSave
+  const verifiedPayloadRef = { current: { transport: 'http', oauth: 'auto_register', url: 'https://mcp.exa.ai/mcp' } }
+  const verifiedConnectorRef = { current: 'exa' }
+  const applyDialogUpdate = (updater) => {
+    const next = typeof updater === 'function'
+      ? updater(dialogTransitions.at(-1) || { connectorName: 'exa', transport: 'http', oauth: 'auto_register', testing: true, saving: false, oauthBaseline: null })
+      : updater
+    dialogTransitions.push(next)
+  }
+  const callbacks = runInNewContext('({' + clientSource.slice(pluginStart, pluginEnd) + '})', {
+    setAuthDialog: applyDialogUpdate,
+    refreshState: async () => {},
+    loadConnectorTools: async (name) => { loadedTools.push(name) },
+    verifiedPayloadRef,
+    verifiedConnectorRef,
+    persistAuthDialog: payload => new Promise((r) => { pluginSaves.push(payload); resolveSave = r }),
+    showToast() {},
+    cleanMcpError: (e) => e?.message || String(e),
+    showApplicationToast: (_st, _res, title, body) => { toasted = { title, body } },
+    closeAuthDialog: () => { closed = true },
+  })
+  const pendingSave = callbacks.onFinished({ ok: true, message: 'OAuth ok' })
+  assert.equal(dialogTransitions.at(-1).testing, false)
+  assert.equal(dialogTransitions.at(-1).saving, true, 'PluginDetail must set saving: true before awaiting persistAuthDialog')
+  resolveSave({ ok: true, application: 'applied' })
+  await pendingSave
+  assert.equal(pluginSaves.length, 1)
+  assert.equal(closed, true)
+  assert.deepEqual(loadedTools, ['exa'], 'loadConnectorTools must still run using connector fallback when res.server is absent')
+  assert.match(toasted?.body || '', /已成功保存 exa 认证信息/, 'toast must include connector name even when res.server is absent')
+
+  // If persistAuthDialog fails, saving lock must release back to false
+  const failToasts = []
+  const failTransitions = []
+  const failCallbacks = runInNewContext('({' + clientSource.slice(pluginStart, pluginEnd) + '})', {
+    setAuthDialog: (u) => failTransitions.push(typeof u === 'function' ? u(failTransitions.at(-1) || { connectorName: 'exa', transport: 'http', oauth: 'auto_register', testing: true, saving: false }) : u),
+    refreshState: async () => {},
+    loadConnectorTools: async () => {},
+    verifiedPayloadRef,
+    verifiedConnectorRef,
+    persistAuthDialog: async () => ({ ok: false, error: 'backend failed' }),
+    showToast: (t, m) => failToasts.push({ t, m }),
+    cleanMcpError: (e) => e?.message || String(e),
+    showApplicationToast: () => {},
+    closeAuthDialog: () => {},
+  })
+  await failCallbacks.onFinished({ ok: true, server: 'exa', message: 'OAuth ok' })
+  assert.equal(failTransitions.at(-1).saving, false, 'failed post-OAuth save must reset saving back to false')
+  assert.equal(failToasts.length, 1)
+
+  // Public oauth session exposes server & toolsCount; no dead CSS/FORM_UI_KEYS leftovers
+  const oauthModule = await import('../src/oauth.js')
+  const s = oauthModule.beginOAuthVerification('test-plugin', 'exa', { url: 'http://127.0.0.1:1/mcp', oauth: 'auto_register' }, { noBrowser: true, callbackTimeout: 200 })
+  const pub = oauthModule.getOAuthVerification(s.id)
+  assert.equal(pub.server, 'exa', 'publicSession must expose connector server name')
+  oauthModule.cancelOAuthVerification(s.id)
+
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(pkg.version, '1.3.0', 'package version must be upgraded to 1.3.0')
+  const routesSource = readFileSync(new URL('../src/routes.js', import.meta.url), 'utf8')
+  assert.match(routesSource, /if \(method === 'POST' && path === '\/mcps\/verify'\)\s*\{[\s\S]*?normalizeMcpName\(body\.name\)/, '/mcps/verify should reuse normalizeMcpName')
+  const bridgeSource = readFileSync(new URL('../src/oauth-bridge.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(bridgeSource, /请在连接器设置中重新登录/, 'oauth-bridge should not hardcode plugin-only connector phrasing')
+  assert.doesNotMatch(clientSource, /\.cpm-mcp-diag-header\.is-neutral/, 'dead .is-neutral CSS must be removed')
+  const uiKeysLine = clientSource.match(/const FORM_UI_KEYS = .*$/m)?.[0] || ''
+  assert.doesNotMatch(uiKeysLine, /"oauthSessionId"|"diagHover"/, 'FORM_UI_KEYS should not keep unused keys')
 })
