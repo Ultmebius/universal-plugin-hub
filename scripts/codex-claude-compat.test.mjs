@@ -1168,7 +1168,7 @@ test('AddMcpDialog and authDialog separate probe vs OAuth login and share McpCon
   oauthModule.cancelOAuthVerification(s.id)
 
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.version, '1.3.0', 'package version must be upgraded to 1.3.0')
+  assert.equal(pkg.version, '1.3.1', 'package version must be upgraded to 1.3.1')
   const routesSource = readFileSync(new URL('../src/routes.js', import.meta.url), 'utf8')
   assert.match(routesSource, /if \(method === 'POST' && path === '\/mcps\/verify'\)\s*\{[\s\S]*?normalizeMcpName\(body\.name\)/, '/mcps/verify should reuse normalizeMcpName')
   const bridgeSource = readFileSync(new URL('../src/oauth-bridge.js', import.meta.url), 'utf8')
