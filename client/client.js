@@ -7514,13 +7514,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const loadMarket = useCallback(async (sourceId) => {
 			if (!sourceId) return;
 			const previous = SESSION_STORE.rows?.[sourceId];
+			const epoch = detailEpochRef.current[sourceId] || 0;
 			if (!previous) setLoadingSourceId(sourceId);
 			try {
 				const body = await api("/market?sourceId=" + encodeURIComponent(sourceId));
+				if ((detailEpochRef.current[sourceId] || 0) !== epoch) return;
 				const plugins = body.plugins || [];
 				setRows(prev => prev?.[sourceId] !== previous || JSON.stringify(previous) === JSON.stringify(plugins)
 					? prev : { ...prev, [sourceId]: plugins });
 			} catch (e) {
+				if ((detailEpochRef.current[sourceId] || 0) !== epoch) return;
 				SESSION_STORE.checkedCatalogs?.delete(sourceId);
 				if (!previous) showToast("加载失败", e.message, { restart: false });
 			} finally {
@@ -7731,18 +7734,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [currentSourcePlugins, query, sortBy, sortInstalledNames, crossSourceInstalledNames]);
 
 		const refresh = async () => {
+			const refreshSourceId = activeSourceId;
 			setIsRefreshing(true);
 			if (detailEpochRef.current) {
 				const seen = new Set(Object.keys(detailEpochRef.current));
-				if (activeSourceId) seen.add(activeSourceId);
+				if (refreshSourceId) seen.add(refreshSourceId);
 				for (const s of (state?.sources || [])) {
 					if (s?.id) seen.add(s.id);
 				}
 				for (const id of seen) detailEpochRef.current[id] = (detailEpochRef.current[id] || 0) + 1;
 			}
+			const refreshEpoch = (refreshSourceId && detailEpochRef.current?.[refreshSourceId]) || 0;
 			if (detailCacheRef.current) detailCacheRef.current = {};
 			try {
-				if (activeSourceId === "skills-local") {
+				if (refreshSourceId === "skills-local") {
 					const body = await api("/skills/refresh", { method: "POST" });
 					setRows(prev => ({ ...(prev || {}), "skills-local": body.skills || [] }));
 					await refreshState();
@@ -7751,9 +7756,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}
 				const body = await api("/market/refresh", {
 					method: "POST",
-					body: JSON.stringify({ sourceId: activeSourceId }),
+					body: JSON.stringify({ sourceId: refreshSourceId }),
 				});
-				setRows((prev) => ({ ...(prev || {}), [activeSourceId]: body.plugins || [] }));
+				if (refreshSourceId && (detailEpochRef.current?.[refreshSourceId] || 0) !== refreshEpoch) return;
+				setRows((prev) => ({ ...(prev || {}), [refreshSourceId]: body.plugins || [] }));
 				showToast("已刷新", "市场清单已更新", { restart: false });
 			} catch (e) {
 				showToast("刷新失败", e.message, { restart: false });
@@ -8303,10 +8309,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 										: (remainingSources.find((s) => s.id !== "local" || hasLocalPlugins) || remainingSources[0])?.id;
 									if (SESSION_STORE.activeSourceId === toRemove.id || activeSourceId === toRemove.id) {
 										if (fallbackSourceId) {
-											setActiveSourceId(fallbackSourceId, SESSION_STORE.sourceFilters?.[fallbackSourceId]);
+											setActiveSourceId(fallbackSourceId, SESSION_STORE.sourceFilters?.[fallbackSourceId] || "all");
 										} else {
 											SESSION_STORE.activeSourceId = "";
 											setActiveSourceIdRaw("");
+											SESSION_STORE.filter = "all";
+											setFilterRaw("all");
 											const emptyView = { type: "browse" };
 											SESSION_STORE.view = emptyView;
 											setViewRaw(emptyView);
