@@ -14,7 +14,12 @@ import { sweepTrash } from './store.js'
 import { restoreUploadedSkills } from './skill-uploads.js'
 import { removeDuplicateLocalMarketTabs } from './local.js'
 import { createProfileApplicator } from './runtime.js'
-import { attachAtPluginsAgentHook, atPluginsBootPayload, invalidateAtPluginsCache } from './at-plugins.js'
+import {
+  attachAtPluginsAgentHook,
+  attachAtPluginsSessionTitleHook,
+  atPluginsBootPayload,
+  invalidateAtPluginsCache,
+} from './at-plugins.js'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
@@ -85,6 +90,9 @@ export function apply(ctx) {
   })
   ctx.inject(['agents'], (hostCtx) => {
     hostCtx.effect(() => attachAtPluginsAgentHook(hostCtx), 'universal-plugin-hub: @ plugins routing')
+  })
+  ctx.inject(['sessions'], (hostCtx) => {
+    hostCtx.effect(() => attachAtPluginsSessionTitleHook(hostCtx), 'universal-plugin-hub: @ plugins session title')
   })
   ctx.inject(['webServer'], (hostCtx) => {
     hostCtx.effect(() => {

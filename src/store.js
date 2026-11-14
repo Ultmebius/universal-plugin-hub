@@ -447,3 +447,14 @@ export function findDuplicateSource(state, id, url) {
   return null
 }
 
+/**
+ * Read an optional Cordis service without tripping its inject proxy check
+ * (`ctx.get` returns `undefined` when missing or inactive), falling back to
+ * direct property lookup only on plain mock objects without `.get`.
+ */
+export function resolveOptionalService(ctx, name) {
+  if (!ctx || typeof name !== 'string') return undefined
+  if (typeof ctx.get === 'function') return ctx.get(name)
+  return ctx[name]
+}
+

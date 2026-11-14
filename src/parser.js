@@ -367,12 +367,10 @@ export function readMarketplace(sourceId, names) {
     if (selection?.key === key && now - selection.time < MARKETPLACE_CACHE_TTL) return selection.data
     const data = parseMarketplaceFromDisk(sourceId, cache, names).filter(row => names.has(row.name))
     MARKETPLACE_SELECTION_CACHE.set(sourceId, { key, time: now, data })
-    PARSER_CACHE_REVISION += 1
     return data
   }
   const rows = parseMarketplaceFromDisk(sourceId, cache)
   MARKETPLACE_CACHE.set(sourceId, { time: now, data: rows })
-  PARSER_CACHE_REVISION += 1
   return rows
 }
 

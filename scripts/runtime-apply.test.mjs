@@ -91,6 +91,36 @@ test('a failed application keeps the persisted result and allows the next change
   assert.equal(next.restartReason, 'module-comparison')
 })
 
+test('createProfileApplicator resolves hmr on plain mock contexts without .get', async () => {
+  const seen = []
+  const directApply = createProfileApplicator({
+    hmr: {
+      reconcileProfile: async (ids) => {
+        seen.push(['direct', ids])
+        return { warnings: [] }
+      },
+    },
+  })
+  scheduledResult({ ok: true }, directApply, ['a'])
+  const directDone = await waitFor(directApply, (s) => s.application === 'applied')
+  assert.equal(directDone.application, 'applied')
+
+  const rootApply = createProfileApplicator({
+    root: {
+      hmr: {
+        reconcileProfile: async (ids) => {
+          seen.push(['root', ids])
+          return { warnings: [] }
+        },
+      },
+    },
+  })
+  scheduledResult({ ok: true }, rootApply, ['b'])
+  const rootDone = await waitFor(rootApply, (s) => s.application === 'applied')
+  assert.equal(rootDone.application, 'applied')
+  assert.deepEqual(seen, [['direct', ['a']], ['root', ['b']]])
+})
+
 test('a new user MCP schedules the live profile application for its registration id', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'hub-runtime-route-'))
   const previousHome = process.env.DSH_HOME

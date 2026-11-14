@@ -7,11 +7,11 @@
  * and icons, and injects a compact Codex-style capability notice on `agent/pre-step`
  * so the model selectively loads only relevant skills via the native `skill` tool.
  */
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
-import { dshHome, installedDir, readState, slugify, statePath, stateRevision } from './store.js'
+import { basename, dirname, isAbsolute, join } from 'node:path'
+import { dshHome, dshSkillsDir, installedDir, isSameOrInsidePath, readState, resolveOptionalService, slugify, statePath, stateRevision } from './store.js'
 import {
   formatDisplayName,
   listAgents,
@@ -29,17 +29,27 @@ import {
   installedPluginIconIdentity,
 } from './install.js'
 import { localIconCacheRevision } from './icons.js'
+import { isUploadedSkillTarget } from './skill-uploads.js'
 
 export const PLUGIN_MENTION_SCHEME = 'uph-plugin:'
 export const AT_PLUGINS_BOOT_LIMIT = 128 * 1024
 
 const SKILL_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const WIRE_MENTION_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]+)\)/uy
+const WIRE_MENTION_TEXT_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]+)\)/gu
+const WIRE_MENTION_TRUNCATED_TAIL_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]*)$/u
+const TITLE_OSC_SEQUENCE_RE = /(?:\u001B\]|\u009D)(?:(?!\u0007|\u001B\\)[\s\S])*(?:\u0007|\u001B\\|$)/gu
+const TITLE_CSI_SEQUENCE_RE = /(?:\u001B\[|\u009B)[0-?]*[ -/]*[@-~]/gu
+const TITLE_ESC_SEQUENCE_RE = /\u001B[@-_]/gu
+const TITLE_CONTROL_CHARACTER_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu
+const TITLE_DIRECTIONAL_CONTROL_RE = /[\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/gu
+const DEFAULT_TITLE_FALLBACK_MAX_WORDS = 5
+const DEFAULT_TITLE_FALLBACK_MAX_BYTES = 40
+const DEFAULT_TITLE_MAX_BYTES = 80
 const RAW_AT_TOKEN_RE = /@([^\s\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}，。；：、！？（）【】《》“”‘’」』]+)/uy
 const LEFT_ALLOWED_RE = /[\s(\[{"'“‘（【《，。；：、！？\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
 const TRAILING_PUNCT_RE = /[.,;:!?，。；：！？)"'\]”’）】》]+$/u
 const SUMMARY_MAX_CHARS = 180
-const CONTEXT_SUMMARY_MAX_CHARS = 120
 
 let cacheEpoch = 0
 let cachedCatalog = null // { home, stamp, plugins }
@@ -276,38 +286,53 @@ function truncateOneLine(text, max = SUMMARY_MAX_CHARS) {
   return `${clean.slice(0, max - 1)}…`
 }
 
-function resolveCallablePluginSkills(target, manifest, snapshotSkills) {
-  const listed = listSkills(target, manifest)
-  if (listed.length === 0) return []
+function pluginOwnsSkillFile(target, installedRoot, mirrorRoot, file) {
+  if (typeof file !== 'string' || !isAbsolute(file)) return false
+  const nativeRoot = dshSkillsDir()
+  const isInstalled = isSameOrInsidePath(file, target) || isSameOrInsidePath(file, installedRoot)
+  const mirrorDir = dirname(file)
+  const isMirror = basename(file).toLowerCase() === 'skill.md' &&
+    [nativeRoot, mirrorRoot].some(root => isSameOrInsidePath(dirname(mirrorDir), root) && isSameOrInsidePath(root, dirname(mirrorDir)))
+  if (!isInstalled && !isMirror) return false
+  try {
+    const canonical = realpathSync.native(file)
+    if (isInstalled) return isSameOrInsidePath(canonical, installedRoot)
+    if (isUploadedSkillTarget(join(nativeRoot, basename(mirrorDir)))) return false
+    // Native discovery resolves the active copy. Its content must still match
+    // this plugin's normalized mirror source, even when another plugin shares its folder name.
+    const mirrorFile = mirrorRoot && join(mirrorRoot, basename(mirrorDir), basename(file))
+    if (!isSameOrInsidePath(canonical, mirrorFile)) return false
+    const original = join(target, 'skills', basename(mirrorDir), 'SKILL.md')
+    return isSameOrInsidePath(realpathSync.native(original), installedRoot) &&
+      readFileSync(original).equals(readFileSync(canonical))
+  } catch {
+    return false
+  }
+}
 
+function resolveCallablePluginSkills(target, manifest, snapshotSkills) {
   const seen = new Set()
   const resolved = []
   if (Array.isArray(snapshotSkills)) {
-    const liveByKey = new Map()
-    for (const s of snapshotSkills) {
-      if (!s || !s.name || s.modelInvocable === false || s.enabled === false) continue
-      liveByKey.set(String(s.name).toLowerCase(), s)
-    }
-    for (const item of listed) {
-      const candidates = [item.name, item.dirName, slugify(item.name)].filter(Boolean)
-      let matched = null
-      for (const key of candidates) {
-        const found = liveByKey.get(String(key).toLowerCase())
-        if (found) { matched = found; break }
-      }
-      if (!matched) continue
-      const lower = matched.name.toLowerCase()
-      if (seen.has(lower)) continue
+    let installedRoot
+    try { installedRoot = realpathSync.native(target) } catch { return [] }
+    let mirrorRoot
+    try { mirrorRoot = realpathSync.native(dshSkillsDir()) } catch {}
+    for (const skill of snapshotSkills) {
+      if (typeof skill?.name !== 'string' || !skill.name || skill.enabled === false ||
+          skill.modelInvocable === false || skill.invocation?.modelInvocable === false) continue
+      const lower = skill.name.toLowerCase()
+      if (seen.has(lower) || !pluginOwnsSkillFile(target, installedRoot, mirrorRoot, skill.path)) continue
       seen.add(lower)
       resolved.push({
-        name: matched.name,
-        description: truncateOneLine(matched.description || item.description),
+        name: skill.name,
+        description: truncateOneLine(skill.description),
       })
     }
     return resolved
   }
 
-  for (const item of listed) {
+  for (const item of listSkills(target, manifest)) {
     const name = SKILL_SLUG_RE.test(item.name || '')
       ? item.name
       : (SKILL_SLUG_RE.test(item.dirName || '') ? item.dirName : slugify(item.name || item.dirName || ''))
@@ -419,14 +444,6 @@ export function renderExplicitPluginInstructions(entries) {
   return sections.join('\n')
 }
 
-function boundSummary(entries) {
-  const names = entries.map((e) => `@${e.plugin.displayName || e.plugin.name}`).join(', ')
-  const raw = entries.length === 1
-    ? `Plugin routing: ${names} (${entries[0].capabilities.skills.length} skills, ${entries[0].capabilities.mcpServers.length} MCP)`
-    : `Plugin routing: ${names}`
-  return raw.length <= CONTEXT_SUMMARY_MAX_CHARS ? raw : `${raw.slice(0, CONTEXT_SUMMARY_MAX_CHARS - 1)}…`
-}
-
 function getUserMessageCreator(resolveDshModules = findDshMainNodeModules) {
   if (cachedCreateUserMessage) return cachedCreateUserMessage
   try {
@@ -498,20 +515,26 @@ export function attachAtPluginsAgentHook(hostCtx, options = {}) {
     signal?.throwIfAborted?.()
 
     let snapshotSkills = null
-    if (hostCtx.skills && typeof hostCtx.skills.snapshot === 'function') {
-      try {
-        const cwd = agent !== undefined && hostCtx.workingDirectory?.ensure
-          ? await hostCtx.workingDirectory.ensure(agent, signal)
+    try {
+      const skillsService = resolveOptionalService(hostCtx, 'skills')
+      if (typeof skillsService?.snapshot === 'function') {
+        const workingDirectory = resolveOptionalService(hostCtx, 'workingDirectory')
+        const cwd = agent !== undefined
+          ? (typeof workingDirectory?.ensure === 'function'
+            ? await workingDirectory.ensure(agent, signal)
+            : (agent?.session && typeof workingDirectory?.get === 'function'
+              ? workingDirectory.get(agent.session)
+              : undefined))
           : undefined
         signal?.throwIfAborted?.()
-        const snapshot = await hostCtx.skills.snapshot({ cwd, signal, scope: agent })
-        if (snapshot && Array.isArray(snapshot.skills) && snapshot.complete !== false) {
+        const snapshot = await skillsService.snapshot({ cwd, signal, scope: agent })
+        if (snapshot && Array.isArray(snapshot.skills)) {
           snapshotSkills = snapshot.skills
         }
-      } catch (err) {
-        if (err?.name === 'AbortError' || signal?.aborted) throw err
-        // Snapshot lookup failed cleanly; fall back to local plugin skill manifest scan.
       }
+    } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) throw err
+      // Snapshot lookup failed cleanly; fall back to local plugin skill manifest scan.
     }
     signal?.throwIfAborted?.()
 
@@ -524,7 +547,6 @@ export function attachAtPluginsAgentHook(hostCtx, options = {}) {
       source: {
         kind: 'plugin-routing',
         form: 'notice',
-        summary: boundSummary(entries),
       },
     })
 
@@ -533,4 +555,280 @@ export function attachAtPluginsAgentHook(hostCtx, options = {}) {
       messages: [...(Array.isArray(decision.messages) ? decision.messages : []), injection],
     }
   })
+}
+
+function safeDecodePluginTarget(rawTarget) {
+  try {
+    return decodeURIComponent(rawTarget)
+  } catch {
+    return rawTarget
+  }
+}
+
+function cleanDshTitleText(input) {
+  if (typeof input !== 'string') return ''
+  return input
+    .replace(TITLE_OSC_SEQUENCE_RE, '')
+    .replace(TITLE_CSI_SEQUENCE_RE, '')
+    .replace(TITLE_ESC_SEQUENCE_RE, '')
+    .replace(TITLE_CONTROL_CHARACTER_RE, '')
+    .replace(TITLE_DIRECTIONAL_CONTROL_RE, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+}
+
+function truncateTitleUtf8(input, maxBytes) {
+  let used = 0
+  let out = ''
+  for (const character of input) {
+    const bytes = Buffer.byteLength(character, 'utf8')
+    if (used + bytes > maxBytes) break
+    used += bytes
+    out += character
+  }
+  return out
+}
+
+function normalizeDshTitle(input, maxBytes) {
+  return truncateTitleUtf8(cleanDshTitleText(input), maxBytes).trimEnd()
+}
+
+function fallbackDshTitle(input, maxWords, maxBytes) {
+  return truncateTitleUtf8(
+    cleanDshTitleText(input).split(' ').filter(Boolean).slice(0, maxWords).join(' '),
+    maxBytes,
+  ).trimEnd()
+}
+
+/**
+ * Replace `@[DisplayName](uph-plugin:id)` wire mentions (including truncated
+ * trailing `uph-plugin:` fragments) with readable plugin display names.
+ */
+export function stripPluginMentionsFromTitle(text) {
+  if (typeof text !== 'string') return ''
+  if (!text.includes('@[')) return text
+  const replaceMention = (_full, displayName, rawId) => {
+    if (cleanDshTitleText(displayName).length > 0) return displayName
+    return rawId ? safeDecodePluginTarget(rawId) : ''
+  }
+  return text
+    .replace(WIRE_MENTION_TEXT_RE, replaceMention)
+    .replace(WIRE_MENTION_TRUNCATED_TAIL_RE, replaceMention)
+}
+
+function resolvePositiveInt(value, fallback) {
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+function resolveTitleLimits(sessionTitle) {
+  const cfg = sessionTitle && typeof sessionTitle === 'object' ? sessionTitle.config : null
+  return {
+    fallbackMaxWords: resolvePositiveInt(cfg?.fallbackMaxWords, DEFAULT_TITLE_FALLBACK_MAX_WORDS),
+    fallbackMaxBytes: resolvePositiveInt(cfg?.fallbackMaxBytes, DEFAULT_TITLE_FALLBACK_MAX_BYTES),
+    maxTitleBytes: resolvePositiveInt(cfg?.maxTitleBytes, DEFAULT_TITLE_MAX_BYTES),
+  }
+}
+
+function extractUserMessageText(event) {
+  if (!event || event.type !== 'user/message' || event.data?.source?.kind !== 'user') return undefined
+  const content = Array.isArray(event.data.content) ? event.data.content : []
+  const text = content
+    .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('\n')
+  return normalizeDshTitle(text, Number.MAX_SAFE_INTEGER).length > 0 ? text : undefined
+}
+
+function isLiveSession(sessions, session) {
+  if (!session || typeof session.append !== 'function') return false
+  if (sessions && typeof sessions.get === 'function') {
+    return sessions.get(session.id) === session
+  }
+  return true
+}
+
+function readSessionEvent(session, seq) {
+  if (typeof seq !== 'number') return undefined
+  if (typeof session.eventAt === 'function') {
+    return session.eventAt(seq)
+  }
+  if (typeof session.snapshotEvents === 'function') {
+    return session.snapshotEvents().find((item) => item?.seq === seq)
+  }
+  return undefined
+}
+
+function readFirstTitleUserMessage(session) {
+  if (typeof session?.snapshotEvents !== 'function') return undefined
+  for (const item of session.snapshotEvents()) {
+    const text = extractUserMessageText(item)
+    if (text !== undefined) {
+      return { seq: item.seq, text }
+    }
+  }
+  return undefined
+}
+
+function readCurrentTitleSnapshot(sessionTitle, session) {
+  if (typeof sessionTitle?.get === 'function') {
+    return sessionTitle.get(session)
+  }
+  if (typeof session?.snapshotEvents === 'function') {
+    const events = session.snapshotEvents()
+    for (let i = events.length - 1; i >= 0; i--) {
+      const item = events[i]
+      if (item?.type === 'session/title') {
+        return {
+          title: item.data?.title,
+          messageSeqs: item.data?.messageSeqs,
+          source: item.data?.source,
+          eventSeq: item.seq,
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function cloneTitleSource(source) {
+  if (source?.kind === 'provider') {
+    const cloned = {
+      kind: 'provider',
+      provider: source.provider,
+    }
+    if (source.model && typeof source.model === 'object') {
+      cloned.model = {
+        provider: source.model.provider,
+        model: source.model.model,
+      }
+    }
+    return cloned
+  }
+  return { kind: 'fallback' }
+}
+
+function safeAppendCleanedTitle(session, payload) {
+  if (!payload?.title) return
+  try {
+    session.append('session/title', payload)
+  } catch {
+    // Ignore store detachment or concurrent disposal races.
+  }
+}
+
+/**
+ * Subscribe to DSH `session/event` so fallback and LLM provider session titles
+ * strip `@[DisplayName](uph-plugin:id)` wire markup while preserving the raw
+ * `user/message` events used by `@` routing and chat chips.
+ */
+export function attachAtPluginsSessionTitleHook(hostCtx) {
+  if (typeof hostCtx?.on !== 'function') return () => {}
+  let disposed = false
+
+  const handleUserMessage = (session, event) => {
+    const sessionTitle = resolveOptionalService(hostCtx, 'sessionTitle')
+    if (!sessionTitle) return
+    const rawText = extractUserMessageText(event)
+    if (rawText === undefined || !rawText.includes('uph-plugin:')) return
+
+    // 1-hop microtask beats DSH SessionTitleService's 2-hop defer -> ensureFallback
+    // while keeping onUserMessage's synchronous state.pending scheduling intact.
+    queueMicrotask(() => {
+      if (disposed) return
+      const liveSessions = resolveOptionalService(hostCtx, 'sessions')
+      const liveTitleService = resolveOptionalService(hostCtx, 'sessionTitle')
+      if (!liveTitleService || !isLiveSession(liveSessions, session)) return
+      if (readCurrentTitleSnapshot(liveTitleService, session) !== undefined) return
+
+      const first = readFirstTitleUserMessage(session)
+      if (!first) return
+      const limits = resolveTitleLimits(liveTitleService)
+      const nativeFallback = fallbackDshTitle(first.text, limits.fallbackMaxWords, limits.fallbackMaxBytes)
+      const cleanedFallback = fallbackDshTitle(
+        stripPluginMentionsFromTitle(first.text),
+        limits.fallbackMaxWords,
+        limits.fallbackMaxBytes,
+      )
+      if (!cleanedFallback || cleanedFallback === nativeFallback) return
+
+      safeAppendCleanedTitle(session, {
+        title: cleanedFallback,
+        messageSeqs: [first.seq],
+        source: { kind: 'fallback' },
+      })
+    })
+  }
+
+  const handleSessionTitle = (session, event) => {
+    const source = event?.data?.source
+    if (!source || source.kind === 'user') return
+    if (source.kind !== 'fallback' && source.kind !== 'provider') return
+    const rawTitle = event?.data?.title
+    if (typeof rawTitle !== 'string' || rawTitle.length === 0) return
+
+    const sessionTitle = resolveOptionalService(hostCtx, 'sessionTitle')
+    if (!sessionTitle) return
+    if (source.kind === 'provider' && !rawTitle.includes('uph-plugin:')) return
+
+    queueMicrotask(() => {
+      if (disposed) return
+      const liveSessions = resolveOptionalService(hostCtx, 'sessions')
+      const liveTitleService = resolveOptionalService(hostCtx, 'sessionTitle')
+      if (!liveTitleService || !isLiveSession(liveSessions, session)) return
+
+      const current = readCurrentTitleSnapshot(liveTitleService, session)
+      if (!current || current.eventSeq !== event.seq || current.source?.kind === 'user') return
+
+      const limits = resolveTitleLimits(liveTitleService)
+      const messageSeqs = Array.isArray(event.data.messageSeqs) ? [...event.data.messageSeqs] : []
+      let cleanedTitle = ''
+
+      if (source.kind === 'fallback') {
+        const firstSeq = messageSeqs[0]
+        const firstEvent = firstSeq !== undefined ? readSessionEvent(session, firstSeq) : undefined
+        const sourceText = extractUserMessageText(firstEvent)
+        if (sourceText !== undefined) {
+          if (!sourceText.includes('uph-plugin:')) return
+          cleanedTitle = fallbackDshTitle(
+            stripPluginMentionsFromTitle(sourceText),
+            limits.fallbackMaxWords,
+            limits.fallbackMaxBytes,
+          )
+        } else if (rawTitle.includes('uph-plugin:')) {
+          cleanedTitle = fallbackDshTitle(
+            stripPluginMentionsFromTitle(rawTitle),
+            limits.fallbackMaxWords,
+            limits.fallbackMaxBytes,
+          )
+        } else {
+          return
+        }
+      } else {
+        if (!rawTitle.includes('uph-plugin:')) return
+        cleanedTitle = normalizeDshTitle(stripPluginMentionsFromTitle(rawTitle), limits.maxTitleBytes)
+      }
+
+      if (!cleanedTitle || cleanedTitle === rawTitle) return
+
+      safeAppendCleanedTitle(session, {
+        title: cleanedTitle,
+        messageSeqs,
+        source: cloneTitleSource(source),
+      })
+    })
+  }
+
+  const off = hostCtx.on('session/event', (session, event) => {
+    if (disposed || !event || typeof event !== 'object') return
+    if (event.type === 'user/message') {
+      handleUserMessage(session, event)
+    } else if (event.type === 'session/title') {
+      handleSessionTitle(session, event)
+    }
+  })
+
+  return () => {
+    disposed = true
+    if (typeof off === 'function') off()
+  }
 }

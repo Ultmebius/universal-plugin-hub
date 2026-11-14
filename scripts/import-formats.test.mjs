@@ -17,6 +17,7 @@ const { inspectLocalPlugin, importLocalPlugin, saveUploadedZip } = await import(
 const { materializePlugin, pluginPath } = await import('../src/market.js')
 const { sourceCacheDir, installedDir, dshSkillsDir, readState, writeState } = await import('../src/store.js')
 const { installPlugin, uninstallPlugin, registerConnector, getConnectorEntry, syncAllInstalledSkillsToDsh, togglePlugin } = await import('../src/install.js')
+const { installUploadedSkills, uninstallUploadedSkill } = await import('../src/skill-uploads.js')
 
 function write(path, content) {
   mkdirSync(dirname(path), { recursive: true })
@@ -88,6 +89,28 @@ test('DSH Hub import formats', async (t) => {
         assert.equal(existsSync(join(destination, 'stale.md')), false)
       } finally {
         await uninstallPlugin(name)
+      }
+    })
+    await t.test('startup repair preserves a same-name skill uploaded during the repair', async () => {
+      const plugin = 'repair-with-upload'
+      const name = 'repair-b'
+      skill(join(installedDir(plugin), 'skills', 'repair-a'), 'repair-a')
+      skill(join(installedDir(plugin), 'skills', name), name)
+      const source = join(root, 'direct-upload', name)
+      write(join(source, 'SKILL.md'), `---\nname: ${name}\ndescription: User upload\n---\nUploaded body\n`)
+      const state = readState()
+      writeState({ ...state, plugins: [...state.plugins, { name: plugin, enabled: true }] })
+      try {
+        const startup = syncAllInstalledSkillsToDsh()
+        installUploadedSkills([{ dir: source, row: { name } }], { overwrite: true })
+        assert.deepEqual((await startup)[plugin], ['repair-a'])
+        const destination = readState().uploadedSkills.find(record => record.name === name).target
+        assert.match(readFileSync(join(destination, 'SKILL.md'), 'utf8'), /Uploaded body/)
+        await uninstallPlugin(plugin)
+        assert.match(readFileSync(join(destination, 'SKILL.md'), 'utf8'), /Uploaded body/)
+      } finally {
+        uninstallUploadedSkill(name)
+        if (readState().plugins.some(record => record.name === plugin)) await uninstallPlugin(plugin)
       }
     })
     await t.test('uninstalling a plugin named user-mcp removes only its own registration', async () => {

@@ -157,6 +157,7 @@ async function startBearerMcpFixture() {
     expectedToken: 'valid-token',
     initializeCalls: 0,
     listToolsCalls: 0,
+    toolsDenied: false,
   }
   const server = createServer(async (req, res) => {
     if (req.url !== '/mcp') return sendJson(res, 404, { error: 'not_found' })
@@ -173,6 +174,10 @@ async function startBearerMcpFixture() {
     for (const msg of messages) {
       if (msg?.method === 'initialize') state.initializeCalls += 1
       if (msg?.method === 'tools/list') state.listToolsCalls += 1
+    }
+    if (state.toolsDenied && messages.some(msg => msg?.method === 'tools/list')) {
+      res.writeHead(403).end('tools forbidden')
+      return
     }
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
     const mcp = new Server({ name: 'bearer-perf-mcp', version: '1.0.0' }, { capabilities: { tools: {} } })
@@ -194,7 +199,7 @@ async function startBearerMcpFixture() {
   }
 }
 
-function writeCounterStdioServer(filePath) {
+function writeCounterStdioServer(filePath, toolName = 'stdio_ping') {
   write(filePath, `
 import { appendFileSync } from 'node:fs'
 import { Server } from ${JSON.stringify(new URL('../node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js', import.meta.url).href)}
@@ -205,7 +210,7 @@ const delayMs = Number(process.env.TEST_DELAY_MS || '0')
 if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
 const server = new Server({ name: 'stdio-counter', version: '1.0.0' }, { capabilities: { tools: {} } })
 server.setRequestHandler(ListToolsRequestSchema, () => ({
-  tools: [{ name: 'stdio_ping', description: 'Stdio ping', inputSchema: { type: 'object', properties: {} } }],
+  tools: [{ name: ${JSON.stringify(toolName)}, description: 'Stdio ping', inputSchema: { type: 'object', properties: {} } }],
 }))
 await server.connect(new StdioServerTransport())
 `)
@@ -361,7 +366,7 @@ test('in-process OAuth probe refreshes rotated tokens, detects expired auth, and
   assert.equal(enabled2.ok, true, enabled2.error)
   assert.equal(fixture.state.refreshes, 1, 'expired access token should refresh in-process')
   assert.equal(fixture.state.initializeCalls, 1, 're-enable must verify connectivity/auth via initialize')
-  assert.equal(fixture.state.listToolsCalls, 0, 're-enable with cached matching config should skip tools/list')
+  assert.equal(fixture.state.listToolsCalls, 1, 're-enable must verify tool access with the refreshed token')
   const updatedRecord = oauthStore.readOAuthRecord(key)
   assert.notEqual(updatedRecord?.tokens?.refresh_token, 'refresh-0', 'rotated refresh token must be persisted')
 
@@ -387,7 +392,7 @@ test('bridgeRuntimeEnv injects ELECTRON_RUN_AS_NODE=1 under Electron', () => {
   assert.equal(electronEnv.UPH_TEST, '1')
 })
 
-test('HTTP and stdio toggles reuse verified cache safely while respecting auth failures and config edits', { timeout: 20000 }, async (t) => {
+test('HTTP toggles check current tool access and unchanged stdio toggles reuse verified cache', { timeout: 20000 }, async (t) => {
   const bearer = await startBearerMcpFixture()
   t.after(() => bearer.close())
 
@@ -402,7 +407,7 @@ test('HTTP and stdio toggles reuse verified cache safely while respecting auth f
   const base = await harness.start()
   t.after(() => harness.close())
 
-  // 1. User HTTP Bearer MCP toggle ON skips tools/list after initial verify, still catches 401
+  // 1. User HTTP Bearer MCP toggle ON rechecks access after initial verification.
   const createdHttp = await postJson(base, '/mcps', {
     name: 'bearer-user',
     transport: 'http',
@@ -420,14 +425,14 @@ test('HTTP and stdio toggles reuse verified cache safely while respecting auth f
   const reEnabledHttp = await postJson(base, '/mcps/toggle', { name: 'bearer-user', enabled: true })
   assert.equal(reEnabledHttp.ok, true, reEnabledHttp.error)
   assert.equal(bearer.state.initializeCalls, 1, 'cached HTTP toggle ON must still verify remote auth via initialize')
-  assert.equal(bearer.state.listToolsCalls, 0, 'cached HTTP toggle ON must skip duplicate tools/list')
+  assert.equal(bearer.state.listToolsCalls, 1, 'cached HTTP toggle ON must check current tools/list access')
 
   await postJson(base, '/mcps/toggle', { name: 'bearer-user', enabled: false })
   bearer.state.expectedToken = 'rotated-secret'
   const rejectedHttp = await postJson(base, '/mcps/toggle', { name: 'bearer-user', enabled: true })
   assert.equal(rejectedHttp.ok, false, '401 must still fail HTTP toggle ON')
 
-  // 2. Plugin connector toggle ON returns single plugin detail and skips tools/list when cached
+  // 2. The plugin connector toggle also checks tools before returning a connected detail.
   bearer.state.expectedToken = 'valid-token'
   bearer.state.initializeCalls = 0
   bearer.state.listToolsCalls = 0
@@ -449,8 +454,15 @@ test('HTTP and stdio toggles reuse verified cache safely while respecting auth f
   const connOn = await postJson(base, `/plugins/${pluginName}/connectors/remote/toggle`, { enabled: true })
   assert.equal(connOn.ok, true, connOn.error)
   assert.equal(bearer.state.initializeCalls, 1)
-  assert.equal(bearer.state.listToolsCalls, 0)
+  assert.equal(bearer.state.listToolsCalls, 1)
   assert.equal(connOn.plugin?.connectors?.[0]?.connected, true)
+
+  await postJson(base, `/plugins/${pluginName}/connectors/remote/toggle`, { enabled: false })
+  bearer.state.toolsDenied = true
+  const denied = await postJson(base, `/plugins/${pluginName}/connectors/remote/toggle`, { enabled: true })
+  assert.equal(denied.ok, false)
+  assert.match(denied.error, /403/)
+  assert.equal(install.isConnectorActive(pluginName, 'remote'), false)
 
   // 3. Stdio unchanged verified MCP toggle ON skips spawning subprocess until config changes
   const serverFile = join(root, 'counter-stdio-mcp.mjs')
@@ -484,7 +496,7 @@ test('HTTP and stdio toggles reuse verified cache safely while respecting auth f
   assert.equal(readFileSync(spawnLog, 'utf8').trim().split('\n').length, 2, 'edited stdio MCP must re-probe subprocess')
 })
 
-test('cache safety, compact tools state, default-stdio/legacy-HTTP verifiedBefore, background applyProfile, and LSP disabled guard', { timeout: 20000 }, async (t) => {
+test('cache safety, compact tools state, legacy stdio restore, background applyProfile, and LSP disabled guard', { timeout: 20000 }, async (t) => {
   const bearer = await startBearerMcpFixture()
   t.after(() => bearer.close())
 
@@ -541,9 +553,27 @@ test('cache safety, compact tools state, default-stdio/legacy-HTTP verifiedBefor
 
   const toggleOn = await install.togglePlugin(pluginName, true)
   assert.equal(toggleOn.ok, true)
-  assert.equal(install.isConnectorActive(pluginName, 'remote'), true, 'legacy HTTP entry with cachedTools + verifiedRemoteConfig must enable synchronously')
+  assert.deepEqual(toggleOn.pendingConnectors, ['remote'])
+  assert.equal(install.isConnectorActive(pluginName, 'remote'), false, 'prior HTTP verification must not register before the new probe succeeds')
   assert.equal(install.isConnectorActive(pluginName, 'local'), true, 'default stdio entry with cachedTools must enable synchronously without savedConnectorDefinition')
   assert.equal(readFileSync(pluginSpawnLog, 'utf8').trim().split('\n').length, 1, 'verified default stdio plugin toggle ON must not spawn subprocess')
+  const remoteDeadline = Date.now() + 5000
+  while (Date.now() < remoteDeadline && !install.isConnectorActive(pluginName, 'remote')) {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  assert.equal(install.isConnectorActive(pluginName, 'remote'), true)
+
+  // A reinstall keeps per-tool choices but re-queries the unchanged stdio command.
+  install.setToolDisabled(pluginName, 'local', 'stdio_ping', true)
+  writeCounterStdioServer(stdioScript, 'stdio_ping_v2')
+  await install.updatePlugin(pluginName)
+  const updateDeadline = Date.now() + 5000
+  while (Date.now() < updateDeadline && install.readMcpToolsState()[`${pluginName}::local`]?.cachedTools?.[0]?.name !== 'stdio_ping_v2') {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  assert.equal(install.readMcpToolsState()[`${pluginName}::local`]?.cachedTools?.[0]?.name, 'stdio_ping_v2')
+  assert.deepEqual(install.getDisabledTools(pluginName, 'local'), ['stdio_ping'])
+  assert.equal(readFileSync(pluginSpawnLog, 'utf8').trim().split('\n').length, 2)
 
   // Slow unverified plugin connector triggers applyProfile when background enable finishes
   const slowPlug = 'slow-unverified-plug'
@@ -595,6 +625,38 @@ test('cache safety, compact tools state, default-stdio/legacy-HTTP verifiedBefor
   const afterDetails = install.installedDetails().find((p) => p.name === lspPlug)
   assert.equal(afterDetails?.enabled, false)
   assert.equal(afterDetails?.lspServers?.[0]?.active, false, 'installedDetails() must not re-activate LSP for disabled plugin')
+})
+
+test('/state remains readable when LSP auto-registration fails and retries after patch repair', async (t) => {
+  const pluginName = 'lsp-auto-retry'
+  write(join(store.installedDir(pluginName), '.lsp.json'), {
+    test_lsp: { command: process.execPath, extensionToLanguage: { '.testext': 'testlang' } },
+  })
+  const state = store.readState()
+  store.writeState({ ...state, plugins: [...state.plugins, { name: pluginName, enabled: true }] })
+  const patchPath = install.cordisPatchPath()
+  const originalPatch = readFileSync(patchPath, 'utf8')
+  const harness = createApiHarness(() => {})
+  const base = await harness.start()
+  t.after(async () => {
+    write(patchPath, originalPatch)
+    const latest = store.readState()
+    store.writeState({ ...latest, plugins: latest.plugins.filter(p => p.name !== pluginName) })
+    await harness.close()
+  })
+
+  const details = async () => {
+    const response = await fetch(`${base}/state`)
+    assert.equal(response.status, 200)
+    return (await response.json()).plugins.find(p => p.name === pluginName).lspServers[0]
+  }
+  write(patchPath, 'invalid: [')
+  assert.equal((await details()).active, false)
+  assert.equal(readFileSync(patchPath, 'utf8'), 'invalid: [')
+  write(patchPath, originalPatch)
+  assert.equal((await details()).active, true)
+  install.unregisterPluginLsp(pluginName)
+  assert.equal((await details()).active, false, 'manual removal after success must still be respected')
 })
 
 function collectPatternBindings(pattern, scope) {
@@ -1355,6 +1417,7 @@ test('client UI refreshes pendingConnectors, invalidates stale GLOBAL_MCP_TOOLS_
       configured: true,
       enabled: connected,
       connected,
+      pending: enabled && !probeSettled,
     }],
   })
   const marketRows = [{
@@ -1460,7 +1523,6 @@ test('client UI refreshes pendingConnectors, invalidates stale GLOBAL_MCP_TOOLS_
     if (u.endsWith('/plugins/exa/toggle')) {
       const body = JSON.parse(opts.body || '{}')
       pluginEnabled = body.enabled !== false
-      setTimeout(() => { probeSettled = true }, 60)
       return { ok: true, status: 200, json: async () => ({ ok: true, enabled: pluginEnabled, pendingConnectors: ['exa'], plugin: mkPlugin(pluginEnabled, false) }) }
     }
     if (u.endsWith('/plugins/exa/connectors/exa/auth')) {
@@ -1494,7 +1556,7 @@ test('client UI refreshes pendingConnectors, invalidates stale GLOBAL_MCP_TOOLS_
     await new Promise((r) => setTimeout(r, 40))
   })
   try {
-    // 1. Open ManagePage for 'exa', toggle ON -> pendingConnectors triggers bounded follow-up poll
+    // 1. A probe still pending past the old polling window keeps receiving refreshes.
     const cards = renderer.root.findAll((node) => node.type === 'div' && node.props.className === 'cpm-card' && typeof node.props.onClick === 'function')
     assert.ok(cards.length >= 1, 'BrowseView must render plugin card')
     await act(async () => {
@@ -1508,8 +1570,14 @@ test('client UI refreshes pendingConnectors, invalidates stale GLOBAL_MCP_TOOLS_
     await act(async () => {
       await manageToggleBtns[0].props.onClick()
     })
+    const pollDeadline = Date.now() + 8000
+    while (stateFetchCount < initialStateFetches + 6 && Date.now() < pollDeadline) {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)) })
+    }
+    assert.ok(stateFetchCount >= initialStateFetches + 6, 'polling must outlast the old four attempts')
+    probeSettled = true
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 500))
+      await new Promise((r) => setTimeout(r, 3200))
     })
     assert.ok(
       stateFetchCount >= initialStateFetches + 2 && probeSettled,

@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync, watch } 
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
-import { readState, writeState, dshSkillsDir, installedDir } from './store.js'
+import { readState, writeState, dshSkillsDir, installedDir, resolveOptionalService } from './store.js'
 import { isUploadedSkillTarget, uploadedSkillRecord } from './skill-uploads.js'
 import { formatDisplayName } from './parser.js'
 
@@ -540,7 +540,7 @@ export function createSkillsManager(root) {
       // A preset's filesystem provider shadows the global layer regardless of
       // rank. Explicit off choices must also live in the exact agent scope.
       // Enabled skills continue to resolve through their native providers.
-      const serviceFor = () => ctx.get?.('agentPresets')?.serviceFor(agent, 'skills') ?? registry
+      const serviceFor = () => resolveOptionalService(ctx, 'agentPresets')?.serviceFor(agent, 'skills') ?? registry
       const service = serviceFor()
       if (service !== registry && !presetProviders.has(service)) {
         let invalidatePreset
@@ -555,13 +555,13 @@ export function createSkillsManager(root) {
       }
       if (service !== registry && presetProviders.has(service)) presetProviders.get(service).users++
       const dispose = (createScope ? (() => { const policy = scopePolicies.get(agent); scopePolicies.delete(agent); return policy?.dispose() })
-        : guard('agent provider', () => agent.ctx.skills.registerProvider(() => disabledProvider()))) || (() => {})
+        : guard('agent provider', () => resolveOptionalService(agent?.ctx, 'skills')?.registerProvider?.(() => disabledProvider()))) || (() => {})
       agentViews.set(agent, { dispose: () => {
         const pending = dispose()
         const preset = presetProviders.get(service)
         if (preset && --preset.users === 0) { preset.dispose(); presetProviders.delete(service) }
         return pending
-      }, registry: serviceFor, lookup: () => ({ scope: agent, cwd: ctx.get?.('workingDirectory')?.get(agent.session) ?? agent.session?.header?.cwd }) })
+      }, registry: serviceFor, lookup: () => ({ scope: agent, cwd: resolveOptionalService(ctx, 'workingDirectory')?.get(agent.session) ?? agent.session?.header?.cwd }) })
     }
     const unbind = (agent) => { const view = agentViews.get(agent); agentViews.delete(agent); return view?.dispose() }
     const offCreated = ctx.on('agent/created', ({ agent }) => bind(agent))

@@ -51,15 +51,6 @@ function recordPaths(name, kind) {
   }
 }
 
-export function uploadedSkillTargetsSet() {
-  return new Set(
-    (readState().uploadedSkills || [])
-      .map(record => record?.target)
-      .filter(Boolean)
-      .map(target => (process.platform === 'win32' ? resolve(target).toLowerCase() : resolve(target))),
-  )
-}
-
 export function isUploadedSkillTarget(path) {
   return (readState().uploadedSkills || []).some(record => samePath(record?.target, path))
 }

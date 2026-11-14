@@ -1,3 +1,5 @@
+import { resolveOptionalService } from './store.js'
+
 /**
  * Apply saved hub changes to the running DSH profile.
  *
@@ -57,7 +59,7 @@ export function createProfileApplicator(ctx) {
       try {
         // Resolve inside the try: a throwing service lookup must become a
         // reported failure, not a rejection that strands the status.
-        const hmr = ctx?.root?.get?.('hmr') || ctx?.get?.('hmr')
+        const hmr = resolveOptionalService(ctx?.root, 'hmr') || resolveOptionalService(ctx, 'hmr')
         if (!hmr || typeof hmr.reconcileProfile !== 'function') {
           return { application: 'restart-required', restartReason: 'no-hmr', token: pending.token }
         }

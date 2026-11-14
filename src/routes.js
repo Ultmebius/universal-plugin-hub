@@ -843,7 +843,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         }
         const canEnable = () => readState().plugins.some(plugin => plugin.name === pluginName && plugin.enabled !== false)
         if (!canEnable()) return { status: 200, body: { ok: false, error: '请先启用所属插件' } }
-        const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable, skipToolsListIfCached: false })
+        const result = await enableConnector(pluginName, connectorName, body, { pluginOwned: true, canEnable, reuseStdioCache: false })
         return { status: 200, body: scheduledIfOk(withPluginDetail(result, pluginName), applyProfile, [getConnectorId(pluginName, connectorName)]) }
       })
       return sendJson(res, outcome.status, outcome.body)

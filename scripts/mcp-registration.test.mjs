@@ -193,7 +193,12 @@ test('plugin-owned Headers survive disable and re-enable and still appear in the
   assert.equal(lookup().connected, true)
   await call('POST', `/plugins/${owner}/toggle`, { enabled: false })
   assert.deepEqual(lookup().headers, remote.headers)
-  await call('POST', `/plugins/${owner}/toggle`, { enabled: true })
+  const reenabled = await call('POST', `/plugins/${owner}/toggle`, { enabled: true })
+  assert.deepEqual(reenabled.body.pendingConnectors, [name])
+  const deadline = Date.now() + 5000
+  while (lookup().pending && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
   assert.equal(lookup().connected, true)
   assert.deepEqual(lookup().headers, remote.headers)
   await call('POST', base + '/toggle', { enabled: false })

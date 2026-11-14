@@ -6313,44 +6313,32 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, []);
 
 		const stateSeqRef = useRef(0);
-		const pendingWatchersRef = useRef(new Map());
-		const pendingTokensRef = useRef(new Map());
 		const mountedRef = useRef(true);
 		useEffect(() => {
 			mountedRef.current = true;
 			return () => {
 				mountedRef.current = false;
-				for (const timer of pendingWatchersRef.current.values()) clearTimeout(timer);
-				pendingWatchersRef.current.clear();
-				pendingTokensRef.current.clear();
 			};
 		}, []);
 
-		const refreshState = useCallback(async () => {
+		const refreshState = useCallback(async ({ quiet = false, signal } = {}) => {
 			const seq = ++stateSeqRef.current;
 			try {
-				const res = await api("/state");
-				if (mountedRef.current && seq === stateSeqRef.current) {
+				const res = await api("/state", signal ? { signal } : undefined);
+				if (mountedRef.current && !signal?.aborted && seq === stateSeqRef.current) {
 					setState(res);
 					if (typeof document !== "undefined") document.dispatchEvent(new Event("uph-at-plugins-changed"));
 				}
 				return res;
 			} catch (e) {
-				showToast("加载状态失败", e.message, { restart: false });
+				if (!quiet && mountedRef.current) showToast("加载状态失败", e.message, { restart: false });
 				return null;
 			}
 		}, [showToast]);
 
-		const patchPluginInState = useCallback((updatedPlugin, pendingConnectors) => {
+		const patchPluginInState = useCallback((updatedPlugin) => {
 			if (!updatedPlugin || !updatedPlugin.name) return;
 			const pluginName = updatedPlugin.name;
-			const prevTimer = pendingWatchersRef.current.get(pluginName);
-			if (prevTimer) {
-				clearTimeout(prevTimer);
-				pendingWatchersRef.current.delete(pluginName);
-			}
-			const token = (pendingTokensRef.current.get(pluginName) || 0) + 1;
-			pendingTokensRef.current.set(pluginName, token);
 			stateSeqRef.current += 1;
 			setState((prev) => ({
 				...prev,
@@ -6359,28 +6347,26 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					: prev.plugins,
 			}));
 			if (typeof document !== "undefined") document.dispatchEvent(new Event("uph-at-plugins-changed"));
-			const pendingList = Array.isArray(pendingConnectors) ? pendingConnectors.filter(Boolean) : [];
-			if (pendingList.length === 0 || updatedPlugin.enabled === false) return;
-			const delays = [250, 700, 1500, 3000];
-			const scheduleStep = (step) => {
-				if (!mountedRef.current || step >= delays.length || pendingTokensRef.current.get(pluginName) !== token) return;
-				const timer = setTimeout(async () => {
-					pendingWatchersRef.current.delete(pluginName);
-					if (!mountedRef.current || pendingTokensRef.current.get(pluginName) !== token) return;
-					const latest = await refreshState();
-					if (!mountedRef.current || !latest || pendingTokensRef.current.get(pluginName) !== token) return;
-					const latestPlugin = (latest.plugins || []).find((p) => p.name === pluginName);
-					if (!latestPlugin || latestPlugin.enabled === false) return;
-					const stillPending = pendingList.some((cName) => {
-						const conn = (latestPlugin.connectors || []).find((c) => c.name === cName);
-						return conn && !conn.enabled && !conn.connected;
-					});
-					if (stillPending && step + 1 < delays.length) scheduleStep(step + 1);
-				}, delays[step]);
-				pendingWatchersRef.current.set(pluginName, timer);
+		}, []);
+
+		const hasPendingConnectors = (state.plugins || []).some(plugin =>
+			plugin.enabled !== false && plugin.connectors?.some(connector => connector.pending));
+		useEffect(() => {
+			if (!hasPendingConnectors) return;
+			const controller = new AbortController();
+			let delay = 250;
+			const refreshPending = async () => {
+				await refreshState({ quiet: true, signal: controller.signal });
+				if (controller.signal.aborted) return;
+				delay = Math.min(delay * 2, 3000);
+				timer = setTimeout(refreshPending, delay);
 			};
-			scheduleStep(0);
-		}, [refreshState]);
+			let timer = setTimeout(refreshPending, delay);
+			return () => {
+				controller.abort();
+				clearTimeout(timer);
+			};
+		}, [hasPendingConnectors, refreshState]);
 
 		useEffect(() => {
 			refreshState();
@@ -7278,7 +7264,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, []);
 
 			useAutoMcpTools([
-				...pluginMcpRows.map(row => ({ owner: row.owner, name: row.name, connected: row.conn.enabled === true, revision: JSON.stringify([row.record.installedAt, row.conn]) })),
+				...pluginMcpRows.map(row => ({ owner: row.owner, name: row.name, connected: row.conn.enabled === true && !row.conn.pending, revision: JSON.stringify([row.record.installedAt, row.conn]) })),
 				...mcps.map(row => ({ owner: "user-mcp", name: row.name, connected: row.enabled === true, revision: JSON.stringify(row) })),
 			], loadGlobalTools);
 
@@ -7350,7 +7336,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					}
 					if (canEdit) await refreshMcps();
 					else if (res?.plugin && patchPluginInState) {
-						patchPluginInState(res.plugin, res.pendingConnectors);
+						patchPluginInState(res.plugin);
 						void refreshState();
 					} else {
 						await refreshState();
@@ -8971,7 +8957,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 						body: JSON.stringify({ enabled }),
 					});
 					if (res?.ok !== false && res?.plugin && patchPluginInState) {
-						patchPluginInState(res.plugin, res.pendingConnectors);
+						patchPluginInState(res.plugin);
 						void refreshState();
 					} else {
 						await refreshState();
@@ -11652,7 +11638,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			});
 			if (res?.ok !== false && connName) {
 				clearMcpToolsCache(`${record.name}::${connName}`);
-				if (res?.plugin && patchPluginInState) patchPluginInState(res.plugin, res.pendingConnectors);
+				if (res?.plugin && patchPluginInState) patchPluginInState(res.plugin);
 			}
 			return res;
 		};
@@ -11792,7 +11778,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const autoLoadConnectorTools = useCallback((_owner, name) => loadConnectorTools(name), [loadConnectorTools]);
 		useAutoMcpTools((record.connectors || []).map(connector => ({
-			owner: record.name, name: connector.name, connected: connector.enabled === true,
+			owner: record.name, name: connector.name, connected: connector.enabled === true && !connector.pending,
 			revision: JSON.stringify([record.installedAt, connector]),
 		})), autoLoadConnectorTools);
 
@@ -11999,7 +11985,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const applyToggleState = async (result) => {
 			if (result?.plugin && patchPluginInState) {
-				patchPluginInState(result.plugin, result.pendingConnectors);
+				patchPluginInState(result.plugin);
 				void refreshState();
 			} else {
 				await refreshState();
@@ -13550,7 +13536,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 		return index === 0 || AT_PLUGIN_LEFT_ALLOWED_RE.test(text[index - 1]);
 	}
 
-	function matchAtPluginMention(text, from, byLowerName) {
+	function matchAtPluginMention(text, from, byLowerName, wireOnly = false) {
 		if (typeof text !== "string" || !text.includes("@")) return undefined;
 		let cursor = from;
 		while (cursor < text.length) {
@@ -13574,7 +13560,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 				cursor = at + wire[0].length;
 				continue;
 			}
-			if (isAtPluginLeftBoundary(text, at) && byLowerName && byLowerName.size > 0) {
+			if (!wireOnly && isAtPluginLeftBoundary(text, at) && byLowerName && byLowerName.size > 0) {
 				AT_PLUGIN_RAW_TOKEN_RE.lastIndex = at;
 				const raw = AT_PLUGIN_RAW_TOKEN_RE.exec(text);
 				if (raw !== null && !raw[1].startsWith("\"")) {
@@ -13595,6 +13581,70 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 			cursor = at + 1;
 		}
 		return undefined;
+	}
+
+	function atPluginReference(mention, label) {
+		return { source: "plugins", ref: mention, label, clipboardText: mention };
+	}
+
+	function pasteAtPluginReferences(event, byLowerName) {
+		const clipboard = event.clipboardData;
+		if (event.defaultPrevented || !clipboard || clipboard.files?.length ||
+			Array.from(clipboard.items || []).some((item) => item.kind === "file")) return;
+		const root = event.target?.closest?.('[data-composer-input][contenteditable="true"]');
+		if (!root || root.hasAttribute("data-composer-composing")) return;
+		const text = clipboard.getData("text/plain");
+		if (!text.includes("(uph-plugin:")) return;
+
+		// DSH bundles Lexical privately. Use the mounted editor and its registered
+		// classes so the pasted nodes share the host's history and draft model.
+		const editor = root.__lexicalEditor;
+		if (editor?.getRootElement?.() !== root || !editor.isEditable?.() || editor.isComposing?.() ||
+			typeof editor.update !== "function") return;
+		const ReferenceChip = editor._nodes?.get?.("reference-chip")?.klass;
+		const Text = editor._nodes?.get?.("text")?.klass;
+		const LineBreak = editor._nodes?.get?.("linebreak")?.klass;
+		if (!ReferenceChip || !Text || !LineBreak) return;
+
+		const clean = text.replace(/[\uE100-\uE11D\uFFFC]/gu, "").replace(/\r\n?/g, "\n");
+		const first = matchAtPluginMention(clean, 0, byLowerName, true);
+		if (!first) return;
+
+		let inserted = false;
+		editor.update(() => {
+			const selection = editor._pendingEditorState?._selection;
+			if (!selection?.anchor || !selection?.focus || typeof selection.insertNodes !== "function") return;
+			const nodes = [];
+			const appendText = (segment) => {
+				const lines = segment.split("\n");
+				for (let i = 0; i < lines.length; i++) {
+					if (i > 0) nodes.push(new LineBreak());
+					if (lines[i]) nodes.push(new Text(lines[i]));
+				}
+			};
+			let cursor = 0;
+			for (let match = first; match; match = matchAtPluginMention(clean, cursor, byLowerName, true)) {
+				appendText(clean.slice(cursor, match.start));
+				const ref = atPluginReference(clean.slice(match.start, match.end), match.data.label);
+				nodes.push(new ReferenceChip(ref));
+				cursor = match.end;
+			}
+			appendText(clean.slice(cursor));
+			selection.insertNodes(nodes);
+			inserted = true;
+		}, { tag: "paste", discrete: true });
+		if (inserted) {
+			event.preventDefault();
+			event.stopPropagation();
+		}
+	}
+
+	function readComposerPluginReference(chip, byLowerName) {
+		const editor = chip.closest?.("[data-composer-input]")?.__lexicalEditor;
+		const state = editor?.getEditorState?.();
+		const node = state?._nodeMap?.get?.(chip[`__lexicalKey_${editor.getKey?.()}`]);
+		if (typeof node?.getReference !== "function" || typeof state.read !== "function") return undefined;
+		return state.read(() => matchAtPluginMention(node.getReference(), 0, byLowerName, true));
 	}
 
 	function filterAtPluginCandidates(plugins, query) {
@@ -13939,8 +13989,26 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 			try { globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY](); } catch {}
 		}
 		cleanupStaleAtPluginDom();
+		let disposed = false;
+		const disposers = [];
+		const disposeAll = () => {
+			if (disposed) return;
+			disposed = true;
+			if (typeof globalThis !== "undefined" && globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] === disposeAll) {
+				delete globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY];
+			}
+			for (let i = disposers.length - 1; i >= 0; i--) {
+				try { disposers[i]?.(); } catch {}
+			}
+		};
+		const collectDisposer = (handle) => {
+			if (typeof handle === "function") disposers.push(handle);
+			else if (typeof handle?.dispose === "function") disposers.push(() => handle.dispose());
+		};
+		if (typeof globalThis !== "undefined") globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] = disposeAll;
+		try {
 		const store = createAtPluginsStore(ctx);
-		const disposers = [() => store.dispose()];
+		disposers.push(() => store.dispose());
 		if (typeof document !== "undefined" && document.head) {
 			const style = document.createElement("style");
 			style.dataset.plugin = "universal-plugin-hub";
@@ -14071,6 +14139,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 		if (typeof document !== "undefined") {
 			const chipIds = new WeakMap();
 			const ownedSlots = new WeakSet();
+			const selfRemovedSlots = new WeakSet();
 			let nextChipId = 1;
 			let knownComposerEl = null;
 			let syncQueued = false;
@@ -14119,20 +14188,26 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 				for (const el of nodes) {
 					stripNativeTitle(el);
 					const label = readComposerChipLabel(el);
+					const reference = readComposerPluginReference(el, store.getByLowerName());
 					const prevName = el.dataset?.uphPluginName || el.getAttribute?.("data-uph-plugin-name") || "";
 					const prevLabel = el.dataset?.uphPluginLabel || el.getAttribute?.("data-uph-plugin-label") || "";
 					const reusedForDifferentLabel = Boolean(prevLabel && label && prevLabel.toLowerCase() !== label.toLowerCase());
 					let live = (prevName && !reusedForDifferentLabel)
 						? (store.getByLowerName().get(prevName.toLowerCase()) || null)
 						: null;
-					if (!live) {
+					if (reference) {
+						live = store.getByLowerName().get(reference.data.name.toLowerCase()) || null;
+					} else if (!live) {
 						live = store.resolveChipPlugin({ label, consumePick: true });
 					}
 
 					const existingSlots = Array.from(el.children || []).filter((c) => c.hasAttribute?.("data-uph-chip-icon"));
 					let ownedSlot = existingSlots.find((c) => ownedSlots.has(c)) || null;
 					for (let i = 0; i < existingSlots.length; i++) {
-						if (existingSlots[i] !== ownedSlot) existingSlots[i].remove?.();
+						if (existingSlots[i] !== ownedSlot) {
+							selfRemovedSlots.add(existingSlots[i]);
+							existingSlots[i].remove?.();
+						}
 					}
 					if (live) {
 						if (el.dataset) {
@@ -14168,11 +14243,16 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 							el.setAttribute?.("data-uph-plugin-name", "");
 							el.setAttribute?.("data-uph-plugin-label", label);
 						}
-						if (ownedSlot) ownedSlot.remove();
+						if (ownedSlot) {
+							selfRemovedSlots.add(ownedSlot);
+							ownedSlot.remove();
+						}
 					}
 				}
 
-				const dark = store.isDark();
+				const dark = (nextChips.length > 0 || activeOverlayState.chips.length > 0 || Boolean(activeOverlayState.hovered))
+					? store.isDark()
+					: activeOverlayState.isDark;
 				const sameChips = activeOverlayState.isDark === dark &&
 					activeOverlayState.chips.length === nextChips.length &&
 					activeOverlayState.chips.every((prev, i) => (
@@ -14256,6 +14336,22 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 				}
 			};
 
+			const isSelfOwnedIconMutation = (m) => {
+				if (m.type !== "childList") return false;
+				if (m.target?.getAttribute?.("data-composer-chip") !== "plugins") return false;
+				const addedLen = m.addedNodes?.length || 0;
+				const removedLen = m.removedNodes?.length || 0;
+				if (addedLen === 0 && removedLen === 0) return false;
+				for (let i = 0; i < addedLen; i++) {
+					if (!ownedSlots.has(m.addedNodes[i])) return false;
+				}
+				for (let i = 0; i < removedLen; i++) {
+					const rem = m.removedNodes[i];
+					if (!selfRemovedSlots.has(rem) && !(addedLen > 0 && ownedSlots.has(rem))) return false;
+				}
+				return true;
+			};
+
 			let domObserver = null;
 			if (typeof MutationObserver === "function" && document.body) {
 				knownComposerEl = document.querySelector?.("[data-composer-input]") || null;
@@ -14263,30 +14359,39 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 					if (blockDisposed) return;
 					let needSync = false;
 					let hasRemovals = false;
+					let composerConnected = Boolean(knownComposerEl?.isConnected);
+					let lookedUpComposer = false;
+					const ensureComposer = () => {
+						if (composerConnected) return knownComposerEl;
+						if (!lookedUpComposer) {
+							lookedUpComposer = true;
+							knownComposerEl = document.querySelector?.("[data-composer-input]") || null;
+							composerConnected = Boolean(knownComposerEl?.isConnected);
+							if (composerConnected) needSync = true;
+						}
+						return composerConnected ? knownComposerEl : null;
+					};
 					for (const m of mutations) {
 						if (m.target?.closest?.("[data-uph-chip-icon]")) continue;
+						if (isSelfOwnedIconMutation(m)) continue;
 						if (m.type === "attributes") {
 							const tgt = m.target;
 							if (tgt?.hasAttribute?.("title") && tgt.closest?.('[data-composer-chip="plugins"]')) {
 								tgt.removeAttribute("title");
-								needSync = true;
 							}
 							continue;
 						}
 						if (m.type === "childList") {
 							if (m.removedNodes.length > 0) hasRemovals = true;
-							if (!knownComposerEl?.isConnected) {
-								knownComposerEl = document.querySelector?.("[data-composer-input]") || null;
+							if (composerConnected && knownComposerEl.contains(m.target)) {
 								needSync = true;
 								continue;
 							}
-							if (knownComposerEl.contains(m.target)) {
-								needSync = true;
-								continue;
-							}
+							let hasAddedElement = false;
 							for (let i = 0; i < m.addedNodes.length; i++) {
 								const added = m.addedNodes[i];
 								if (added?.nodeType !== 1) continue;
+								hasAddedElement = true;
 								if (
 									added.getAttribute?.("data-composer-chip") === "plugins" ||
 									added.getAttribute?.("data-composer-input") !== null ||
@@ -14295,6 +14400,9 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 									needSync = true;
 									break;
 								}
+							}
+							if (!composerConnected && hasAddedElement && !needSync) {
+								ensureComposer();
 							}
 						}
 					}
@@ -14320,10 +14428,13 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 			disposers.push(store.subscribeTheme(updateDarkOverlayState));
 
 			if (typeof document.addEventListener === "function") {
+				const onPaste = (event) => pasteAtPluginReferences(event, store.getByLowerName());
+				document.addEventListener("paste", onPaste, true);
 				document.addEventListener("pointerover", onPointerOver, true);
 				document.addEventListener("focusin", onFocusIn, true);
 				document.addEventListener("keydown", onComposerKeyDown, true);
 				disposers.push(() => {
+					document.removeEventListener("paste", onPaste, true);
 					document.removeEventListener("pointerover", onPointerOver, true);
 					document.removeEventListener("focusin", onFocusIn, true);
 					document.removeEventListener("keydown", onComposerKeyDown, true);
@@ -14436,14 +14547,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 				if (!picked) return undefined;
 				store.recordPick(picked.name, picked.displayName);
 				const mention = formatAtPluginMention(picked.name, picked.displayName);
-				return {
-					insert: {
-						source: "plugins",
-						ref: mention,
-						label: picked.displayName,
-						clipboardText: mention,
-					},
-				};
+				return { insert: atPluginReference(mention, picked.displayName) };
 			},
 			codec: {
 				clipboardText: (ref) => ref,
@@ -14451,12 +14555,12 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 			},
 		};
 
-		ctx.inject?.(["inputTriggers"], (hostCtx) => {
+		collectDisposer(ctx.inject?.(["inputTriggers"], (hostCtx) => {
 			if (typeof hostCtx?.inputTriggers?.registerSource !== "function") return;
 			hostCtx.effect?.(() => hostCtx.inputTriggers.registerSource(triggerSource), "universal-plugin-hub: @ plugins trigger");
-		});
+		}));
 
-		ctx.inject?.(["uiConversation"], (hostCtx) => {
+		collectDisposer(ctx.inject?.(["uiConversation"], (hostCtx) => {
 			const registerRule = () => hostCtx?.uiConversation?.userText?.register?.({
 				id: "uph-plugin",
 				order: 15,
@@ -14466,9 +14570,11 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 			});
 			if (typeof hostCtx?.uiConversation?.userText?.register !== "function") return;
 			hostCtx.effect?.(() => {
+				let effectDisposed = false;
 				let offRule = registerRule();
 				let prevLexKey = store.lexiconKey();
 				const offSub = store.subscribe(() => {
+					if (effectDisposed) return;
 					const nextLexKey = store.lexiconKey();
 					if (nextLexKey === prevLexKey) return;
 					prevLexKey = nextLexKey;
@@ -14476,31 +14582,34 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 					offRule = registerRule();
 				});
 				return () => {
+					effectDisposed = true;
 					offSub();
 					try { offRule?.(); } catch {}
 				};
 			}, "universal-plugin-hub: @ plugins user-text");
-		});
+		}));
 
-		if (typeof ctx.slots?.register === "function") {
+		if (typeof ctx.slots?.inject === "function") {
+			const offSlotInject = ctx.slots.inject("conversation.user.text.node", () => ctx.slots.register({
+				name: "conversation.user.text.node",
+				key: "uph-plugin",
+				priority: 100,
+			}, PluginMentionChip));
+			collectDisposer(offSlotInject);
+		} else if (typeof ctx.slots?.register === "function") {
 			const offNodeSlot = ctx.slots.register({
 				name: "conversation.user.text.node",
 				key: "uph-plugin",
 				priority: 100,
 			}, PluginMentionChip);
-			if (typeof offNodeSlot === "function") disposers.push(offNodeSlot);
+			collectDisposer(offNodeSlot);
 		}
 
-		const disposeAll = () => {
-			if (typeof globalThis !== "undefined" && globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] === disposeAll) {
-				delete globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY];
-			}
-			for (let i = disposers.length - 1; i >= 0; i--) {
-				try { disposers[i]?.(); } catch {}
-			}
-		};
-		if (typeof globalThis !== "undefined") globalThis[AT_PLUGINS_ACTIVE_DISPOSE_KEY] = disposeAll;
 		return disposeAll;
+		} catch (err) {
+			disposeAll();
+			throw err;
+		}
 	}
 
 	const name = "universal-plugin-hub";
