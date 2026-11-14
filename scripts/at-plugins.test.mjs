@@ -565,7 +565,7 @@ test('client.js registers @ input trigger (order -1, scoped UI, reference chip) 
     assert.match(atStyle.textContent, /@media\s*\(prefers-reduced-transparency:\s*reduce\)/)
     assert.match(atStyle.textContent, /@media\s*\(prefers-contrast:\s*more\)/)
 
-    // 2. InputTriggerSource contract (order -1, section 'Plugins', no alias, zero cold HTTP fetch)
+    // 2. InputTriggerSource contract (order -1, section '插件', no alias, zero cold HTTP fetch)
     assert.equal(registeredSources.length, 1)
     const src = registeredSources[0]
     assert.equal(src.trigger, '@')
@@ -578,7 +578,7 @@ test('client.js registers @ input trigger (order -1, scoped UI, reference chip) 
     assert.equal(fetchCalls, 0, 'boot cache prevents cold network fetch on @')
     assert.deepEqual(all.map(c => c.name), ['Computer Use', 'Remotion'])
     assert.equal(all[0].label, undefined, 'omits differing label so MenuView does not render duplicate itemAlias')
-    assert.equal(all[0].section, 'Plugins')
+    assert.equal(all[0].section, '插件')
     assert.equal(all[0].description, 'Control Windows apps natively.')
     assert.equal(all[1].description, 'Write videos in React.')
 

@@ -13897,7 +13897,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 						name: title,
 						...(summary ? { description: summary } : {}),
 						icon: getIconComponent(plugin),
-						section: "Plugins",
+						section: "插件",
 						value: JSON.stringify({ name: plugin.name, displayName: title }),
 					};
 				});
