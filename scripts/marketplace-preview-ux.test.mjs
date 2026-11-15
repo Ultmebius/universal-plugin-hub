@@ -150,7 +150,7 @@ test('发现插件市场与发现插件在右侧渲染统一规范的版本号�
   })
 })
 
-test('当存在本地插件标签时，发现插件市场在系统建议简化名上方提供「加入本地插件标签」选择框，默认仍选中建议名', async (t) => {
+test('当存在本地插件标签时，发现插件市场在使用推荐市场名上方提供「加入本地插件标签」选择框，默认仍选中建议名', async (t) => {
   await t.test('有 localTabName 时三项按顺序渲染（加入本地 -> 建议名 -> 自定义）且使用原生单选与 fieldset/legend', async () => {
     const ctx = await mount({
       localTabName: 'Local Plugins',
@@ -173,12 +173,12 @@ test('当存在本地插件标签时，发现插件市场在系统建议简化�
     assert.equal(cards.length, 3, '存在本地标签时应展示三个选择卡片')
     assert.match(textOf(cards[0]), /加入本地插件标签/)
     assert.match(textOf(cards[0]), /Local Plugins/)
-    assert.match(textOf(cards[1]), /使用系统建议简化名/)
+    assert.match(textOf(cards[1]), /使用推荐市场名/)
     assert.match(textOf(cards[2]), /我自己命名/)
 
     const radios = cards.map((card) => card.findByProps({ type: 'radio' }))
     assert.equal(radios[0].props.checked, false)
-    assert.equal(radios[1].props.checked, true, '默认选中仍为使用系统建议简化名')
+    assert.equal(radios[1].props.checked, true, '默认选中仍为使用推荐市场名')
     assert.equal(radios[2].props.checked, false)
 
     // 切换选中「加入本地插件标签」后顶部副标题联动更新，不再说成独立标签页
@@ -306,8 +306,11 @@ test('真实浏览器渲染验证：版本徽标对齐、暗/亮色选择卡无�
     body { margin: 0; font-family: sans-serif; }
     .cpm-dialog, .cpm-dialog-box { animation: none; }
     .cpm-radio-card, .cpm-custom-radio { transition: none; }
+    .cpm-root div { corner-shape: squircle; }
+    .cpm-root :is(button, input), .cpm-root input::after { border-radius: 8px; corner-shape: squircle; }
   </style>
   <div class="cpm-root" id="light-root" style="width:1280px;padding:24px;">
+    <button class="cpm-icon-btn" aria-label="刷新"></button>
     <div class="cpm-dialog-box cpm-source-dialog-box" role="dialog" aria-modal="true" style="position:relative;margin:0 auto;">
       <div class="cpm-source-header cpm-detect-header">
         <div class="cpm-source-header-title">发现插件市场</div>
@@ -341,7 +344,7 @@ test('真实浏览器渲染验证：版本徽标对齐、暗/亮色选择卡无�
             <input class="cpm-sr-only" type="radio" name="m" value="suggest" id="radio-suggest" checked>
             <div class="cpm-custom-radio"><div class="cpm-custom-radio-inner"></div></div>
             <div class="cpm-radio-card-content">
-              <div class="cpm-radio-card-header"><div class="cpm-radio-card-title">使用系统建议简化名</div></div>
+              <div class="cpm-radio-card-header"><div class="cpm-radio-card-title">使用推荐市场名</div></div>
               <div class="cpm-radio-card-desc">分类标签名：<span class="cpm-tag-preview">Codex controls claude</span></div>
             </div>
           </label>
@@ -350,6 +353,13 @@ test('真实浏览器渲染验证：版本徽标对齐、暗/亮色选择卡无�
     </div>
   </div>
   <div class="cpm-root cpm-dark" id="dark-root" style="width:1280px;padding:24px;">
+    <button class="cpm-icon-btn" aria-label="刷新"></button>
+    <button class="cpm-filter">全部插件</button>
+    <button class="cpm-sort">默认排序</button>
+    <div class="cpm-menu-pop">添加插件市场</div>
+    <div class="cpm-card"><button class="cpm-card-pill">安装</button></div>
+    <div class="cpm-card"><button class="cpm-card-pill cpm-card-pill-installed">管理</button></div>
+    <div class="cpm-card"><input class="cpm-toggle on" type="checkbox" checked aria-label="启用插件"></div>
     <div class="cpm-dialog-box cpm-source-dialog-box" style="position:relative;margin:0 auto;">
       <div class="cpm-detect-well">
         <ul class="cpm-detect-list">
@@ -377,23 +387,54 @@ test('真实浏览器渲染验证：版本徽标对齐、暗/亮色选择卡无�
     const beforeBorder = getComputedStyle(cardLocal).borderTopWidth;
     const radioLocal = document.getElementById('radio-local');
     const radioDisplay = getComputedStyle(radioLocal).display;
+    const marker = cardLocal.querySelector('.cpm-custom-radio');
+    const roundShape = getComputedStyle(document.body).getPropertyValue('corner-shape');
+    const supportsBorderShape = CSS.supports('border-shape', 'shape(from 0 0, line to 100% 100%, close)');
+    const isCircle = (element) => {
+      const style = getComputedStyle(element);
+      return style.width === style.height && style.borderTopLeftRadius === '50%'
+        && style.getPropertyValue('corner-shape') === roundShape;
+    };
+    const uncheckedCircle = isCircle(marker);
+    const switchTrack = document.querySelector('.cpm-toggle');
+    const isCapsule = (element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const outline = style.getPropertyValue('border-shape');
+      return rect.width > rect.height && style.borderTopLeftRadius === '9999px'
+        && style.getPropertyValue('corner-shape') === roundShape
+        && (!supportsBorderShape || (outline.startsWith('shape(')
+          && outline.split('arc to').length === 3 && outline.split('curve to').length === 5));
+    };
+    const knob = getComputedStyle(switchTrack, '::after');
     const checkedBorderBefore = getComputedStyle(document.getElementById('card-suggest')).borderColor;
     radioLocal.click();
     const afterRect = cardLocal.getBoundingClientRect();
     const checkedBorderAfter = getComputedStyle(cardLocal).borderColor;
     const darkVerStyle = getComputedStyle(document.getElementById('dark-row-ver'));
+    const darkControlBackgrounds = ['.cpm-icon-btn', '.cpm-filter', '.cpm-sort', '.cpm-menu-pop'].map((selector) =>
+      getComputedStyle(document.querySelector('#dark-root ' + selector)).backgroundColor);
     document.getElementById('metrics').textContent = JSON.stringify({
       verRightOfName: verRect.left >= nameRect.right - 1,
       verSameLineAsName: Math.abs((verRect.top + verRect.height / 2) - (nameRect.top + nameRect.height / 2)) < 6,
       verInsideCard: verRect.right <= singleCard.right - 8 && verRect.top >= singleCard.top,
       radioDisplay,
       localCheckedNow: radioLocal.checked,
+      uncheckedCircle,
+      checkedCircle: isCircle(marker),
+      checkedDotCircle: isCircle(marker.firstElementChild),
+      pillButtons: Array.from(document.querySelectorAll('.cpm-card-pill')).every(isCapsule),
+      switchCapsule: isCapsule(switchTrack),
+      switchKnobCircle: knob.width === knob.height && knob.borderRadius === '50%'
+        && knob.getPropertyValue('corner-shape') === roundShape,
       noHeightShift: Math.abs(afterRect.height - beforeRect.height) < 0.5,
       noWidthShift: Math.abs(afterRect.width - beforeRect.width) < 0.5,
       beforeBorder,
       checkedBorderBefore,
       checkedBorderAfter,
       darkVerColor: darkVerStyle.color,
+      darkControlBackgrounds,
+      lightControlBackground: getComputedStyle(document.querySelector('#light-root .cpm-icon-btn')).backgroundColor,
     });
   </script>`)
   const dump = execFileSync(browser, [
@@ -406,7 +447,15 @@ test('真实浏览器渲染验证：版本徽标对齐、暗/亮色选择卡无�
   assert.equal(m.verInsideCard, true, '版本号必须稳稳落在预览卡内不得溢出')
   assert.notEqual(m.radioDisplay, 'none', '原生 radio 必须保留在无障碍树中')
   assert.equal(m.localCheckedNow, true, '点击「加入本地插件标签」应选中其原生 radio')
+  assert.equal(m.uncheckedCircle, true, '未选中时的标记应是正圆')
+  assert.equal(m.checkedCircle, true, '选中时的标记应是正圆')
+  assert.equal(m.checkedDotCircle, true, '选中标记的中心点应是正圆')
+  assert.equal(m.pillButtons, true, '管理和安装按钮应采用带平滑过渡的圆弧端头')
+  assert.equal(m.switchCapsule, true, '开关轨道应采用带平滑过渡的圆弧端头')
+  assert.equal(m.switchKnobCircle, true, '开关滑块应为正圆')
   assert.equal(m.noHeightShift, true, '切换选中状态不得产生卡片高度抖动')
   assert.equal(m.noWidthShift, true, '切换选中状态不得产生卡片宽度抖动')
   assert.equal(m.checkedBorderAfter, m.checkedBorderBefore, ':has(> input:checked) 应激活高亮边框色')
+  assert.deepEqual(m.darkControlBackgrounds, Array(4).fill('rgb(32, 32, 35)'))
+  assert.equal(m.lightControlBackground, 'rgb(255, 255, 255)')
 })

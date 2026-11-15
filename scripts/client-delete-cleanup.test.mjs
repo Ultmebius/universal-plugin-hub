@@ -102,7 +102,7 @@ function mountHub({
         ...stateData,
         sources: [...stateData.sources.filter((s) => s.id !== 'custom-a'), added],
       }
-      return { ok: true, status: 200, json: async () => ({ ok: true, source: added, pluginCount: 2 }) }
+      return { ok: true, status: 200, json: async () => ({ ok: true, source: added, pluginCount: 2, plugins: structuredClone(rowsData[added.id] || []) }) }
     }
     if (method === 'DELETE' && cleanUrl.startsWith('/sources/')) {
       const sourceId = decodeURIComponent(cleanUrl.slice('/sources/'.length))
@@ -319,6 +319,7 @@ test('source delete evicts detailCacheRef entries and blocks in-flight prefetchD
   let detailFetchCount = 0
   let betaFetchCount = 0
   let anthropicFetchCount = 0
+  let catalogFetchCount = 0
 
   const hub = mountHub({
     initialSources: [
@@ -332,7 +333,9 @@ test('source delete evicts detailCacheRef entries and blocks in-flight prefetchD
         { name: 'beta', id: 'custom-a/beta' },
       ],
     },
-    onFetch: ({ url, method }) => {
+    onFetch: ({ url, method, options }) => {
+      if (method === 'GET' && url === '/market?sourceId=custom-a') catalogFetchCount++
+      if (method === 'POST' && url === '/market/refresh' && JSON.parse(options.body).sourceId === 'custom-a') catalogFetchCount++
       if (method === 'GET' && url === '/plugins/anthropic/pw') {
         anthropicFetchCount++
         return { ok: true, status: 200, json: async () => ({ plugin: { name: 'pw', skills: [{ name: 'pw-skill' }] } }) }
@@ -424,6 +427,7 @@ test('source delete evicts detailCacheRef entries and blocks in-flight prefetchD
       await hub.flush()
     }
     const confirmAddBtn = renderer.root.findAllByType('button').find((b) => b.children.includes('确认添加'))
+    const catalogFetchesBeforeAdd = catalogFetchCount
     if (confirmAddBtn) {
       await act(async () => { await confirmAddBtn.props.onClick() })
       await hub.flush()
@@ -434,7 +438,8 @@ test('source delete evicts detailCacheRef entries and blocks in-flight prefetchD
       // Fallback: unmount & don't rely on AddSourceDialog phrasing if dialog uses different flow
       assert.fail('Expected AddSourceDialog to restore Custom A')
     }
-    await hub.clickTab('Custom A')
+    assert.equal(hub.sessionStore.activeSourceId, 'custom-a')
+    assert.equal(catalogFetchCount, catalogFetchesBeforeAdd, 'the add response already contains the complete catalog')
 
     const cards = renderer.root.findAll((n) => n.props?.className === 'cpm-card')
     await act(async () => { cards[0].props.onClick() })

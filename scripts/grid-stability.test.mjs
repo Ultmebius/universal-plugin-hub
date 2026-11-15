@@ -76,7 +76,7 @@ test('every switch in the plugin draws the same control', () => {
   // the inset is whatever is left, split evenly.
   assert.match(base[1], /--sw-knob: calc\(var\(--sw-h\) \* 0\.7\);/)
   assert.match(base[1], /--sw-inset: calc\(\(var\(--sw-h\) - var\(--sw-knob\)\) \/ 2\);/)
-  assert.match(base[1], /border-radius: 9999px;/)
+  assert.match(client, /\.cpm-root :is\(\.cpm-card-pill, \.cpm-toggle\) \{[^}]*border-radius: 9999px;/)
   // Off and on are the mockup's two states: a faint wash under a hairline,
   // and the solid blue. The hairline is an inset shadow — a border would push
   // the box, and an outline renders worse corners than a shadow.
@@ -108,7 +108,7 @@ test('the knob moves on a spring, not a cubic-bezier', () => {
   // The silhouette is border-radius, NOT clip-path: clip-path clips the
   // element's own box-shadow, which silently deleted the lift under the knob
   // that the mockup depends on.
-  assert.match(knob[1], /border-radius: 50%;/)
+  assert.match(client, /\.cpm-root \.cpm-toggle::after \{[^}]*border-radius: 50%;/)
   assert.doesNotMatch(knob[1], /clip-path/)
   assert.match(knob[1], /box-shadow: var\(--cpm-toggle-knob-shadow\);/)
   // Travel is pixels against --sw-w, never a percentage: a percentage in

@@ -11,7 +11,7 @@ import {
   readState, writeState, slugify, suggestSourceName, parseGitUrl, normalizeGitRepoUrl, findDuplicateSource, installedDir, sourceCacheDir, safeRmDir,
 } from './store.js'
 import { ensureSourceCloned, pullSource, safeSegment, materializePlugin } from './market.js'
-import { readMarketplace, pluginDetail, invalidateMarketplaceCache, resolveMarketplacePluginDir } from './parser.js'
+import { readMarketplace, readMarketplaceName, pluginDetail, invalidateMarketplaceCache, resolveMarketplacePluginDir } from './parser.js'
 import { getOrFetchIcon, readLocalIconCached, invalidateLocalIconCache } from './icons.js'
 import {
   installPlugin, uninstallPlugin, togglePlugin, updatePlugin, installedDetails, installedPluginDetail, isScanDirRegistered, toolCallIconGroups,
@@ -293,12 +293,15 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
     if (method === 'GET' && path === '/market') {
       const rawSource = url.searchParams.get('sourceId') || url.searchParams.get('source') || 'anthropic'
       const sourceId = safeSegment(rawSource, 'source id')
-      await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
-      let rows = readMarketplace(sourceId)
-      if (sourceId === 'local') {
-        const names = new Set(rows.map(r => r.name))
-        rows = [...rows, ...installedDetails().filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name)) && !names.has(p.name)).map(p => ({ ...p, sourceMissing: true }))]
-      }
+      const rows = await withSourceLock(sourceId, async () => {
+        await ensureMarketCheckout(sourceId, sourceUrlOf(sourceId))
+        let plugins = readMarketplace(sourceId)
+        if (sourceId === 'local') {
+          const names = new Set(plugins.map(r => r.name))
+          plugins = [...plugins, ...installedDetails().filter(p => p.sourceId === 'local' && existsSync(installedDir(p.name)) && !names.has(p.name)).map(p => ({ ...p, sourceMissing: true }))]
+        }
+        return plugins
+      })
       return sendJson(res, 200, { plugins: rows })
     }
 
@@ -309,7 +312,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const plugins = await withSourceLock(sourceId, async () => {
         // Clone first if the source has never been fetched (fresh install), so a
         // first-launch refresh does not fail with "尚未克隆".
-        await ensureSourceCloned(sourceId, sourceUrlOf(sourceId))
+        await ensureMarketCheckout(sourceId, sourceUrlOf(sourceId))
         await pullSource(sourceId)
         invalidateMarketplaceCache(sourceId)
         invalidateLocalIconCache(sourceId)
@@ -337,7 +340,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
       const id = slugify(parsed ? `${parsed.owner}-${parsed.repo}` : url)
       if (!id) throw new Error('无法从该地址识别仓库')
 
-      const count = await withSourceLock(id, async () => {
+      const { pluginCount, marketName } = await withSourceLock(id, async () => {
         // Check duplicates BEFORE cloning
         const state = readState()
         const duplicate = findDuplicateSource(state, id, url)
@@ -345,9 +348,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
           throw new Error(`该插件源已存在（${duplicate.name}）`)
         }
         // Validate by cloning into the cache
-        await ensureSourceCloned(id, url)
-        const rows = readMarketplace(id)
-        return Array.isArray(rows) ? rows.length : 0
+        const checkout = await ensureMarketCheckout(id, url)
+        return { pluginCount: readMarketplace(id).length, marketName: readMarketplaceName(checkout) }
       })
 
       const repoLabel = parsed ? `${parsed.owner}/${parsed.repo}` : (url.replace(/^https?:\/\//i, '').replace(/\.git$/i, ''))
@@ -357,8 +359,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         sourceId: id,
         repoLabel,
         normalizedUrl: url,
-        pluginCount: count,
-        suggestedName: suggestSourceName(url),
+        pluginCount,
+        suggestedName: suggestSourceName(url, marketName),
       })
     }
 
@@ -496,9 +498,8 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
 
       return sendJson(res, 200, await withSourceLock(id, async () => {
         validateUnique(readState())
-        await ensureSourceCloned(id, url)
-        const rows = readMarketplace(id)
-        const count = Array.isArray(rows) ? rows.length : 0
+        await ensureMarketCheckout(id, url)
+        const plugins = readMarketplace(id)
 
         // Re-read state after awaiting clone so concurrent mutations (e.g. plugin toggles) are preserved.
         const latestState = readState()
@@ -506,7 +507,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         const source = { id, name, url, addedAt: Date.now() }
         latestState.sources.push(source)
         writeState(latestState)
-        return { ok: true, source, pluginCount: count }
+        return { ok: true, source, plugins, pluginCount: plugins.length }
       }))
     }
 
@@ -551,7 +552,9 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
         // The remote checkout pool is shared by marketplaces. Only remove this
         // source's own clone or uploaded marketplace copy.
         if (sourceId === 'local') cleanupAllStagedUploads()
-        if (sourceId !== 'remote') await removeManagedDirAsync(sourceCacheDir(sourceId), { allowTrash: false })
+        if (sourceId !== 'remote') {
+          await removeManagedDirAsync(sourceCacheDir(sourceId), { deferCleanup: /^https?:\/\//i.test(source.url) })
+        }
         const latestState = readState()
         latestState.sources = latestState.sources.filter((s) => s.id !== sourceId)
         if (Array.isArray(latestState.tabOrder)) latestState.tabOrder = latestState.tabOrder.filter((id) => id !== sourceId)
@@ -1010,6 +1013,16 @@ function requireSameOrigin(req) {
     error.status = 403
     throw error
   }
+}
+
+function ensureMarketCheckout(sourceId, url) {
+  return ensureSourceCloned(sourceId, url, {
+    onCloned() {
+      invalidateMarketplaceCache(sourceId)
+      invalidateLocalIconCache(sourceId)
+      invalidateAtPluginsCache()
+    },
+  })
 }
 
 function sourceUrlOf(sourceId) {

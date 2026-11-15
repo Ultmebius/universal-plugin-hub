@@ -2310,8 +2310,8 @@ async function retryManagedDirOperation(operation, destination) {
   }
 }
 
-export async function removeManagedDirAsync(dir, { allowTrash = false } = {}) {
-  return retryManagedDirOperation(() => removeManagedDir(dir, { allowTrash }), dir)
+export async function removeManagedDirAsync(dir, options) {
+  return retryManagedDirOperation(() => removeManagedDir(dir, options), dir)
 }
 
 function replaceManagedDir(from, to, keepExisting, repairOnly = false, { allowTrash = false } = {}) {

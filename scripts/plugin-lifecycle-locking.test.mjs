@@ -37,6 +37,7 @@ after(() => {
 const store = await import('../src/store.js')
 const parser = await import('../src/parser.js')
 const install = await import('../src/install.js')
+const { ensureSourceCloned } = await import('../src/market.js')
 const { mountRoutes } = await import('../src/routes.js')
 
 const clientSource = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
@@ -597,14 +598,14 @@ test('togglePlugin(true) rollback removes already-synced skills even when cordis
   }
 })
 
-test('routes: POST /sources preserves concurrent state mutations during clone and DELETE /plugins/:p/connectors/:c/toggle checks plugin presence', async () => {
+test('marketplace preview repairs an interrupted clone, shares the checkout with confirm, and preserves concurrent state changes', async () => {
   // Set up a tiny local bare git repo served over smart HTTP with an artificial /info/refs delay
   const bareRepo = join(root, 'slow-bare.git')
   const workRepo = join(root, 'slow-work')
   mkdirSync(workRepo, { recursive: true })
   execFileSync('git', ['init', '-b', 'main'], { cwd: workRepo, windowsHide: true })
   write(join(workRepo, '.claude-plugin', 'marketplace.json'), {
-    name: 'slow-remote-market',
+    name: 'open-code-review',
     plugins: [{ name: 'remote-plug', source: './plugins/remote-plug', version: '1.0.0' }],
   })
   write(join(workRepo, 'plugins', 'remote-plug', '.claude-plugin', 'plugin.json'), {
@@ -618,9 +619,14 @@ test('routes: POST /sources preserves concurrent state mutations during clone an
   execFileSync('git', ['commit', '-m', 'init'], { cwd: workRepo, windowsHide: true })
   execFileSync('git', ['clone', '--bare', workRepo, bareRepo], { windowsHide: true })
 
+  let cloneRequests = 0
+  let notifyCloneStarted
+  const cloneStarted = new Promise((resolve) => { notifyCloneStarted = resolve })
   const gitHttpServer = createServer((req, res) => {
     const reqUrl = new URL(req.url, 'http://127.0.0.1')
     if (reqUrl.pathname.endsWith('/info/refs') && reqUrl.searchParams.get('service') === 'git-upload-pack') {
+      cloneRequests++
+      notifyCloneStarted()
       setTimeout(() => {
         const proc = spawn('git', ['upload-pack', '--stateless-rpc', '--advertise-refs', bareRepo], { windowsHide: true })
         spawnedChildren.add(proc)
@@ -660,23 +666,38 @@ test('routes: POST /sources preserves concurrent state mutations during clone an
   }
   const unregister = mountRoutes(fakeApp, null, () => {})
   const apiPort = await listenSafe(apiServer)
+  const apiBase = `http://127.0.0.1:${apiPort}/universal-plugin-hub/api`
+  const sourceId = 'testorg-slowrepo'
+  const sourceUrl = `http://127.0.0.1:${gitPort}/testorg/slowrepo.git`
+  const cache = store.sourceCacheDir(sourceId)
+  const post = (path, body) => fetch(apiBase + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => r.json())
 
   try {
-    const addSourcePromise = fetch(`http://127.0.0.1:${apiPort}/universal-plugin-hub/api/sources`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Slow HTTP Source',
-        url: `http://127.0.0.1:${gitPort}/testorg/slowrepo.git`,
-      }),
-    }).then((r) => r.json())
+    // A crashed clone can leave .git behind while the worktree is still empty.
+    write(join(cache, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+    assert.deepEqual(parser.readMarketplace(sourceId), [])
+
+    const previewPromise = post('/sources/ensure', { url: sourceUrl })
+    await Promise.race([cloneStarted, previewPromise])
+    assert.equal(existsSync(cache), false, 'the final checkout must stay hidden while git is running')
+    const checkoutPromise = ensureSourceCloned(sourceId, sourceUrl)
+    const addSourcePromise = post('/sources', { name: 'Open Code Review', url: sourceUrl })
 
     // Mutate plugin state while POST /sources is waiting on git clone
     await new Promise((r) => setTimeout(r, 40))
     await install.togglePlugin('race-peer-plugin', false)
 
-    const addBody = await addSourcePromise
+    const [preview, , addBody] = await Promise.all([previewPromise, checkoutPromise, addSourcePromise])
+    assert.equal(preview.pluginCount, 1)
+    assert.equal(preview.suggestedName, 'Open Code Review')
     assert.equal(addBody.ok, true)
+    assert.equal(addBody.pluginCount, 1)
+    assert.deepEqual(addBody.plugins.map((row) => row.name), ['remote-plug'])
+    assert.equal(cloneRequests, 1, 'preview and confirmation must reuse one checkout')
 
     const finalState = store.readState()
     assert.ok(finalState.sources.some((s) => s.id === 'testorg-slowrepo'), 'added source must be persisted')
@@ -685,6 +706,27 @@ test('routes: POST /sources preserves concurrent state mutations during clone an
       false,
       'POST /sources must not clobber concurrent togglePlugin state updates after await ensureSourceCloned',
     )
+
+    const listing = await fetch(`${apiBase}/market?sourceId=${sourceId}`).then((r) => r.json())
+    assert.deepEqual(listing.plugins.map((row) => row.name), ['remote-plug'])
+    if (process.platform === 'win32') {
+      const lock = await holdDirectoryCwd(cache, 10000)
+      try {
+        const blocked = await fetch(`${apiBase}/sources/${sourceId}`, { method: 'DELETE' })
+        assert.equal(blocked.ok, false)
+        assert.match((await blocked.json()).error, /无法清理目录/)
+        assert.ok(store.readState().sources.some((source) => source.id === sourceId))
+        assert.ok(existsSync(join(cache, '.claude-plugin', 'marketplace.json')), 'failed removal leaves the checkout intact')
+      } finally {
+        const exited = once(lock, 'exit')
+        lock.kill()
+        await exited
+      }
+    }
+    const remove = await fetch(`${apiBase}/sources/${sourceId}`, { method: 'DELETE' }).then((r) => r.json())
+    assert.equal(remove.ok, true)
+    assert.equal(existsSync(cache), false)
+    assert.equal(cloneRequests, 1, 'listing and deletion must not clone again')
 
     // Uninstalled plugin connector toggle(false) must also reject cleanly
     const missingToggle = await fetch(`http://127.0.0.1:${apiPort}/universal-plugin-hub/api/plugins/never-installed-plugin/connectors/foo/toggle`, {
@@ -699,6 +741,41 @@ test('routes: POST /sources preserves concurrent state mutations during clone an
     gitHttpServer.close()
     await install.uninstallPlugin('race-peer-plugin').catch(() => {})
     store.safeRmDir(store.sourceCacheDir('testorg-slowrepo'), { allowTrash: false })
+  }
+})
+
+test('a declared Claude plugin imports only its own skills and commands from a mixed-platform repository', async () => {
+  const sourceId = 'mixed-ocr-market'
+  const pluginName = 'mixed-ocr'
+  const { sourceDir } = setupLocalSourcePlugin(sourceId, pluginName, { skills: [] })
+  const parent = join(sourceDir, 'plugins', pluginName)
+  const claudeDir = join(parent, 'claude-code')
+  const entry = { name: pluginName, source: `./plugins/${pluginName}/claude-code` }
+  write(join(sourceDir, '.claude-plugin', 'marketplace.json'), { name: pluginName, plugins: [entry] })
+  write(join(sourceDir, '.agents', 'plugins', 'marketplace.json'), {
+    name: pluginName, plugins: [{ name: 'different-codex-entry', source: `./plugins/${pluginName}` }],
+  })
+  write(join(claudeDir, '.claude-plugin', 'plugin.json'), { name: pluginName, commands: './commands' })
+  for (const name of ['review', 'delegate-review']) {
+    write(join(claudeDir, 'commands', `${name}.md`), `---\ndescription: ${name} command\n---\n# ${name}\n`)
+  }
+  for (const name of ['ocr-template', 'ocr-delegate-template']) {
+    write(join(parent, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: Template\n---\n# ${name}\n`)
+  }
+  write(join(parent, 'commands', 'parent-only.md'), '# An unrelated command\n')
+
+  const rows = parser.readMarketplace(sourceId)
+  assert.deepEqual(rows.map(({ name, source }) => ({ name, source })), [entry])
+  const names = (detail) => detail.skills.map((skill) => skill.name).sort()
+  assert.deepEqual(names(parser.pluginDetail(sourceId, pluginName, entry.source, rows[0])), ['delegate-review', 'review'])
+
+  await install.installPlugin({ sourceId, pluginName })
+  try {
+    assert.deepEqual(names(install.installedPluginDetail(pluginName)), ['delegate-review', 'review'])
+    for (const name of ['review', 'delegate-review']) assert.ok(existsSync(join(store.dshSkillsDir(), name, 'SKILL.md')))
+    assert.equal(existsSync(join(store.dshSkillsDir(), 'parent-only')), false)
+  } finally {
+    await install.uninstallPlugin(pluginName)
   }
 })
 

@@ -11,9 +11,10 @@ test('fresh cached catalogs load before a slow Git update finishes', async () =>
   let effect, effectKey
   let rows = { modern: [{ name: 'old', icons: {} }] }
   const requests = []
-  const state = { sources: [{ id: 'slow-git' }, { id: 'modern' }, { id: 'local' }] }
+  const state = { sources: [{ id: 'slow-git' }, { id: 'modern' }, { id: 'local' }, { id: 'just-added' }] }
   const context = {
     state,
+    useRef: () => ({ current: new Set(['just-added']) }),
     useEffect(callback, deps) { effect = callback; effectKey = deps[0] },
     setRows(update) { rows = update(rows) },
     api: async (path, options) => {
@@ -38,6 +39,7 @@ test('catalog effects ignore responses arriving after the view is disposed', asy
   let writes = 0
   vm.runInNewContext(client.slice(start, end), {
     state: { sources: [{ id: 'local' }] },
+    useRef: (current) => ({ current }),
     useEffect(callback) { effect = callback },
     setRows() { writes++ },
     api: () => new Promise((resolve) => { resolveRequest = resolve }),

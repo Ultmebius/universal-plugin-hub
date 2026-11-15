@@ -9,6 +9,7 @@
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, lstatSync, rmSync, rmdirSync, unlinkSync, readdirSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 
 let TRASH_SEQ = 0
@@ -38,6 +39,14 @@ function scheduleTrashSweep(trashed) {
     try { sweepTrash() } catch {}
   }, 5000)
   TRASH_SWEEP_TIMER.unref?.()
+}
+
+function moveToTrash(dir, quarantineRoot) {
+  mkdirSync(quarantineRoot, { recursive: true })
+  const seq = (TRASH_SEQ = (TRASH_SEQ + 1) & 0xffffff).toString(36)
+  const trashed = join(quarantineRoot, `${basename(dir) || 'dir'}-${process.pid}-${Date.now().toString(36)}-${seq}`)
+  renameSync(dir, trashed)
+  return trashed
 }
 
 function unlinkReparsePointsSync(dir) {
@@ -88,11 +97,7 @@ export function safeRmDir(dir, { allowTrash = true, quarantineRoot = trashRoot()
   } catch (err) {
     if (allowTrash && quarantineRoot && !isSameOrInsidePath(dir, quarantineRoot) && !isSameOrInsidePath(quarantineRoot, dir)) {
       try {
-        mkdirSync(quarantineRoot, { recursive: true })
-        const seq = (TRASH_SEQ = (TRASH_SEQ + 1) & 0xffffff).toString(36)
-        const trashed = join(quarantineRoot, `${basename(dir) || 'dir'}-${process.pid}-${Date.now().toString(36)}-${seq}`)
-        renameSync(dir, trashed)
-        scheduleTrashSweep(trashed)
+        scheduleTrashSweep(moveToTrash(dir, quarantineRoot))
         return
       } catch {}
     }
@@ -123,7 +128,27 @@ export function safeRmDir(dir, { allowTrash = true, quarantineRoot = trashRoot()
 }
 
 /** Remove managed files before forgetting the record needed to retry cleanup. */
-export function removeManagedDir(dir, { allowTrash = false } = {}) {
+export function removeManagedDir(dir, { allowTrash = false, deferCleanup = false } = {}) {
+  if (deferCleanup) {
+    try {
+      if (!lstatSync(dir, { throwIfNoEntry: false })) return
+      // Detach the checkout as a unit. An open Windows handle can block the
+      // move, in which case the caller retries while the checkout stays intact.
+      const quarantineRoot = trashRoot()
+      const trashed = moveToTrash(dir, quarantineRoot)
+      void rm(trashed, { recursive: true, force: true }).then(
+        () => { try { rmdirSync(quarantineRoot) } catch {} },
+        () => scheduleTrashSweep(trashed),
+      )
+      return
+    } catch (cause) {
+      throw Object.assign(new Error(`无法清理目录：${dir}`, { cause }), {
+        code: cause.code,
+        syscall: cause.syscall,
+        path: dir,
+      })
+    }
+  }
   safeRmDir(dir, { allowTrash })
   let remaining = null
   let lstatErr = null
@@ -384,12 +409,18 @@ export function parseGitUrl(url) {
   return null
 }
 
-/** Suggested display name for a source: repo name simplified & capitalized; official repo → "Anthropic". */
-export function suggestSourceName(url) {
+function formatMarketLabel(name) {
+  // Keep spaced labels intact and preserve casing within each slug word.
+  if (/\s/.test(name)) return name
+  return name.replace(/[-_]+/g, ' ').replace(/(^| )([a-z])/g, (_, space, initial) => space + initial.toUpperCase())
+}
+
+/** Prefer the market title and fall back to a readable Git repository name. */
+export function suggestSourceName(url, marketName) {
   const parsed = parseGitUrl(url)
   if (!parsed) {
     const raw = String(url).split('/').pop()?.replace(/\.git$/, '') || 'Custom'
-    return raw.charAt(0).toUpperCase() + raw.slice(1)
+    return formatMarketLabel(marketName || raw)
   }
   const { owner, repo } = parsed
   const ownerLower = (owner || '').toLowerCase()
@@ -400,9 +431,11 @@ export function suggestSourceName(url) {
   if (repoLower === 'claude-plugins-community') return 'Community'
 
   const genericRepoNames = new Set([
-    'skills', 'plugins', 'agents', 'tools', 'marketplace', 'hub',
-    'claude-skills', 'claude-plugins', 'claude-agents', 'dsh-plugins', 'extensions', 'packages',
+    'skill', 'skills', 'plugin', 'plugins', 'agent', 'agents', 'tool', 'tools', 'marketplace', 'hub',
+    'claude-skills', 'claude-plugins', 'claude-agents', 'dsh-plugins', 'extensions', 'packages', 'repo', 'repository', 'custom',
   ])
+
+  if (marketName && !genericRepoNames.has(marketName.toLowerCase())) return formatMarketLabel(marketName)
 
   // If repo is generic (e.g. "skills", "plugins", "tools"), use capitalized owner (e.g. Mattpocock)
   if (genericRepoNames.has(repoLower) && owner) {
@@ -413,7 +446,10 @@ export function suggestSourceName(url) {
     .replace(/^(claude|dsh|anthropic)[-_]?(plugins?)?[-_]?/i, '')
     .replace(/[-_]?(plugins?|skills?|agents?|official|marketplace)$/i, '')
   const name = simplified || repo
-  return name.charAt(0).toUpperCase() + name.slice(1)
+  if (genericRepoNames.has(name.toLowerCase()) && owner) {
+    return owner.charAt(0).toUpperCase() + owner.slice(1)
+  }
+  return formatMarketLabel(name)
 }
 
 /** Find an existing source that duplicates the given id, normalized URL, or git repo. */

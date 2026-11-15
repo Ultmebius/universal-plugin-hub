@@ -6,9 +6,9 @@
  * user-facing message; network/git failures are retryable at the UI level.
  */
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve, relative, isAbsolute } from 'node:path'
-import { sourceCacheDir, safeRmDir, readState } from './store.js'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
+import { sourceCacheDir, removeManagedDir, safeRmDir, readState } from './store.js'
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i
 
@@ -105,11 +105,11 @@ function formatGitError(stderr, errorMsg) {
   return last.length > 50 ? last.slice(0, 48) + '…' : last
 }
 
-function runGit(args, cwd) {
+function runGit(args, cwd, timeout) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+    execFile('git', args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
-        const detail = formatGitError(stderr, error.message)
+        const detail = error.killed && timeout ? 'Git 操作超时，请检查网络后重试' : formatGitError(stderr, error.message)
         reject(new Error(detail))
         return
       }
@@ -118,40 +118,37 @@ function runGit(args, cwd) {
   })
 }
 
+function hasSourceCheckout(dir) {
+  const git = join(dir, '.git')
+  // Legacy clones wrote their first index after checking out the worktree.
+  return existsSync(join(git, 'uph-clone-complete')) || existsSync(join(git, 'index'))
+}
+
 /** Clone a source repository into its cache dir (idempotent, concurrency-safe). */
-export async function ensureSourceCloned(sourceId, url) {
+export async function ensureSourceCloned(sourceId, url, { onCloned } = {}) {
   safeSegment(sourceId, 'source id')
   const dir = sourceCacheDir(sourceId)
   if (sourceId === 'local' || /^local-(?:upload|market):\/\//i.test(String(url || ''))) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     return dir
   }
-  if (existsSync(join(dir, '.git'))) return dir
+  if (hasSourceCheckout(dir)) return dir
 
   return withGitLock(`src:${sourceId}`, async () => {
-    // Another request may have completed the clone while we waited on the lock.
-    if (existsSync(join(dir, '.git'))) return dir
+    if (hasSourceCheckout(dir)) return dir
 
-    // Clean incomplete cache if previous clone failed
-    if (existsSync(dir)) {
-      try {
-        safeRmDir(dir)
-      } catch {
-        // ignore rm error
-      }
-    }
-
+    removeManagedDir(dir, { allowTrash: true })
+    const parent = dirname(dir)
+    mkdirSync(parent, { recursive: true })
+    const staging = mkdtempSync(join(parent, '.clone-'))
     try {
-      await runGit(['clone', '--depth', '1', url, dir])
-    } catch (err) {
-      if (existsSync(dir) && !existsSync(join(dir, '.git'))) {
-        try {
-          safeRmDir(dir)
-        } catch {
-          // ignore rm error
-        }
-      }
-      throw err
+      await runGit(['clone', '--depth', '1', url, staging], undefined, 120_000)
+      // Empty repositories can be cloned successfully without an index.
+      writeFileSync(join(staging, '.git', 'uph-clone-complete'), '')
+      renameSync(staging, dir)
+      onCloned?.()
+    } finally {
+      safeRmDir(staging)
     }
     return dir
   })

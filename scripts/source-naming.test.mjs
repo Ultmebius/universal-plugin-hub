@@ -13,6 +13,7 @@ test('Knowledge Work and the official Anthropic marketplace get distinct names',
     assert.equal(suggestSourceName(url), 'Knowledge Work')
   }
   assert.equal(suggestSourceName('anthropics/claude-plugins-official'), 'Anthropic')
+  assert.equal(suggestSourceName('alibaba/open-code-review'), 'Open Code Review')
 })
 
 test('going back and reopening the naming step starts with a blank custom field', async () => {
@@ -22,6 +23,7 @@ test('going back and reopening the naming step starts with a blank custom field'
   assert.ok(start >= 0 && end > start)
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   const posted = []
+  let finishAdd
   const context = {
     ...React,
     h: React.createElement,
@@ -31,6 +33,7 @@ test('going back and reopening the naming step starts with a blank custom field'
       if (path === '/sources/ensure') return { repoLabel: repo, suggestedName: suggestSourceName(repo) }
       assert.equal(path, '/sources')
       posted.push(JSON.parse(options.body).name)
+      await new Promise((resolve) => { finishAdd = resolve })
       return { source: { id: 'knowledge-work' } }
     },
   }
@@ -48,13 +51,20 @@ test('going back and reopening the naming step starts with a blank custom field'
     await act(() => view.root.findByProps({ id: 'cpm-source-url' }).props.onChange({ target: { value: repo } }))
     await click('下一步')
     assert.equal(view.root.findByProps({ className: 'cpm-tag-preview' }).children[0], 'Knowledge Work')
+    assert.ok(view.root.findAllByType('div').some(node => node.children.includes('使用推荐市场名')))
     await paste('knowledge-work-plugins')
     await click('上一步')
     await click('下一步')
     assert.equal(field().props.value, '')
     assert.equal(button('确认添加').props.disabled, false)
     await paste('knowledge-work-plugins')
-    await click('确认添加')
+    let add
+    await act(() => { add = button('确认添加').props.onClick() })
+    try {
+      assert.equal(button('正在安装…')?.props.disabled, true)
+    } finally {
+      await act(async () => { finishAdd(); await add })
+    }
     assert.deepEqual(posted, ['knowledge-work-plugins'])
   } finally {
     await act(() => view.unmount())

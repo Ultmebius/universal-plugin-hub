@@ -809,6 +809,18 @@ export function parseMarketplaceFromDisk(sourceId, cache, names, options = {}) {
   return []
 }
 
+/** Display metadata from the same marketplace formats used for listing. */
+export function readMarketplaceName(cache) {
+  for (const parts of MANIFEST_CANDIDATE_PARTS) {
+    try {
+      const market = JSON.parse(readFileSync(join(cache, ...parts), 'utf8'))
+      if (!Array.isArray(market?.plugins) || !market.plugins.length) continue
+      return [market.displayName, market.title, market.name]
+        .find((value) => typeof value === 'string' && value.trim())?.trim()
+    } catch {}
+  }
+}
+
 /** Resolve the directory that holds a plugin's content (cache or remote checkout). */
 export function pluginContentDir(sourceId, pluginName, source, preferInstalled = true) {
   safeSegment(sourceId, 'source id')
@@ -1007,10 +1019,14 @@ export function resolvePluginCommandEntries(dir, manifest = readPluginManifest(d
 
   const candidateCmdRoots = [
     join(dir, 'commands'),
-    join(dir, '..', 'commands'),
     join(dir, '.claude', 'commands'),
-    join(dir, '..', '.claude', 'commands'),
   ]
+  // A Claude plugin manifest owns a package root. Siblings are often
+  // implementations for other hosts, not capabilities of this plugin.
+  if (!existsSync(join(dir, '.claude-plugin', 'plugin.json'))) {
+    candidateCmdRoots.splice(1, 0, join(dir, '..', 'commands'))
+    candidateCmdRoots.push(join(dir, '..', '.claude', 'commands'))
+  }
   const inlineFallbacks = []
   const declared = manifest?.commands
   if (typeof declared === 'string') {
@@ -1124,7 +1140,9 @@ export function listSkills(dir, manifest = readPluginManifest(dir)) {
     .filter(Boolean)
   const candidateSkillRoots = []
   const seenSkillRoots = new Set()
-  for (const rootCandidate of [...declaredSkillPaths, join(dir, 'skills'), join(dir, '..', 'skills')]) {
+  const skillRoots = [...declaredSkillPaths, join(dir, 'skills')]
+  if (!existsSync(join(dir, '.claude-plugin', 'plugin.json'))) skillRoots.push(join(dir, '..', 'skills'))
+  for (const rootCandidate of skillRoots) {
     const resolvedRoot = resolve(rootCandidate)
     if (seenSkillRoots.has(resolvedRoot)) continue
     seenSkillRoots.add(resolvedRoot)

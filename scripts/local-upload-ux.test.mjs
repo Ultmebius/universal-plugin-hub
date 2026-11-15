@@ -379,20 +379,18 @@ test('取消市场预览后再传另一个市场，不继承上一次的命名�
 test('onAdded 不引用 BrowseView 作用域内的 loadMarket', () => {
   // loadMarket 定义在 BrowseView 里，而 onAdded 在 MarketApp 的 return 中，
   // 两者不是同一作用域：引用会直接抛 ReferenceError，导入成功后崩溃。
-  const i = source.indexOf('onAdded: async (newSourceId, keepOpen)')
+  const i = source.indexOf('onAdded: async (newSourceId,')
   assert.ok(i > 0, '要能找到 onAdded')
-  const seg = source.slice(i, i + 1600)
-  const end = seg.indexOf('showToast,')
-  const body = end > 0 ? seg.slice(0, end) : seg
+  const body = source.slice(i, source.indexOf('showToast,', i))
   assert.doesNotMatch(body, /loadMarket/, 'onAdded 不能调用 BrowseView 内的 loadMarket')
 })
 
 test('onAdded 刷新 Skills 标签页走 /skills，不走 /market', () => {
   // 覆盖导入会把技能换到新路径，id 随之改变。若按市场去拉 /market，
   // 旧的 rows 会原地不动，之后每次切换都报「Skill 不存在」。
-  const i = source.indexOf('onAdded: async (newSourceId, keepOpen)')
-  const seg = source.slice(i, i + 1600)
-  const body = seg.slice(0, seg.indexOf('showToast,') || undefined)
+  const i = source.indexOf('onAdded: async (newSourceId,')
+  assert.ok(i > 0, '要能找到 onAdded')
+  const body = source.slice(i, source.indexOf('showToast,', i))
   assert.match(body, /newSourceId === "skills-local"/, '要单独识别 Skills 标签页')
   assert.match(body, /api\("\/skills"\)/, 'Skills 标签页要从 /skills 取列表')
   assert.match(body, /body\?\.skills/, '取 skills 字段，不是 plugins')

@@ -641,7 +641,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-pill-bg: rgba(255, 255, 255, 0.08);
 	--cpm-pill-border: rgba(255, 255, 255, 0.12);
 	--cpm-pill-text: #f4f4f5;
-	--cpm-icon-btn-bg: #373739;
+	--cpm-icon-btn-bg: #202023;
 	--cpm-icon-btn-border: rgba(255, 255, 255, 0.14);
 	--cpm-icon-btn-hover: rgba(255, 255, 255, 0.12);
 	--cpm-accent: #3b82f6;
@@ -653,10 +653,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	--cpm-toggle-knob-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.35);
 	--cpm-toggle-on: #2563eb;
 	--cpm-toggle-on-border: #2563eb;
-	--cpm-modal-bg: #373739;
+	--cpm-modal-bg: #202023;
 	--cpm-modal-border: rgba(255, 255, 255, 0.14);
 	--cpm-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
-	--cpm-toast-bg: #373739;
+	--cpm-toast-bg: #202023;
 	--cpm-toast-text: #f4f4f5;
 	--cpm-toast-border: rgba(255, 255, 255, 0.14);
 	--cpm-toast-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
@@ -1015,7 +1015,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	flex-direction: column;
 }
 .cpm-dark .cpm-preview-popover {
-	background: rgba(55, 55, 57, 0.75);
+	background: rgba(32, 32, 35, 0.75);
 	backdrop-filter: blur(22px) saturate(180%);
 	-webkit-backdrop-filter: blur(22px) saturate(180%);
 	border: 1px solid var(--cpm-modal-border);
@@ -1266,12 +1266,43 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+.cpm-root :is(.cpm-card-pill, .cpm-toggle) {
+	border-radius: 9999px;
+	corner-shape: initial;
+}
+@supports (border-shape: shape(from 0 0, line to 100% 100%, close)) {
+	/* Each end keeps its middle 120° of circular arc. The cubic shoulders
+	   match the tangent and curvature of the straight edge and the arc. */
+	.cpm-root :is(.cpm-card-pill, .cpm-toggle) {
+		--cap-start: calc(var(--cap-radius) * 1.1);
+		--cap-control-flat: calc(var(--cap-radius) * .947441);
+		--cap-control-arc: calc(var(--cap-radius) * .732051);
+		--cap-join-x: calc(var(--cap-radius) * .5);
+		--cap-join-y: calc(var(--cap-radius) * .133975);
+		border-shape: shape(
+			from var(--cap-start) 0,
+			line to calc(100% - var(--cap-start)) 0,
+			curve to calc(100% - var(--cap-join-x)) var(--cap-join-y)
+				with calc(100% - var(--cap-control-flat)) 0 / calc(100% - var(--cap-control-arc)) 0,
+			arc to calc(100% - var(--cap-join-x)) calc(100% - var(--cap-join-y)) of var(--cap-radius) cw,
+			curve to calc(100% - var(--cap-start)) 100%
+				with calc(100% - var(--cap-control-arc)) 100% / calc(100% - var(--cap-control-flat)) 100%,
+			line to var(--cap-start) 100%,
+			curve to var(--cap-join-x) calc(100% - var(--cap-join-y))
+				with var(--cap-control-flat) 100% / var(--cap-control-arc) 100%,
+			arc to var(--cap-join-x) var(--cap-join-y) of var(--cap-radius) cw,
+			curve to var(--cap-start) 0 with var(--cap-control-arc) 0 / var(--cap-control-flat) 0,
+			close
+		);
+	}
+}
 .cpm-card-pill {
+	/* Radius of the border's centerline: half the line-height, padding and one border edge. */
+	--cap-radius: calc(.7em + 3.5px);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	padding: 3px 12px;
-	border-radius: 9999px;
 	font-size: 12px;
 	font-weight: 500;
 	cursor: pointer;
@@ -1683,6 +1714,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	   look like a cut-down copy. */
 	--sw-w: 40px;
 	--sw-h: 22px;
+	--cap-radius: calc(var(--sw-h) / 2);
 	--sw-knob: calc(var(--sw-h) * 0.7);
 	--sw-inset: calc((var(--sw-h) - var(--sw-knob)) / 2);
 	position: relative;
@@ -1698,7 +1730,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	align-self: center;
 	padding: 0;
 	box-sizing: border-box;
-	border-radius: 9999px;
 	background: var(--cpm-toggle-off);
 	/* The hairline is an inset box-shadow, not a border and not an outline.
 	   A border pushes the box unless border-box survives a host reset; an
@@ -1720,16 +1751,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-toggle:focus-visible {
 	box-shadow: inset 0 0 0 1px var(--cpm-toggle-off-border), 0 0 0 2px var(--cpm-toggle-on);
 }
-/* The knob.
- *
- * Its silhouette comes from border-radius. In the host a radius declaration
- * was being clamped (a 27px knob painted with a ~3px radius), and clip-path
- * was the workaround — but clip-path clips the element's own box-shadow too,
- * which silently deleted the lift under the knob that makes the mockup read
- * as a physical control. The radius is kept here (Browsers honour it in every
- * panel surface now that the switch is out of the host's generic input rules)
- * so the drop shadow survives.
- */
+.cpm-root .cpm-toggle::after {
+	border-radius: 50%;
+	corner-shape: initial;
+}
 .cpm-toggle::after {
 	content: "";
 	position: absolute;
@@ -1740,7 +1765,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	left: var(--sw-inset);
 	width: var(--sw-knob);
 	height: var(--sw-knob);
-	border-radius: 50%;
 	background: var(--cpm-toggle-knob);
 	/* Two stops, the same construction as the mockup: a tight contact shadow
 	   under the knob plus a soft ambient one. This is the detail that reads
@@ -2983,10 +3007,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	outline: 2px solid var(--cpm-accent, #3b82f6);
 	outline-offset: 2px;
 }
+.cpm-radio-card > .cpm-custom-radio,
+.cpm-custom-radio > .cpm-custom-radio-inner {
+	border-radius: 50%;
+	corner-shape: initial;
+}
 .cpm-custom-radio {
 	width: 17px;
 	height: 17px;
-	border-radius: 50%;
 	border: 1.5px solid var(--cpm-border);
 	display: flex;
 	align-items: center;
@@ -3004,7 +3032,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-custom-radio-inner {
 	width: 5px;
 	height: 5px;
-	border-radius: 50%;
 	background: #ffffff;
 	transform: scale(0);
 	transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -4139,7 +4166,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	overscroll-behavior: contain;
 }
 .cpm-dark .cpm-mcp-tool-popover {
-	background: rgba(55, 55, 57, 0.75);
+	background: rgba(32, 32, 35, 0.75);
 	backdrop-filter: blur(22px) saturate(180%);
 	-webkit-backdrop-filter: blur(22px) saturate(180%);
 	border: 1px solid var(--cpm-modal-border);
@@ -4520,7 +4547,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	user-select: none;
 }
 .cpm-dark .cpm-toast {
-	background: rgba(55, 55, 57, 0.75);
+	background: rgba(32, 32, 35, 0.75);
 	color: #f4f4f5;
 	backdrop-filter: blur(22px) saturate(180%);
 	-webkit-backdrop-filter: blur(22px) saturate(180%);
@@ -5021,7 +5048,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			throw err;
 		}
 		if (typeof document !== "undefined" && body?.ok !== false && !body?.error && /^(POST|PUT|PATCH|DELETE)$/i.test(options?.method || "") &&
-			!/\/(verify|oauth-status|inspect|tools\/toggle)$/.test(path)) {
+			!/\/(verify|oauth-status|inspect|tools\/toggle)$/.test(path) && path !== "/sources/ensure") {
 			if (/^\/(plugins|mcps)(\/|$)/.test(path)) {
 				document.dispatchEvent(new Event("uph-mcp-branding-changed"));
 			} else if (/^\/(sources|marketplaces|market)(\/|$)/.test(path)) {
@@ -7075,21 +7102,24 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [refreshState]);
 
 		// Read cached catalogs immediately, then update Git sources in the background.
-		const sourceIdsKey = (state.sources || []).map((s) => s.id).sort().join(",");
+		const addedGitSourceIds = useRef(new Set());
+		// Markets added in this panel already returned their catalog. Keep them
+		// out of the startup refresh, which also pulls Git.
+		const sourcesToWarm = (state.sources || []).filter((source) => !source.virtual && !addedGitSourceIds.current.has(source.id));
+		const sourceIdsKey = sourcesToWarm.map((s) => s.id).sort().join(",");
 		useEffect(() => {
-			if (!state.sources || state.sources.length === 0) return;
+			if (sourcesToWarm.length === 0) return;
 			let isMounted = true;
 			(async () => {
-				await Promise.allSettled(state.sources.map(async (s) => {
-					if (s.virtual) return;
+				await Promise.allSettled(sourcesToWarm.map(async (s) => {
 					try {
 						const res = await api("/market?sourceId=" + encodeURIComponent(s.id));
 						if (isMounted && Array.isArray(res?.plugins)) setRows((prev) => ({ ...(prev || {}), [s.id]: res.plugins }));
 					} catch {}
 				}));
-				for (const s of state.sources) {
+				for (const s of sourcesToWarm) {
 					if (!isMounted) break;
-					if (s.id === "local" || s.virtual) continue;
+					if (s.id === "local") continue;
 					try {
 						const res = await api("/market/refresh", {
 							method: "POST",
@@ -7161,6 +7191,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				setActiveSourceId,
 				rows,
 				setRows,
+				addedGitSourceIds,
 				scrollTopRef,
 			}),
 			toast && h("div", {
@@ -7854,6 +7885,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		setActiveSourceId,
 		rows,
 		setRows,
+		addedGitSourceIds,
 		scrollTopRef,
 	}) {
 		const [showFilter, setShowFilter] = useState(false);
@@ -9841,8 +9873,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				initialPhase: addDialog.initialPhase,
 				onBusyChange: (v) => { addDialogBusyRef.current = !!v; },
 				onCancel: () => { if (!addDialogBusyRef.current) setAddDialog(false); },
-				onAdded: async (newSourceId, keepOpen) => {
+				onAdded: async (newSourceId, keepOpen, market) => {
 					if (!keepOpen) setAddDialog(false);
+					if (newSourceId && market?.source?.id === newSourceId && Array.isArray(market.plugins)) {
+						addedGitSourceIds.current.add(newSourceId);
+						(SESSION_STORE.checkedCatalogs ||= new Set()).add(newSourceId);
+						setRows((prev) => ({ ...prev, [newSourceId]: market.plugins }));
+						setState((prev) => prev.sources.some((source) => source.id === newSourceId)
+							? prev : { ...prev, sources: [...prev.sources, market.source] });
+						if (newSourceId !== activeSourceId) setActiveSourceId(newSourceId);
+						void refreshState({ quiet: true });
+						return;
+					}
 					await refreshState();
 					// The tab list and the rows both come from the server state.
 					if (newSourceId) {
@@ -9931,6 +9973,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								if (SESSION_STORE[mapKey]) delete SESSION_STORE[mapKey][toRemove.id];
 							}
 							if (SESSION_STORE.checkedCatalogs) SESSION_STORE.checkedCatalogs.delete(toRemove.id);
+							addedGitSourceIds.current.delete(toRemove.id);
 							savedTabScrolls.delete(toRemove.id);
 							if (tabRefs?.current) delete tabRefs.current[toRemove.id];
 							setRows((prev) => omitSourceKey(prev, toRemove.id));
@@ -10636,65 +10679,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return s.replace(/^https?:\/\//i, "").replace(/\.git$/i, "");
 		};
 
-		const computeSmartSuggestedName = (rawInput, serverSuggested) => {
-			const s = String(rawInput || "").trim().replace(/^['"]|['"]$/g, "");
-			let owner = "";
-			let repo = "";
-			const sshMatch = s.match(/^git@[^:]+:([^/]+)\/(.+?)(\.git)?$/);
-			if (sshMatch) {
-				owner = sshMatch[1];
-				repo = sshMatch[2];
-			} else {
-				const httpMatch = s.match(/^https?:\/\/[^/]+\/([^/]+)\/([^/]+?)(\.git)?$/i);
-				if (httpMatch) {
-					owner = httpMatch[1];
-					repo = httpMatch[2];
-				} else {
-					const shortMatch = s.match(/^([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+?)(\.git)?$/);
-					if (shortMatch) {
-						owner = shortMatch[1];
-						repo = shortMatch[2];
-					} else {
-						repo = s.replace(/^https?:\/\//i, "").replace(/\.git$/i, "").split("/").pop() || "";
-					}
-				}
-			}
-
-			const ownerLower = (owner || "").toLowerCase();
-			const repoLower = (repo || "").toLowerCase();
-
-			if (repoLower === "claude-plugins-official") return "Anthropic";
-			if (repoLower === "claude-plugins-community") return "Community";
-
-			const genericWords = new Set([
-				"skills", "skill", "plugins", "plugin", "agents", "agent", "tools", "tool",
-				"marketplace", "hub", "claude-skills", "claude-plugins", "claude-agents",
-				"dsh-plugins", "extensions", "packages", "repo", "repository", "custom"
-			]);
-
-			if (serverSuggested && !genericWords.has(serverSuggested.toLowerCase())) {
-				return serverSuggested;
-			}
-
-			if (genericWords.has(repoLower) && owner) {
-				return owner.charAt(0).toUpperCase() + owner.slice(1);
-			}
-
-			const simplified = repo
-				.replace(/^(claude|dsh|anthropic)[-_]?(plugins?)?[-_]?/i, "")
-				.replace(/[-_]?(plugins?|skills?|agents?|official|marketplace)$/i, "");
-
-			const clean = simplified || repo;
-			if (genericWords.has(clean.toLowerCase()) && owner) {
-				return owner.charAt(0).toUpperCase() + owner.slice(1);
-			}
-
-			if (clean) {
-				return clean.charAt(0).toUpperCase() + clean.slice(1);
-			}
-			return serverSuggested || "Custom";
-		};
-
 		const cleanError = (err) => {
 			if (!err) return "操作失败";
 			let msg = String(err.message || err).replace(/^Error:\s*/i, "").trim();
@@ -10718,9 +10702,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				const body = await api("/sources/ensure", { method: "POST", body: JSON.stringify({ url: raw }) });
 				if (unmountedRef.current) return;
 				const finalRepoLabel = body.repoLabel || extractRepoLabel(raw);
-				const finalSuggested = computeSmartSuggestedName(raw, body.suggestedName);
 				setRepoLabel(finalRepoLabel);
-				setSuggested(finalSuggested);
+				setSuggested(body.suggestedName || finalRepoLabel.split("/").pop() || "Custom");
 				setCustomName("");
 				setMode("suggest");
 				setNormalizedUrl(body.normalizedUrl || raw);
@@ -10750,7 +10733,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (unmountedRef.current) return;
 				const count = res.pluginCount !== undefined ? res.pluginCount : pluginCount;
 				showToast("插件源已添加", `分类「${name}」已创建，成功导入 ${count} 个插件`, { restart: false });
-				await onAdded(res.source?.id);
+				await onAdded(res.source?.id, false, res);
 			} catch (e) {
 				if (unmountedRef.current) return;
 				showToast("添加源失败", cleanError(e), { restart: false });
@@ -10759,6 +10742,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}
 		};
 
+		const urlBusyLabel = isLocalPath(url) ? "正在解析…" : "正在安装…";
 		const inlineBusyProgress = () => busy && h("div", { className: "cpm-upload-inline-progress", key: "imp-prog" },
 			h("progress", { className: "cpm-upload-progress", "aria-label": "正在导入插件" }),
 			h("div", { className: "cpm-upload-status", role: "status", "aria-live": "polite", style: { marginTop: 0 } }, "正在导入文件，请勿关闭弹窗…"),
@@ -10936,7 +10920,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", disabled: busy, onClick: onCancel }, "取消"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? "正在解析…" : "下一步"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || !url.trim(), onClick: ensure }, busy ? urlBusyLabel : "下一步"),
 					),
 				],
 				phase === "local-preview" && localPreview && localPreview.kind === "marketplace" && [
@@ -10977,7 +10961,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								value: "suggest",
 								selected: mode === "suggest",
 								onSelect: () => setMode("suggest"),
-								title: "使用系统建议简化名",
+								title: "使用推荐市场名",
 								desc: [
 									"分类标签名：",
 									// Only the market's own name: falling back to the local
@@ -11212,7 +11196,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								value: "suggest",
 								selected: mode === "suggest",
 								onSelect: () => setMode("suggest"),
-								title: "使用系统建议简化名",
+								title: "使用推荐市场名",
 								desc: ["分类标签名：", h("span", { className: "cpm-tag-preview", key: "tag" }, suggested)],
 							}),
 							renderChoiceCard({
@@ -11243,7 +11227,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					),
 					h("div", { className: "cpm-dialog-actions", key: "a" },
 						h("button", { className: "cpm-btn cpm-btn-secondary", type: "button", disabled: busy, onClick: () => setPhase("url") }, "上一步"),
-						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || (mode === "custom" && !customName.trim()), onClick: confirm }, busy ? "正在保存…" : "确认添加"),
+						h("button", { className: "cpm-btn cpm-btn-primary", disabled: busy || (mode === "custom" && !customName.trim()), onClick: confirm }, busy ? "正在安装…" : "确认添加"),
 					),
 				],
 			),
@@ -14172,7 +14156,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-chip {
 }
 body[data-ds-dark-theme] .cpm-at-plugin-popover,
 .cpm-at-plugin-popover.cpm-dark {
-	background: rgba(55, 55, 57, 0.75);
+	background: rgba(32, 32, 35, 0.75);
 	backdrop-filter: blur(22px) saturate(180%);
 	-webkit-backdrop-filter: blur(22px) saturate(180%);
 	border: 1px solid rgba(255, 255, 255, 0.14);
