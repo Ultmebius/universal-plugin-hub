@@ -2053,12 +2053,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 .cpm-dialog {
 	position: fixed;
 	inset: 0;
-	padding: 16px;
+	box-sizing: border-box;
+	padding-block: 16px;
+	padding-left: calc(var(--cpm-dialog-inset-left, 0px) + 16px);
+	padding-right: calc(var(--cpm-dialog-inset-right, 0px) + 16px);
 	background: rgba(15, 23, 42, 0.38);
 	z-index: 10000;
 	display: flex;
 	align-items: center;
+	align-items: safe center;
 	justify-content: center;
+	justify-content: safe center;
+	overflow-y: auto;
 	overscroll-behavior: contain;
 	backdrop-filter: blur(8px) saturate(140%);
 	-webkit-backdrop-filter: blur(8px) saturate(140%);
@@ -3145,14 +3151,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 /* ────────────────────────────── MCP Connector Modal Styles (Refined) ────────────────────────────── */
 .cpm-mcp-modal {
+	box-sizing: border-box;
 	width: 540px;
-	max-width: calc(100vw - 32px);
+	max-width: 100%;
 	border-radius: var(--dsw-radius-lg, 16px);
 	background: #ffffff;
 	border: 1px solid rgba(0, 0, 0, 0.08);
 	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.06);
 	padding: 0;
 	overflow: visible;
+	overscroll-behavior: contain;
+	transform-origin: center 45%;
+	animation: cpm-dialog-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 	color: #18181b;
 	display: flex;
 	flex-direction: column;
@@ -4789,7 +4799,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}
 	}
 	.cpm-dialog { animation-duration: 0.08s; }
-	.cpm-dialog-box { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
+	.cpm-dialog-box, .cpm-mcp-modal { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
 	.cpm-source-dialog-box { transition: border-color 100ms ease, box-shadow 100ms ease; }
 	.cpm-source-drag-overlay,
 	.cpm-source-drag-content {
@@ -4858,7 +4868,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		border-color: var(--cpm-accent);
 		box-shadow: none;
 	}
-	.cpm-dialog-box, .cpm-source-dialog-box { border-color: var(--cpm-text-sub); }
+	.cpm-dialog-box, .cpm-source-dialog-box, .cpm-mcp-modal { border-color: var(--cpm-text-sub); }
 	.cpm-upload-dialog .cpm-dropzone { border-color: var(--cpm-text-sub); }
 }
 @media (forced-colors: active) {
@@ -4870,7 +4880,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		border: 1px solid CanvasText;
 		box-shadow: none;
 	}
-	.cpm-dialog-box, .cpm-source-dialog-box {
+	.cpm-dialog-box, .cpm-source-dialog-box, .cpm-mcp-modal {
 		border: 1px solid CanvasText;
 		box-shadow: none;
 	}
@@ -6575,6 +6585,114 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return {};
 	}
 
+	function normalizePanelInset(value) {
+		if (!Number.isFinite(value) || value < 0.01) return 0;
+		return Math.round(value * 100) / 100;
+	}
+
+	function computePanelHorizontalInsets(rootEl, doc = rootEl?.ownerDocument || globalThis.document) {
+		if (!rootEl || typeof rootEl.getBoundingClientRect !== "function") {
+			return { left: 0, right: 0 };
+		}
+		const rect = rootEl.getBoundingClientRect();
+		const win = doc?.defaultView;
+		const docWidth = doc?.documentElement?.clientWidth;
+		const viewportWidth = Number.isFinite(docWidth) && docWidth > 0
+			? docWidth
+			: (Number.isFinite(win?.innerWidth) && win.innerWidth > 0 ? win.innerWidth : 0);
+		if (!rect || !(rect.width > 0) || !(viewportWidth > 0)) {
+			return { left: 0, right: 0 };
+		}
+		const left = normalizePanelInset(rect.left);
+		const right = normalizePanelInset(Number.isFinite(rect.right) ? viewportWidth - rect.right : 0);
+		// Guard degenerate narrow/transient rects so dialog padding never collapses usable width below 32px
+		if (left + right >= viewportWidth - 32) {
+			return { left: 0, right: 0 };
+		}
+		return { left, right };
+	}
+
+	function usePanelHorizontalInsets(rootRef) {
+		useSafeLayoutEffect(() => {
+			const rootEl = rootRef?.current;
+			if (!rootEl || typeof rootEl.style?.setProperty !== "function") return undefined;
+			const doc = rootEl.ownerDocument || (typeof document !== "undefined" ? document : null);
+			const win = doc?.defaultView || (typeof window !== "undefined" ? window : null);
+			let lastLeft = "";
+			let lastRight = "";
+			let rafId = 0;
+
+			const sync = () => {
+				const { left, right } = computePanelHorizontalInsets(rootEl, doc);
+				const nextLeft = `${left}px`;
+				const nextRight = `${right}px`;
+				if (nextLeft !== lastLeft) {
+					rootEl.style.setProperty("--cpm-dialog-inset-left", nextLeft);
+					lastLeft = nextLeft;
+				}
+				if (nextRight !== lastRight) {
+					rootEl.style.setProperty("--cpm-dialog-inset-right", nextRight);
+					lastRight = nextRight;
+				}
+			};
+
+			const scheduleSync = () => {
+				if (rafId || typeof win?.requestAnimationFrame !== "function") {
+					if (!rafId) sync();
+					return;
+				}
+				rafId = win.requestAnimationFrame(() => {
+					rafId = 0;
+					sync();
+				});
+			};
+
+			sync();
+
+			const ResizeObserverCtor = win?.ResizeObserver || globalThis.ResizeObserver;
+			let observer = null;
+			const p1 = rootEl.parentElement;
+			const p2 = p1?.parentElement;
+			const p3 = p2?.parentElement;
+			const frameRoot = p3 || p2 || p1 || rootEl;
+
+			if (typeof ResizeObserverCtor === "function") {
+				observer = new ResizeObserverCtor(() => { sync(); });
+				const targets = new Set([
+					rootEl,
+					p1,
+					p1?.previousElementSibling,
+					p1?.nextElementSibling,
+					p2,
+					p2?.previousElementSibling,
+					p2?.nextElementSibling,
+					p3,
+					doc?.documentElement,
+				]);
+				for (const target of targets) {
+					if (target) observer.observe(target);
+				}
+			}
+
+			if (typeof win?.addEventListener === "function") win.addEventListener("resize", sync);
+			if (typeof frameRoot?.addEventListener === "function") frameRoot.addEventListener("transitionend", scheduleSync);
+
+			return () => {
+				if (rafId && typeof win?.cancelAnimationFrame === "function") {
+					win.cancelAnimationFrame(rafId);
+					rafId = 0;
+				}
+				if (observer) observer.disconnect();
+				if (typeof win?.removeEventListener === "function") win.removeEventListener("resize", sync);
+				if (typeof frameRoot?.removeEventListener === "function") frameRoot.removeEventListener("transitionend", scheduleSync);
+				if (typeof rootEl.style?.removeProperty === "function") {
+					rootEl.style.removeProperty("--cpm-dialog-inset-left");
+					rootEl.style.removeProperty("--cpm-dialog-inset-right");
+				}
+			};
+		}, [rootRef]);
+	}
+
 	const SESSION_STORE = {
 		view: { type: "browse" },
 		sourceViews: {},
@@ -6599,6 +6717,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	// ────────────────────────────── Root App ──────────────────────────────
 	function MarketApp({ ctx }) {
 		const rootRef = useRef(null);
+		usePanelHorizontalInsets(rootRef);
 		const getEffectiveTheme = useCallback(() => {
 			return isDarkMode(ctx, rootRef.current);
 		}, [ctx]);
@@ -9152,19 +9271,16 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			return () => { alive = false; };
 		}, [view]);
 
-		useEffect(() => {
-			if (!installFor && !addDialog && !confirmRemoveSource && !mcpDialog) return;
-			const onKey = (e) => {
-				if (e.key === "Escape") {
-					if (installFor) setInstallFor(null);
-					if (addDialog && !addDialogBusyRef.current) setAddDialog(false);
-					if (confirmRemoveSource) setConfirmRemoveSource(null);
-					if (mcpDialog) setMcpDialog(false);
-				}
-			};
-			window.addEventListener("keydown", onKey);
-			return () => window.removeEventListener("keydown", onKey);
-		}, [installFor, addDialog, confirmRemoveSource, mcpDialog]);
+		useDialogEscape(!!(installFor || addDialog || confirmRemoveSource || mcpDialog), () => {
+			if (installFor) setInstallFor(null);
+			if (addDialog && !addDialogBusyRef.current) setAddDialog(false);
+			if (confirmRemoveSource) setConfirmRemoveSource(null);
+			if (mcpDialog) {
+				setMcpDialog(false);
+				setEditMcp(null);
+				setEditMcpOwner(null);
+			}
+		});
 
 		const removePlugin = async (pluginName) => {
 			try {
@@ -9774,68 +9890,61 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}),
 
 			confirmRemoveSource && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemoveSource(null)) },
-				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
-					h("div", { className: "cpm-dialog-title" }, `删除插件源「${confirmRemoveSource.name}」`),
-					h("div", { className: "cpm-field", style: { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" } },
-						"将从插件市场中移除该源及其分类标签。如需再次使用，可随时通过右上角「+」重新添加。",
-					),
-					h("div", { className: "cpm-dialog-actions" },
-						h("button", {
-							className: "cpm-btn cpm-btn-secondary",
-							onClick: () => setConfirmRemoveSource(null),
-						}, "取消"),
-						h("button", {
-							className: "cpm-btn cpm-btn-primary",
-							style: { background: "#dc2626", borderColor: "#dc2626", color: "#fff" },
-							disabled: !!busy,
-							onClick: async () => {
-								const toRemove = confirmRemoveSource;
-								setConfirmRemoveSource(null);
-								setBusy("正在删除插件源…");
-								try {
-									await api("/sources/" + encodeURIComponent(toRemove.id), { method: "DELETE" });
-									showToast("插件源已删除", `已移除分类「${toRemove.name}」`, { restart: false });
-									invalidateSourceDetailCache(toRemove.id);
-									const currentSources = Array.isArray(SESSION_STORE.state?.sources)
-										? SESSION_STORE.state.sources
-										: (Array.isArray(state?.sources) ? state.sources : []);
-									const remainingSources = currentSources.filter((s) => s && s.id !== toRemove.id);
-									const fallbackSourceId = remainingSources.some((s) => s.id === "anthropic")
-										? "anthropic"
-										: (remainingSources.find((s) => s.id !== "local" || hasLocalPlugins) || remainingSources[0])?.id;
-									if (SESSION_STORE.activeSourceId === toRemove.id || activeSourceId === toRemove.id) {
-										if (fallbackSourceId) {
-											setActiveSourceId(fallbackSourceId, SESSION_STORE.sourceFilters?.[fallbackSourceId] || "all");
-										} else {
-											SESSION_STORE.activeSourceId = "";
-											setActiveSourceIdRaw("");
-											SESSION_STORE.filter = "all";
-											setFilterRaw("all");
-											const emptyView = { type: "browse" };
-											SESSION_STORE.view = emptyView;
-											setViewRaw(emptyView);
-										}
-									}
-									for (const mapKey of ["sourceViews", "scrollTops", "sourceFilters", "browseSortSnapshots"]) {
-										if (SESSION_STORE[mapKey]) delete SESSION_STORE[mapKey][toRemove.id];
-									}
-									if (SESSION_STORE.checkedCatalogs) SESSION_STORE.checkedCatalogs.delete(toRemove.id);
-									savedTabScrolls.delete(toRemove.id);
-									if (tabRefs?.current) delete tabRefs.current[toRemove.id];
-									setRows((prev) => omitSourceKey(prev, toRemove.id));
-									syncCachedStore("rows", STORAGE_KEY_ROWS, rows, (prev) => omitSourceKey(prev, toRemove.id));
-									setState((prev) => stripDeletedSource(prev, toRemove.id));
-									syncCachedStore("state", STORAGE_KEY_STATE, state, (prev) => stripDeletedSource(prev, toRemove.id));
-									try { await refreshState(); } catch {}
-								} catch (e) {
-									showToast("删除失败", cleanError(e), { restart: false });
-								} finally {
-									setBusy(null);
+				h(ConfirmDialogBox, {
+					titleId: "cpm-confirm-remove-source-title",
+					title: `删除插件源「${confirmRemoveSource.name}」`,
+					description: "将从插件市场中移除该源及其分类标签。如需再次使用，可随时通过右上角「+」重新添加。",
+					confirmLabel: "确认删除",
+					confirmBusyLabel: "删除中…",
+					confirmStyle: { background: "#dc2626", borderColor: "#dc2626", color: "#fff" },
+					busy: !!busy,
+					onCancel: () => setConfirmRemoveSource(null),
+					onConfirm: async () => {
+						const toRemove = confirmRemoveSource;
+						setConfirmRemoveSource(null);
+						setBusy("正在删除插件源…");
+						try {
+							await api("/sources/" + encodeURIComponent(toRemove.id), { method: "DELETE" });
+							showToast("插件源已删除", `已移除分类「${toRemove.name}」`, { restart: false });
+							invalidateSourceDetailCache(toRemove.id);
+							const currentSources = Array.isArray(SESSION_STORE.state?.sources)
+								? SESSION_STORE.state.sources
+								: (Array.isArray(state?.sources) ? state.sources : []);
+							const remainingSources = currentSources.filter((s) => s && s.id !== toRemove.id);
+							const fallbackSourceId = remainingSources.some((s) => s.id === "anthropic")
+								? "anthropic"
+								: (remainingSources.find((s) => s.id !== "local" || hasLocalPlugins) || remainingSources[0])?.id;
+							if (SESSION_STORE.activeSourceId === toRemove.id || activeSourceId === toRemove.id) {
+								if (fallbackSourceId) {
+									setActiveSourceId(fallbackSourceId, SESSION_STORE.sourceFilters?.[fallbackSourceId] || "all");
+								} else {
+									SESSION_STORE.activeSourceId = "";
+									setActiveSourceIdRaw("");
+									SESSION_STORE.filter = "all";
+									setFilterRaw("all");
+									const emptyView = { type: "browse" };
+									SESSION_STORE.view = emptyView;
+									setViewRaw(emptyView);
 								}
-							},
-						}, busy ? "删除中…" : "确认删除"),
-					),
-				),
+							}
+							for (const mapKey of ["sourceViews", "scrollTops", "sourceFilters", "browseSortSnapshots"]) {
+								if (SESSION_STORE[mapKey]) delete SESSION_STORE[mapKey][toRemove.id];
+							}
+							if (SESSION_STORE.checkedCatalogs) SESSION_STORE.checkedCatalogs.delete(toRemove.id);
+							savedTabScrolls.delete(toRemove.id);
+							if (tabRefs?.current) delete tabRefs.current[toRemove.id];
+							setRows((prev) => omitSourceKey(prev, toRemove.id));
+							syncCachedStore("rows", STORAGE_KEY_ROWS, rows, (prev) => omitSourceKey(prev, toRemove.id));
+							setState((prev) => stripDeletedSource(prev, toRemove.id));
+							syncCachedStore("state", STORAGE_KEY_STATE, state, (prev) => stripDeletedSource(prev, toRemove.id));
+							try { await refreshState(); } catch {}
+						} catch (e) {
+							showToast("删除失败", cleanError(e), { restart: false });
+						} finally {
+							setBusy(null);
+						}
+					},
+				}),
 			),
 
 			// ────────────────────────────── Modern Floating Drag Overlay (Zero Container Clipping) ──────────────────────────────
@@ -9872,15 +9981,82 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 	}
 
+	function useDialogEscape(open, onDismiss, capture = false) {
+		const onDismissRef = useRef(onDismiss);
+		onDismissRef.current = onDismiss;
+		useEffect(() => {
+			if (!open) return undefined;
+			const onKey = (e) => {
+				if (e.key !== "Escape") return;
+				if (capture) {
+					e.stopPropagation();
+					e.preventDefault();
+				}
+				onDismissRef.current?.(e);
+			};
+			window.addEventListener("keydown", onKey, capture);
+			return () => window.removeEventListener("keydown", onKey, capture);
+		}, [open, capture]);
+	}
+
+	function ConfirmDialogBox({
+		titleId,
+		title,
+		description,
+		descriptionStyle,
+		cancelLabel = "取消",
+		confirmLabel,
+		confirmBusyLabel,
+		confirmStyle,
+		busy = false,
+		cancelDisabled = false,
+		onCancel,
+		onConfirm,
+	}) {
+		return h("div", {
+			className: "cpm-dialog-box",
+			role: "dialog",
+			"aria-modal": "true",
+			"aria-labelledby": titleId,
+			onClick: (e) => e.stopPropagation(),
+		},
+			h("div", { id: titleId, className: "cpm-dialog-title" }, title),
+			description && h("div", {
+				className: "cpm-field",
+				style: descriptionStyle || { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" },
+			}, description),
+			h("div", { className: "cpm-dialog-actions" },
+				h("button", {
+					className: "cpm-btn cpm-btn-secondary",
+					disabled: !!cancelDisabled,
+					onClick: onCancel,
+				}, cancelLabel),
+				h("button", {
+					className: "cpm-btn cpm-btn-primary",
+					style: confirmStyle,
+					disabled: !!busy,
+					onClick: onConfirm,
+				}, busy && confirmBusyLabel ? confirmBusyLabel : confirmLabel),
+			),
+		);
+	}
+
 	// ────────────────────────────── Modern Install Dialog ──────────────────────────────
 	function InstallDialog({ plugin, isDark, onCancel, onConfirm }) {
 		const [busy, setBusy] = useState(false);
+		const titleId = "cpm-install-dialog-title";
 		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
-			h("div", { className: "cpm-dialog-box cpm-install-dialog", onClick: (e) => e.stopPropagation() },
+			h("div", {
+				className: "cpm-dialog-box cpm-install-dialog",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-labelledby": titleId,
+				onClick: (e) => e.stopPropagation(),
+			},
 				h("div", { className: "cpm-install-dialog-header" },
 					h(PluginIcon, { plugin, isDark }),
 					h("div", { className: "cpm-install-dialog-header-info" },
-						h("div", { className: "cpm-install-dialog-title" }, `安装 ${plugin.displayName || plugin.name}`),
+						h("div", { id: titleId, className: "cpm-install-dialog-title" }, `安装 ${plugin.displayName || plugin.name}`),
 						plugin.author && h("div", { className: "cpm-install-dialog-sub" }, `by ${plugin.author}`),
 					),
 				),
@@ -11112,17 +11288,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		// The confirmation renders inside this dialog, so it must handle Escape
 		// first: the outer handler would otherwise close the whole editor and
 		// discard the form behind it.
-		useEffect(() => {
-			if (!confirmDelete) return;
-			const onKey = (e) => {
-				if (e.key !== "Escape") return;
-				e.stopPropagation();
-				e.preventDefault();
-				setConfirmDelete(false);
-			};
-			window.addEventListener("keydown", onKey, true);
-			return () => window.removeEventListener("keydown", onKey, true);
-		}, [confirmDelete]);
+		useDialogEscape(confirmDelete, () => setConfirmDelete(false), true);
 		const upd = (patch) => {
 			setForm((prev) => ({ ...prev, ...patch }));
 			setConnState((prev) => prev.status === "untested" ? prev : { status: "untested", statusMessage: "", lastResult: null });
@@ -11343,7 +11509,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		return h("div", { className: "cpm-dialog" },
-			h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
+			h("div", {
+				className: "cpm-mcp-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": initial?.name ? `编辑 MCP「${initial.name}」` : "添加 MCP",
+				onClick: (e) => e.stopPropagation(),
+			},
 				h("button", { type: "button", className: "cpm-mcp-close-top", "aria-label": "关闭", onClick: onCancel }, h(IconClose, { size: 14 })),
 				h("div", { className: "cpm-mcp-body" },
 					h("div", { className: "cpm-mcp-row" },
@@ -11504,24 +11676,17 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 			),
 			confirmDelete && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmDelete(false)) },
-				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
-					h("div", { className: "cpm-dialog-title" }, `删除 MCP「${initial.name}」`),
-					h("div", { className: "cpm-field", style: { fontSize: 13, lineHeight: 1.6, color: "var(--cpm-muted)" } },
-						"将移除它的连接配置、已保存的授权和工具开关记录。如需再次使用，可在「添加」里重新配置。",
-					),
-					h("div", { className: "cpm-dialog-actions" },
-						h("button", {
-							className: "cpm-btn cpm-btn-secondary",
-							onClick: () => setConfirmDelete(false),
-						}, "取消"),
-						h("button", {
-							className: "cpm-btn cpm-btn-primary",
-							style: { background: "#dc2626", borderColor: "#dc2626", color: "#fff" },
-							disabled: deleting,
-							onClick: removeMcp,
-						}, deleting ? "删除中…" : "确认删除"),
-					),
-				),
+				h(ConfirmDialogBox, {
+					titleId: "cpm-confirm-delete-mcp-title",
+					title: `删除 MCP「${initial.name}」`,
+					description: "将移除它的连接配置、已保存的授权和工具开关记录。如需再次使用，可在「添加」里重新配置。",
+					confirmLabel: "确认删除",
+					confirmBusyLabel: "删除中…",
+					confirmStyle: { background: "#dc2626", borderColor: "#dc2626", color: "#fff" },
+					busy: deleting,
+					onCancel: () => setConfirmDelete(false),
+					onConfirm: removeMcp,
+				}),
 			),
 		);
 	}
@@ -11651,6 +11816,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		const [optimisticEnabled, setOptimisticEnabled] = useState(null);
 			const { detailRef, maskClass: detailMaskClass, updateMask: updateDetailMask } = useDetailScrollMask(plugin?.name, containerRef, plugin, scrollState);
 		useEffect(() => { setOptimisticEnabled(null); }, [plugin?.name]);
+		useDialogEscape(confirmRemove, () => { if (!busy) setConfirmRemove(false); });
 
 		if (!plugin) return null;
 		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
@@ -11873,28 +12039,28 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => { if (!busy) setConfirmRemove(false); }) },
-				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
-					h("div", { className: "cpm-dialog-title" }, `卸载 ${plugin.displayName || plugin.name}？`),
-					h("div", { className: "cpm-field", style: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" } }, "将删除插件副本、技能与子代理注册及 MCP 配置。"),
-					h("div", { className: "cpm-dialog-actions" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", disabled: busy, onClick: () => { if (!busy) setConfirmRemove(false); } }, "取消"),
-						h("button", {
-							className: "cpm-btn cpm-btn-primary",
-							style: { background: "#ef4444", borderColor: "#ef4444", color: "#ffffff" },
-							disabled: busy,
-							onClick: async () => {
-								if (busy) return;
-								setBusy(true);
-								try {
-									await onRemove();
-								} finally {
-									setBusy(false);
-									setConfirmRemove(false);
-								}
-							},
-						}, busy ? "卸载中…" : "卸载"),
-					),
-				),
+				h(ConfirmDialogBox, {
+					titleId: "cpm-confirm-remove-detail-title",
+					title: `卸载 ${plugin.displayName || plugin.name}？`,
+					description: "将删除插件副本、技能与子代理注册及 MCP 配置。",
+					descriptionStyle: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" },
+					confirmLabel: "卸载",
+					confirmBusyLabel: "卸载中…",
+					confirmStyle: { background: "#ef4444", borderColor: "#ef4444", color: "#ffffff" },
+					busy,
+					cancelDisabled: busy,
+					onCancel: () => { if (!busy) setConfirmRemove(false); },
+					onConfirm: async () => {
+						if (busy) return;
+						setBusy(true);
+						try {
+							await onRemove();
+						} finally {
+							setBusy(false);
+							setConfirmRemove(false);
+						}
+					},
+				}),
 			)
 		);
 	}
@@ -12794,17 +12960,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			openAuthDialog(initialConnector, found);
 		}, [record, connectors, initialConnector]);
 
-		useEffect(() => {
-			if (!authDialog && !confirmRemove) return;
-			const onKey = (e) => {
-				if (e.key === "Escape") {
-					if (authDialog) closeAuthDialog();
-					if (confirmRemove && !busy) setConfirmRemove(false);
-				}
-			};
-			window.addEventListener("keydown", onKey);
-			return () => window.removeEventListener("keydown", onKey);
-		}, [authDialog, confirmRemove, busy]);
+		useDialogEscape(!!(authDialog || confirmRemove), () => {
+			if (authDialog) closeAuthDialog();
+			if (confirmRemove && !busy) setConfirmRemove(false);
+		});
 
 		return h(React.Fragment, null,
 			h("div", {
@@ -13176,7 +13335,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			authDialog && h("div", { className: "cpm-dialog" },
-				h("div", { className: "cpm-mcp-modal", onClick: (e) => e.stopPropagation() },
+				h("div", {
+					className: "cpm-mcp-modal",
+					role: "dialog",
+					"aria-modal": "true",
+					"aria-label": authDialog.connectorName ? `配置 MCP「${authDialog.connectorName}」` : "配置 MCP",
+					onClick: (e) => e.stopPropagation(),
+				},
 					h("button", {
 						type: "button",
 						className: "cpm-mcp-close-top",
@@ -13374,14 +13539,19 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			),
 
 			confirmRemove && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => { if (!busy) setConfirmRemove(false); }) },
-				h("div", { className: "cpm-dialog-box", onClick: (e) => e.stopPropagation() },
-					h("div", { className: "cpm-dialog-title" }, `卸载 ${record.displayName || record.name}？`),
-					h("div", { className: "cpm-field", style: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" } }, "将删除插件副本、技能与子代理注册及 MCP 配置。"),
-					h("div", { className: "cpm-dialog-actions" },
-						h("button", { className: "cpm-btn cpm-btn-secondary", disabled: busy, onClick: () => { if (!busy) setConfirmRemove(false); } }, "取消"),
-						h("button", { className: "cpm-btn cpm-btn-primary", style: { background: "#ef4444", borderColor: "#ef4444", color: "#ffffff" }, disabled: busy, onClick: remove }, busy ? "卸载中…" : "卸载"),
-					),
-				),
+				h(ConfirmDialogBox, {
+					titleId: "cpm-confirm-remove-manage-title",
+					title: `卸载 ${record.displayName || record.name}？`,
+					description: "将删除插件副本、技能与子代理注册及 MCP 配置。",
+					descriptionStyle: { color: "var(--cpm-muted)", fontSize: "13px", lineHeight: 1.5, marginBottom: "20px" },
+					confirmLabel: "卸载",
+					confirmBusyLabel: "卸载中…",
+					confirmStyle: { background: "#ef4444", borderColor: "#ef4444", color: "#ffffff" },
+					busy,
+					cancelDisabled: busy,
+					onCancel: () => { if (!busy) setConfirmRemove(false); },
+					onConfirm: remove,
+				}),
 			),
 
 			hoveredTool && (() => {

@@ -24,7 +24,7 @@ test('opening management keeps the shared browser shell and stores it as the sou
   const slots = []
   let cursor = 0
   const context = {
-    SESSION_STORE: store, isDarkMode: () => false, h, BrowseView: 'browse',
+    SESSION_STORE: store, isDarkMode: () => false, usePanelHorizontalInsets() {}, h, BrowseView: 'browse',
     useState(initial) {
       const i = cursor++
       if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial

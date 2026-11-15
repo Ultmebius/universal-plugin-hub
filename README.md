@@ -20,6 +20,7 @@ After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP,
 | **MCP** | Connect plugin-declared MCP servers, configure service addresses, authentication, headers, and environment variables, then inspect tools and control which ones are enabled. |
 | **Hooks** | Plugin hook configuration files are registered with DSH's hooks bridge and follow the plugin's enabled state. |
 | **LSP** | Plugin-declared language servers are registered with DSH when their executables are available; missing executables are reported. |
+| **`@` Plugin mentions** | Type `@` in the DSH composer to pick enabled plugins. The turn prioritizes those plugins and selects only the skills, commands, subagents, and enabled MCP tools your task needs instead of loading every capability at once. |
 
 ### Discover, install, and manage plugins
 
@@ -29,6 +30,7 @@ After installation, the Hub recognizes a plugin's Skills, Commands, Agents, MCP,
 - **Toggle individual local skills**: Enable or disable skills from the list or detail page. Disabling a skill removes it from the DSH composer's `/` menu and prevents model invocation. Enabling it again restores its original invocation settings, with its files kept in place.
 - **Manage installed plugins**: Install, update, enable, disable, or uninstall plugins, along with their associated skills, MCP connectors, Hooks, and LSP registrations.
 - **Manage MCP servers together**: Add your own MCP servers and view them alongside plugin connectors. Configure addresses, authentication, and environment variables, inspect tool lists, and control servers and individual tools.
+- **Call plugins with `@` in chat**: Type `@` in the DSH composer to search and insert one or more enabled plugins. DSH routes the turn to those plugins on demand, so you do not have to remember individual command names.
 
 ## Interface preview
 
@@ -37,6 +39,10 @@ Plugin cards show descriptions and installation states, with source tabs, search
 **Official plugin catalog**: Browse official Claude plugins, search and preview descriptions, and install with one click.
 
 ![Official plugin catalog and description preview](assets/Plugins-official.png)
+
+**Scroll back to top**: After scrolling down a plugin list, click the active source tab again to return to the top.
+
+![Click the active source tab to scroll back to the top](assets/Tab-scroll-to-top.gif)
 
 **Plugin details**: Review a plugin's source, version, and capabilities, and manage the plugin and its MCP connectors.
 
@@ -53,6 +59,10 @@ Plugin cards show descriptions and installation states, with source tabs, search
 **Add plugin sources**: Add your own Git repositories to import Claude or Codex marketplaces and plugins.
 
 ![Add a plugin source from a Git repository](assets/Add-plugin-source.png)
+
+**`@` plugin selector**: Type `@` in the DSH composer to select enabled plugins and route to their capabilities.
+
+![Select enabled plugins with @ in the DSH composer](assets/At-plugins.png)
 
 ## Installation
 
@@ -92,9 +102,11 @@ dsh plugin add universal-plugin-hub
 4. **Manage installed plugins**: Click **Manage** on an installed plugin to configure connectors, manage capabilities, update, or uninstall it.
 5. **Use MCP tools**: Open the **MCP** tab to view servers and plugin connectors. Expand a server's tools to view their descriptions and control which tools are enabled.
 6. **Manage local skills**: Once local skills are detected, open the **Skills** tab, click a skill to read its instructions, and use the switch in the list or detail page to enable or disable it. Refresh the list after adding, editing, or deleting skill files.
-7. **Reorder tabs**: Long-press a source tab and drag it to change the tab order.
+7. **Scroll back to the top**: After scrolling down a plugin list, click the current source tab again to return to the top.
+8. **Reorder tabs**: Long-press a source tab and drag it to change the tab order.
+9. **Mention plugins with `@`**: Type `@` in the DSH composer and choose an enabled plugin to route requests automatically.
 
-After installing a plugin with Skills or Commands, find its skills in the DSH composer's `/` menu. For a plugin with MCP connectors, open the **From plugins** group in the MCP tab to configure connections and inspect tools.
+After installing a plugin with Skills or Commands, find its skills in the DSH composer's `/` menu, or mention enabled plugins with `@` in chat. For a plugin with MCP connectors, open the **From plugins** group in the MCP tab to configure connections and inspect tools.
 
 Local skill discovery follows DSH's native scope: it recognizes `~/.agents/skills/<name>/SKILL.md` and `~/.agents/skills/<name>.md`, without recursively scanning deeper directories. When `DSH_AGENTS_HOME` is set, it scans the `skills` directory under that location instead.
 
