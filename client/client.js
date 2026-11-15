@@ -4108,9 +4108,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	font-family: inherit;
 	box-sizing: border-box;
 }
+.cpm-tooltip-surface,
 .cpm-smart-hover {
 	border-radius: var(--dsw-radius-lg, 16px);
 	corner-shape: squircle;
+}
+.cpm-smart-hover {
 	user-select: text;
 }
 .cpm-root:has(.cpm-smart-hover[data-pointer-inside="true"]) :is(.cpm-card, .cpm-mcp-tool-dot) {
@@ -4657,35 +4660,134 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	animation: cpm-rot 0.75s linear infinite;
 }
 .cpm-tooltip {
-	padding: 5px 10px;
-	border-radius: 8px;
-	font-size: 11.5px;
+	position: fixed;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	overflow: visible;
+	pointer-events: none;
+	z-index: 999999;
+	width: fit-content;
+	max-width: calc(100vw - 24px);
+	transition:
+		display 0.09s,
+		overlay 0.09s;
+	transition-behavior: allow-discrete;
+}
+.cpm-tooltip:not(:is(:popover-open, .\\:popover-open, [data-open="true"])) {
+	display: none;
+}
+.cpm-tooltip-surface {
+	--cpm-tip-y: 4px;
+	--cpm-tip-origin-x: 50%;
+	max-width: min(280px, calc(100vw - 24px));
+	padding: 6px 12px;
+	font-size: 12px;
 	font-weight: 500;
 	line-height: 1.35;
+	letter-spacing: 0.005em;
 	white-space: nowrap;
-	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
-	background: #ffffff;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	color: #18181b;
-	border: 1px solid rgba(0, 0, 0, 0.12);
-	animation: cpmTipIn 0.12s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+	background: rgba(255, 255, 255, 0.88);
+	background-clip: padding-box;
+	border: 1px solid rgba(0, 0, 0, 0.08);
+	box-shadow:
+		0 6px 20px rgba(0, 0, 0, 0.1),
+		0 2px 6px rgba(0, 0, 0, 0.05);
+	backdrop-filter: blur(20px) saturate(180%);
+	-webkit-backdrop-filter: blur(20px) saturate(180%);
+	transform-origin: var(--cpm-tip-origin-x) bottom;
+	opacity: 0;
+	transform: translateY(var(--cpm-tip-y)) scale(0.94);
+	will-change: opacity, transform;
+	transition:
+		opacity 0.09s cubic-bezier(0.22, 1, 0.36, 1),
+		transform 0.09s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.cpm-root.cpm-dark .cpm-tooltip, .cpm-tooltip.cpm-dark {
-	background: #27272a;
+.cpm-root.cpm-dark .cpm-tooltip-surface,
+.cpm-tooltip.cpm-dark .cpm-tooltip-surface {
 	color: #f4f4f5;
-	border: 1px solid rgba(255, 255, 255, 0.14);
-	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+	background: rgba(34, 34, 38, 0.88);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	box-shadow:
+		0 8px 24px rgba(0, 0, 0, 0.5),
+		0 2px 6px rgba(0, 0, 0, 0.32);
 }
-@keyframes cpmTipIn {
-	from {
+.cpm-tooltip:is(:popover-open, .\\:popover-open, [data-open="true"]) .cpm-tooltip-surface {
+	opacity: 1;
+	transform: translateY(0) scale(1);
+	transition:
+		opacity 0.09s cubic-bezier(0.22, 1, 0.36, 1),
+		transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+	transition:
+		opacity 0.09s cubic-bezier(0.22, 1, 0.36, 1),
+		transform 0.14s linear(0, 0.1293 3.6%, 0.2747 7.1%, 0.4206 10.7%, 0.5566 14.3%, 0.6768 17.9%, 0.7782 21.4%, 0.8602 25%, 0.9238 28.6%, 0.9709 32.1%, 1.004 35.7%, 1.0255 39.3%, 1.0379 42.9%, 1.0435 46.4%, 1.0443 50%, 1.0419 53.6%, 1.0374 57.1%, 1.0321 60.7%, 1.0264 64.3%, 1.021 67.9%, 1.016 71.4%, 1.0118 75%, 1.0083 78.6%, 1.0056 82.1%, 1.0035 85.7%, 1.002 89.3%, 1.001 92.9%, 1.0003 96.4%, 1);
+}
+@starting-style {
+	.cpm-tooltip:is(:popover-open, .\\:popover-open, [data-open="true"]) .cpm-tooltip-surface {
 		opacity: 0;
-		transform: translateY(3px) scale(0.96);
+		transform: translateY(var(--cpm-tip-y)) scale(0.94);
 	}
-	to {
-		opacity: 1;
-		transform: translateY(0) scale(1);
+}
+.cpm-tooltip[data-placement="bottom"] .cpm-tooltip-surface {
+	--cpm-tip-y: -4px;
+	transform-origin: var(--cpm-tip-origin-x) top;
+}
+.cpm-tooltip[data-anchored="false"] {
+	position-area: none;
+	position-anchor: auto;
+	inset: auto;
+	right: auto;
+	bottom: auto;
+	margin: 0;
+}
+@supports (position-area: block-start) and (anchor-name: --cpm-tip-anchor) {
+	.cpm-tooltip:not([data-anchored="false"]) {
+		position-anchor: --cpm-tip-anchor;
+		position-area: block-start;
+		position-try-fallbacks: flip-block;
+		justify-self: anchor-center;
+		margin-inline: 12px;
+		margin-block-end: 8px;
+	}
+}
+@supports (container-type: anchored) {
+	.cpm-tooltip:not([data-anchored="false"]) {
+		container-type: anchored;
+	}
+	@container anchored(fallback: flip-block) {
+		.cpm-tooltip-surface {
+			--cpm-tip-y: -4px;
+			transform-origin: var(--cpm-tip-origin-x) top;
+		}
 	}
 }
 @media (prefers-reduced-motion: reduce) {
+	.cpm-tooltip {
+		transition:
+			display 0.1s,
+			overlay 0.1s;
+		transition-behavior: allow-discrete;
+	}
+	.cpm-tooltip-surface {
+		--cpm-tip-y: 0px;
+		transform: none;
+		will-change: opacity;
+		transition: opacity 0.1s ease;
+	}
+	.cpm-tooltip:is(:popover-open, .\\:popover-open, [data-open="true"]) .cpm-tooltip-surface {
+		transform: none;
+		transition: opacity 0.1s ease;
+	}
+	@starting-style {
+		.cpm-tooltip:is(:popover-open, .\\:popover-open, [data-open="true"]) .cpm-tooltip-surface {
+			opacity: 0;
+			transform: none;
+		}
+	}
 	.cpm-dialog { animation-duration: 0.08s; }
 	.cpm-dialog-box { animation-name: cpm-dialog-fade; animation-duration: 0.1s; }
 	.cpm-source-dialog-box { transition: border-color 100ms ease, box-shadow 100ms ease; }
@@ -4723,6 +4825,28 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	.cpm-upload-progress:indeterminate::-moz-progress-bar { animation-duration: 10s; }
 	.cpm-upload-dialog .cpm-spin-ring { animation-duration: 3s; }
 }
+@media (prefers-reduced-transparency: reduce) {
+	.cpm-tooltip-surface {
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+		background: #ffffff;
+	}
+	.cpm-root.cpm-dark .cpm-tooltip-surface,
+	.cpm-tooltip.cpm-dark .cpm-tooltip-surface {
+		background: #222226;
+	}
+}
+@media (prefers-contrast: more) {
+	.cpm-tooltip-surface {
+		background: rgba(255, 255, 255, 0.96);
+		border-color: rgba(0, 0, 0, 0.28);
+	}
+	.cpm-root.cpm-dark .cpm-tooltip-surface,
+	.cpm-tooltip.cpm-dark .cpm-tooltip-surface {
+		background: rgba(34, 34, 38, 0.96);
+		border-color: rgba(255, 255, 255, 0.34);
+	}
+}
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
 	.cpm-dialog {
 		backdrop-filter: none;
@@ -4738,6 +4862,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	.cpm-upload-dialog .cpm-dropzone { border-color: var(--cpm-text-sub); }
 }
 @media (forced-colors: active) {
+	.cpm-tooltip-surface {
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+		background: Canvas;
+		color: CanvasText;
+		border: 1px solid CanvasText;
+		box-shadow: none;
+	}
 	.cpm-dialog-box, .cpm-source-dialog-box {
 		border: 1px solid CanvasText;
 		box-shadow: none;
@@ -5945,26 +6077,349 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		);
 	}
 
-	function CustomTooltip({ text, rect, isDark }) {
-		if (!text || !rect) return null;
-		const tipWidth = Math.min(280, Math.max(60, text.length * 12 + 20));
-		let left = rect.left + rect.width / 2 - tipWidth / 2;
-		left = Math.max(8, Math.min(window.innerWidth - tipWidth - 8, left));
-		let top = rect.top - 30;
-		if (top < 8) {
-			top = rect.bottom + 6;
-		}
+	const CPM_TOOLTIP_MARGIN = 12;
+	const CPM_TOOLTIP_MARGIN_Y = 8;
+	const CPM_TOOLTIP_GAP = 8;
 
-		return h("div", {
-			className: "cpm-tooltip" + (isDark ? " cpm-dark" : ""),
-			style: {
-				position: "fixed",
+	function getTooltipViewport(viewport) {
+		return {
+			width: viewport && viewport.width > 0 ? viewport.width : (typeof window !== "undefined" ? window.innerWidth : 1280),
+			height: viewport && viewport.height > 0 ? viewport.height : (typeof window !== "undefined" ? window.innerHeight : 800),
+		};
+	}
+
+	/**
+	 * Compute viewport-safe coordinates and flip direction for a floating tooltip.
+	 * Keeps the tooltip horizontally centered over its trigger (clamped to margin)
+	 * and sets transform-origin to track the trigger's center across clamps/flips.
+	 */
+	function placeTooltip(anchorRect, tipWidth, tipHeight, viewport) {
+		const { width: vw, height: vh } = getTooltipViewport(viewport);
+		const anchorW = anchorRect.width != null ? anchorRect.width : (anchorRect.right - anchorRect.left);
+		const anchorBottom = anchorRect.bottom != null ? anchorRect.bottom : anchorRect.top + (anchorRect.height || 0);
+		const triggerCenterX = anchorRect.left + anchorW / 2;
+		const maxLeft = Math.max(CPM_TOOLTIP_MARGIN, vw - tipWidth - CPM_TOOLTIP_MARGIN);
+		const left = Math.round(Math.max(CPM_TOOLTIP_MARGIN, Math.min(maxLeft, triggerCenterX - tipWidth / 2)));
+		const originPx = tipWidth > 0 ? Math.max(8, Math.min(tipWidth - 8, triggerCenterX - left)) : 0;
+		const originX = tipWidth > 0 ? (Math.round((originPx / tipWidth) * 1000) / 10) + "%" : "50%";
+
+		const aboveTop = anchorRect.top - tipHeight - CPM_TOOLTIP_GAP;
+		const belowTop = anchorBottom + CPM_TOOLTIP_GAP;
+		const spaceAbove = anchorRect.top - CPM_TOOLTIP_MARGIN_Y;
+		const spaceBelow = vh - CPM_TOOLTIP_MARGIN_Y - anchorBottom;
+
+		if (aboveTop >= CPM_TOOLTIP_MARGIN_Y) {
+			return {
 				left,
-				top,
-				zIndex: 999999,
-				pointerEvents: "none",
-			},
-		}, text);
+				top: Math.round(aboveTop),
+				placement: "top",
+				originX,
+				originY: "100%",
+			};
+		}
+		if (spaceBelow > spaceAbove) {
+			const maxTop = Math.max(CPM_TOOLTIP_MARGIN_Y, vh - tipHeight - CPM_TOOLTIP_MARGIN_Y);
+			return {
+				left,
+				top: Math.round(Math.min(maxTop, Math.max(CPM_TOOLTIP_MARGIN_Y, belowTop))),
+				placement: "bottom",
+				originX,
+				originY: "0%",
+			};
+		}
+		return {
+			left,
+			top: Math.round(CPM_TOOLTIP_MARGIN_Y),
+			placement: "top",
+			originX,
+			originY: "100%",
+		};
+	}
+
+	/**
+	 * Verify CSS Anchor Positioning actually aligned the popover to its trigger.
+	 * Catches ancestor containment / anchor-scope isolation where CSS anchor fails silently.
+	 */
+	function isAnchoredTipAligned(anchorRect, tipRect, viewport) {
+		if (!anchorRect || !tipRect || !(tipRect.width > 0) || !(tipRect.height > 0)) return false;
+		const expected = placeTooltip(anchorRect, tipRect.width, tipRect.height, viewport);
+		const anchorBottom = anchorRect.bottom != null ? anchorRect.bottom : anchorRect.top + (anchorRect.height || 0);
+		const tipBottom = tipRect.bottom != null ? tipRect.bottom : tipRect.top + tipRect.height;
+		const aboveGap = anchorRect.top - tipBottom;
+		const belowGap = tipRect.top - anchorBottom;
+		const horizOk = Math.abs(tipRect.left - expected.left) <= 4;
+		const vertOk = Math.abs(aboveGap - CPM_TOOLTIP_GAP) <= 4 || Math.abs(belowGap - CPM_TOOLTIP_GAP) <= 4;
+		return horizOk && vertOk;
+	}
+
+	let _cachedTipReactDOM;
+	function getTooltipReactDOM() {
+		if (_cachedTipReactDOM !== undefined) return _cachedTipReactDOM;
+		try {
+			const mod = typeof require === "function" ? require("react-dom") : null;
+			_cachedTipReactDOM = mod && typeof mod.createPortal === "function" ? mod : null;
+		} catch {
+			_cachedTipReactDOM = null;
+		}
+		return _cachedTipReactDOM;
+	}
+
+	function restoreAnchorTarget(entry) {
+		if (!entry || !entry.target) return;
+		const target = entry.target;
+		if (target.style && typeof target.style.setProperty === "function") {
+			if (entry.prevAnchorName) {
+				target.style.setProperty("anchor-name", entry.prevAnchorName, entry.prevAnchorPriority || "");
+			} else if (typeof target.style.removeProperty === "function") {
+				target.style.removeProperty("anchor-name");
+			}
+		}
+	}
+
+	function restoreDescribedBy(entry) {
+		if (!entry || !entry.addedDescribedBy || !entry.target || typeof entry.target.getAttribute !== "function") return;
+		const target = entry.target;
+		const tokens = (target.getAttribute("aria-describedby") || "").split(/\s+/).filter((t) => t && t !== "cpm-tooltip");
+		if (tokens.length === 0) {
+			if (typeof target.removeAttribute === "function") target.removeAttribute("aria-describedby");
+		} else if (typeof target.setAttribute === "function") {
+			target.setAttribute("aria-describedby", tokens.join(" "));
+		}
+	}
+
+	function applyFallbackPlacement(el, target) {
+		if (!el || !target || typeof target.getBoundingClientRect !== "function" || typeof el.getBoundingClientRect !== "function") return;
+		const anchorRect = target.getBoundingClientRect();
+		const tipRect = el.getBoundingClientRect();
+		if (!(tipRect.width > 0) || !(tipRect.height > 0)) return;
+		const pos = placeTooltip(anchorRect, tipRect.width, tipRect.height, getTooltipViewport());
+		if (typeof el.setAttribute === "function") {
+			el.setAttribute("data-anchored", "false");
+			el.setAttribute("data-placement", pos.placement);
+		}
+		if (el.style) {
+			el.style.left = pos.left + "px";
+			el.style.top = pos.top + "px";
+			if (typeof el.style.setProperty === "function") {
+				el.style.setProperty("--cpm-tip-origin-x", pos.originX);
+			}
+		}
+	}
+
+	function CustomTooltip({ tooltip, isDark }) {
+		const popRef = useRef(null);
+		const anchorSessionRef = useRef(null);
+		const closingAnchorRef = useRef(null);
+		const exitGenRef = useRef(0);
+		const exitTimerRef = useRef(null);
+		const lastTextRef = useRef("");
+
+		const target = tooltip && tooltip.target ? tooltip.target : null;
+		const text = tooltip && tooltip.text ? tooltip.text : "";
+		const isOpen = Boolean(target && text);
+		// Retain last label text across close so the 0.16s exit fade never collapses to an empty box.
+		if (isOpen) lastTextRef.current = text;
+		const displayText = isOpen ? text : lastTextRef.current;
+
+		// Ensure popover="hint" attribute is wired once on mount.
+		useSafeLayoutEffect(() => {
+			const el = popRef.current;
+			if (!el || typeof el.setAttribute !== "function") return;
+			try {
+				el.setAttribute("popover", "hint");
+			} catch {
+				// Ignore in non-DOM test renderers or browsers rejecting hint.
+			}
+		}, []);
+
+		useSafeLayoutEffect(() => {
+			const el = popRef.current;
+			const hasTargetDom = Boolean(target && typeof target.getAttribute === "function");
+
+			if (!isOpen || !hasTargetDom) {
+				const prev = anchorSessionRef.current;
+				anchorSessionRef.current = null;
+				if (prev) restoreDescribedBy(prev);
+				const exitGen = ++exitGenRef.current;
+				if (exitTimerRef.current) {
+					clearTimeout(exitTimerRef.current);
+					exitTimerRef.current = null;
+				}
+				if (el && typeof HTMLElement !== "undefined" && typeof el.hidePopover === "function") {
+					try {
+						if (typeof el.matches === "function" && el.matches(":popover-open")) el.hidePopover();
+					} catch {
+						// Ignore hide errors if already closed or detached.
+					}
+				}
+				if (prev) {
+					if (closingAnchorRef.current && closingAnchorRef.current !== prev) {
+						restoreAnchorTarget(closingAnchorRef.current);
+					}
+					closingAnchorRef.current = prev;
+					const finishClose = () => {
+						if (exitGenRef.current !== exitGen) return;
+						if (closingAnchorRef.current === prev) closingAnchorRef.current = null;
+						restoreAnchorTarget(prev);
+					};
+					const anims = el && typeof el.getAnimations === "function" ? el.getAnimations({ subtree: true }) : [];
+					if (anims.length > 0 && typeof Promise !== "undefined") {
+						Promise.allSettled(anims.map((a) => a.finished)).then(finishClose);
+						exitTimerRef.current = setTimeout(finishClose, 150);
+					} else {
+						finishClose();
+					}
+				}
+				return;
+			}
+
+			exitGenRef.current += 1;
+			if (exitTimerRef.current) {
+				clearTimeout(exitTimerRef.current);
+				exitTimerRef.current = null;
+			}
+
+			const existing = anchorSessionRef.current;
+			if (existing && existing.target !== target) {
+				restoreDescribedBy(existing);
+				restoreAnchorTarget(existing);
+				anchorSessionRef.current = null;
+			}
+
+			const attachTarget = (sessionEntry) => {
+				const tokens = (target.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+				const addedDescribedBy = !tokens.includes("cpm-tooltip");
+				if (addedDescribedBy) {
+					tokens.push("cpm-tooltip");
+					target.setAttribute("aria-describedby", tokens.join(" "));
+				}
+				if (target.style && typeof target.style.setProperty === "function") {
+					target.style.setProperty("anchor-name", "--cpm-tip-anchor");
+				}
+				sessionEntry.addedDescribedBy = sessionEntry.addedDescribedBy || addedDescribedBy;
+				anchorSessionRef.current = sessionEntry;
+			};
+
+			const pendingClose = closingAnchorRef.current;
+			if (pendingClose) {
+				if (pendingClose.target === target && !anchorSessionRef.current) {
+					// Reclaim original saved anchor state before restoring if re-hovered mid-exit.
+					closingAnchorRef.current = null;
+					attachTarget(pendingClose);
+				} else {
+					closingAnchorRef.current = null;
+					restoreAnchorTarget(pendingClose);
+				}
+			}
+
+			if (!anchorSessionRef.current) {
+				const prevAnchorName = target.style && typeof target.style.getPropertyValue === "function"
+					? target.style.getPropertyValue("anchor-name")
+					: "";
+				const prevAnchorPriority = target.style && typeof target.style.getPropertyPriority === "function"
+					? target.style.getPropertyPriority("anchor-name")
+					: "";
+				attachTarget({ target, prevAnchorName, prevAnchorPriority, addedDescribedBy: false });
+			}
+
+			if (!el) return;
+
+			const supportsAnchorPos = typeof window !== "undefined" && Boolean(
+				window.CSS &&
+				typeof window.CSS.supports === "function" &&
+				window.CSS.supports("position-area", "block-start") &&
+				window.CSS.supports("anchor-name", "--cpm-tip-anchor")
+			);
+
+			if (supportsAnchorPos) {
+				if (typeof el.removeAttribute === "function") {
+					el.removeAttribute("data-anchored");
+					el.removeAttribute("data-placement");
+				}
+				if (el.style) {
+					el.style.left = "";
+					el.style.top = "";
+					if (typeof el.style.removeProperty === "function") {
+						el.style.removeProperty("--cpm-tip-origin-x");
+					}
+				}
+			} else if (typeof el.setAttribute === "function") {
+				el.setAttribute("data-anchored", "false");
+			}
+
+			if (typeof el.showPopover === "function") {
+				try {
+					if (typeof el.matches !== "function" || !el.matches(":popover-open")) {
+						el.showPopover();
+					}
+				} catch {
+					// Ignore if browser rejects showPopover in current state.
+				}
+			}
+
+			if (typeof target.getBoundingClientRect === "function" && typeof el.getBoundingClientRect === "function") {
+				if (!supportsAnchorPos || !isAnchoredTipAligned(target.getBoundingClientRect(), el.getBoundingClientRect(), getTooltipViewport())) {
+					applyFallbackPlacement(el, target);
+				}
+			}
+		}, [isOpen, target, text]);
+
+		// Keep fallback position synced on window resize or live size/text changes.
+		useEffect(() => {
+			const el = popRef.current;
+			if (!isOpen || !el || !target) return;
+			const syncIfFallback = () => {
+				if (!el.getAttribute || el.getAttribute("data-anchored") !== "false") return;
+				applyFallbackPlacement(el, target);
+			};
+			let ro = null;
+			if (typeof window !== "undefined" && typeof window.ResizeObserver === "function") {
+				ro = new window.ResizeObserver(syncIfFallback);
+				ro.observe(el);
+				if (typeof target.getBoundingClientRect === "function") ro.observe(target);
+			}
+			if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+				window.addEventListener("resize", syncIfFallback);
+			}
+			return () => {
+				if (ro) ro.disconnect();
+				if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+					window.removeEventListener("resize", syncIfFallback);
+				}
+			};
+		}, [isOpen, target, text]);
+
+		// Restore trigger attributes if CustomTooltip itself unmounts mid-display.
+		useEffect(() => {
+			return () => {
+				if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+				const pendingClose = closingAnchorRef.current;
+				closingAnchorRef.current = null;
+				if (pendingClose) restoreAnchorTarget(pendingClose);
+				const current = anchorSessionRef.current;
+				anchorSessionRef.current = null;
+				if (current) {
+					restoreDescribedBy(current);
+					restoreAnchorTarget(current);
+				}
+			};
+		}, []);
+
+		const node = h("div", {
+			id: "cpm-tooltip",
+			ref: popRef,
+			role: "tooltip",
+			className: "cpm-tooltip" + (isDark ? " cpm-dark" : ""),
+			"data-open": isOpen ? "true" : "false",
+			"aria-hidden": isOpen ? undefined : "true",
+		}, h("div", { className: "cpm-tooltip-surface" }, displayText));
+
+		const needsBodyPortal = typeof HTMLElement === "undefined" || typeof HTMLElement.prototype?.showPopover !== "function";
+		const ReactDOM = needsBodyPortal ? getTooltipReactDOM() : null;
+		if (needsBodyPortal && ReactDOM && typeof document !== "undefined" && document.body) {
+			return ReactDOM.createPortal(node, document.body);
+		}
+		return node;
 	}
 
 	let currentTabAnim = null;
@@ -6281,35 +6736,163 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			}, duration);
 		}, []);
 
+		const [tipMounted, setTipMounted] = useState(false);
 		const [activeTooltip, setActiveTooltip] = useState(null);
+		const activeTipTargetRef = useRef(null);
+		activeTipTargetRef.current = activeTooltip ? activeTooltip.target : null;
 		const tipTimerRef = useRef(null);
+		const pendingTipTargetRef = useRef(null);
+		const tipPointerTypeRef = useRef("");
 
-		const handleRootMouseOver = useCallback((e) => {
-			const target = e.target && e.target.closest && e.target.closest("[data-cpm-tip]");
-			if (!target) {
-				if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
-				setActiveTooltip(null);
-				return;
+		const dismissTooltip = useCallback(() => {
+			pendingTipTargetRef.current = null;
+			if (tipTimerRef.current) {
+				clearTimeout(tipTimerRef.current);
+				tipTimerRef.current = null;
 			}
-			const text = target.getAttribute("data-cpm-tip");
-			if (!text) {
-				setActiveTooltip(null);
-				return;
-			}
-			if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
-			tipTimerRef.current = setTimeout(() => {
-				const rect = target.getBoundingClientRect();
-				setActiveTooltip({ text, rect });
-			}, 100);
+			setActiveTooltip(null);
 		}, []);
 
-		const handleRootMouseOut = useCallback((e) => {
-			const related = e.relatedTarget;
-			if (related && related.closest && related.closest("[data-cpm-tip]")) {
+		const scheduleTooltip = useCallback((target, delayMs, source) => {
+			if (delayMs > 0 && tipTimerRef.current && pendingTipTargetRef.current === target) {
 				return;
 			}
+			pendingTipTargetRef.current = null;
+			if (tipTimerRef.current) {
+				clearTimeout(tipTimerRef.current);
+				tipTimerRef.current = null;
+			}
+			const text = target && typeof target.getAttribute === "function" ? target.getAttribute("data-cpm-tip") : "";
+			if (!target || !text) {
+				setActiveTooltip(null);
+				return;
+			}
+			setTipMounted(true);
+			if (delayMs <= 0) {
+				setActiveTooltip((prev) => (prev && prev.target === target && prev.text === text && prev.source === source ? prev : { target, text, source }));
+				return;
+			}
+			pendingTipTargetRef.current = target;
+			tipTimerRef.current = setTimeout(() => {
+				tipTimerRef.current = null;
+				pendingTipTargetRef.current = null;
+				if (target.isConnected === false) return;
+				const latestText = target.getAttribute("data-cpm-tip");
+				if (!latestText) {
+					setActiveTooltip(null);
+					return;
+				}
+				setActiveTooltip((prev) => (prev && prev.target === target && prev.text === latestText && prev.source === source ? prev : { target, text: latestText, source }));
+			}, delayMs);
+		}, []);
+
+		const handleRootPointerOverCapture = useCallback((e) => {
+			tipPointerTypeRef.current = e.pointerType || "";
+		}, []);
+
+		const handleRootPointerDownCapture = useCallback((e) => {
+			if (e.pointerType) tipPointerTypeRef.current = e.pointerType;
+			if (e.pointerType === "touch") dismissTooltip();
+		}, [dismissTooltip]);
+
+		const handleRootScrollCapture = useCallback(() => {
+			if (tipTimerRef.current || activeTipTargetRef.current) dismissTooltip();
+		}, [dismissTooltip]);
+
+		const handleRootMouseOver = useCallback((e) => {
+			if (tipPointerTypeRef.current === "touch") return;
+			const target = e.target && e.target.closest && e.target.closest("[data-cpm-tip]");
+			if (!target) {
+				dismissTooltip();
+				return;
+			}
+			if (activeTipTargetRef.current === target) return;
+			scheduleTooltip(target, 45, "pointer");
+		}, [dismissTooltip, scheduleTooltip]);
+
+		const handleRootMouseOut = useCallback((e) => {
+			const leaving = e.target && e.target.closest && e.target.closest("[data-cpm-tip]");
+			const related = e.relatedTarget;
+			const entering = related && related.closest && related.closest("[data-cpm-tip]");
+			if (entering && (!leaving || entering === leaving)) return;
+			dismissTooltip();
+		}, [dismissTooltip]);
+
+		const handleRootFocus = useCallback((e) => {
+			const target = e.target && e.target.closest && e.target.closest("[data-cpm-tip]");
+			if (!target) return;
+			let isFocusVisible = true;
+			try {
+				isFocusVisible = typeof target.matches === "function" ? target.matches(":focus-visible") : true;
+			} catch {
+				// Fallback to showing on focus when :focus-visible is unsupported.
+			}
+			if (!isFocusVisible) return;
+			scheduleTooltip(target, 0, "focus");
+		}, [scheduleTooltip]);
+
+		const handleRootBlur = useCallback((e) => {
+			const related = e.relatedTarget;
+			if (related && related.closest && related.closest("[data-cpm-tip]")) return;
+			dismissTooltip();
+		}, [dismissTooltip]);
+
+		useEffect(() => {
+			const target = activeTooltip && activeTooltip.target;
+			if (!target) return undefined;
+			const rootEl = rootRef.current;
+
+			const handleScroll = () => dismissTooltip();
+			const handleWindowBlur = () => dismissTooltip();
+			const handleKeyDown = (e) => {
+				if (e.key === "Escape") dismissTooltip();
+			};
+
+			let attrObs = null;
+			let treeObs = null;
+			if (typeof window !== "undefined" && typeof window.MutationObserver === "function") {
+				attrObs = new window.MutationObserver(() => {
+					if (target.isConnected === false) {
+						dismissTooltip();
+						return;
+					}
+					const nextText = target.getAttribute("data-cpm-tip");
+					if (!nextText) {
+						dismissTooltip();
+						return;
+					}
+					setActiveTooltip((prev) => (prev && prev.target === target && prev.text !== nextText ? { ...prev, text: nextText } : prev));
+				});
+				if (typeof target.nodeType === "number") {
+					attrObs.observe(target, { attributes: true, attributeFilter: ["data-cpm-tip"] });
+				}
+				if (rootEl && typeof rootEl.nodeType === "number") {
+					treeObs = new window.MutationObserver(() => {
+						if (target.isConnected === false) dismissTooltip();
+					});
+					treeObs.observe(rootEl, { childList: true, subtree: true });
+				}
+			}
+
+			if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+				window.addEventListener("scroll", handleScroll, { passive: true });
+				window.addEventListener("blur", handleWindowBlur);
+				window.addEventListener("keydown", handleKeyDown, true);
+			}
+
+			return () => {
+				if (attrObs) attrObs.disconnect();
+				if (treeObs) treeObs.disconnect();
+				if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+					window.removeEventListener("scroll", handleScroll);
+					window.removeEventListener("blur", handleWindowBlur);
+					window.removeEventListener("keydown", handleKeyDown, true);
+				}
+			};
+		}, [activeTooltip && activeTooltip.target, dismissTooltip]);
+
+		useEffect(() => () => {
 			if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
-			setActiveTooltip(null);
 		}, []);
 
 		const stateSeqRef = useRef(0);
@@ -6430,8 +7013,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return h("div", {
 			ref: rootRef,
 			className: "cpm-root" + (isDark ? " cpm-dark" : ""),
+			onPointerOverCapture: handleRootPointerOverCapture,
+			onPointerDownCapture: handleRootPointerDownCapture,
+			onScrollCapture: handleRootScrollCapture,
 			onMouseOver: handleRootMouseOver,
 			onMouseOut: handleRootMouseOut,
+			onFocus: handleRootFocus,
+			onBlur: handleRootBlur,
 		},
 			h(BrowseView, {
 				view,
@@ -6467,7 +7055,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					toast.body && h("div", { className: "cpm-toast-body" }, toast.body),
 				),
 			),
-			activeTooltip && h(CustomTooltip, { text: activeTooltip.text, rect: activeTooltip.rect, isDark }),
+			(tipMounted || activeTooltip) && h(CustomTooltip, { tooltip: activeTooltip, isDark }),
 		);
 	}
 
