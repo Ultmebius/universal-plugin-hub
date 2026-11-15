@@ -11,12 +11,11 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { basename, dirname, isAbsolute, join } from 'node:path'
-import { dshHome, dshSkillsDir, installedDir, isSameOrInsidePath, readState, resolveOptionalService, slugify, statePath, stateRevision } from './store.js'
+import { dshHome, dshSkillsDir, installedDir, isSameOrInsidePath, readState, resolveOptionalService, statePath, stateRevision } from './store.js'
 import {
   formatDisplayName,
   listAgents,
   listPrompts,
-  listSkills,
   parserCacheRevision,
   readMarketplace,
   readPluginManifest,
@@ -30,11 +29,11 @@ import {
 } from './install.js'
 import { localIconCacheRevision } from './icons.js'
 import { isUploadedSkillTarget } from './skill-uploads.js'
+import { discoverSkills } from './skills.js'
 
 export const PLUGIN_MENTION_SCHEME = 'uph-plugin:'
 export const AT_PLUGINS_BOOT_LIMIT = 128 * 1024
 
-const SKILL_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const WIRE_MENTION_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]+)\)/uy
 const WIRE_MENTION_TEXT_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]+)\)/gu
 const WIRE_MENTION_TRUNCATED_TAIL_RE = /@\[([^\]\n]+)\]\(uph-plugin:([^)\s]*)$/u
@@ -167,9 +166,10 @@ export function listAtPlugins() {
 }
 
 function compactAtPluginEntry(entry, { includePreviews = true, includeDescriptions = true } = {}) {
-  const icons = entry.icons && typeof entry.icons === 'object'
-    ? (includePreviews ? entry.icons : { light: entry.icons.light || [], dark: entry.icons.dark || [] })
-    : undefined
+  let icons
+  if (entry.icons && typeof entry.icons === 'object') {
+    icons = includePreviews ? entry.icons : { light: entry.icons.light || [], dark: entry.icons.dark || [] }
+  }
   if (!includeDescriptions) {
     return {
       name: entry.name,
@@ -310,39 +310,23 @@ function pluginOwnsSkillFile(target, installedRoot, mirrorRoot, file) {
   }
 }
 
-function resolveCallablePluginSkills(target, manifest, snapshotSkills) {
+function resolveCallablePluginSkills(target, snapshotSkills) {
+  let installedRoot
+  try { installedRoot = realpathSync.native(target) } catch { return [] }
+  let mirrorRoot
+  try { mirrorRoot = realpathSync.native(dshSkillsDir()) } catch {}
+  const candidates = snapshotSkills ?? discoverSkills(join(target, 'skills'))
   const seen = new Set()
   const resolved = []
-  if (Array.isArray(snapshotSkills)) {
-    let installedRoot
-    try { installedRoot = realpathSync.native(target) } catch { return [] }
-    let mirrorRoot
-    try { mirrorRoot = realpathSync.native(dshSkillsDir()) } catch {}
-    for (const skill of snapshotSkills) {
-      if (typeof skill?.name !== 'string' || !skill.name || skill.enabled === false ||
-          skill.modelInvocable === false || skill.invocation?.modelInvocable === false) continue
-      const lower = skill.name.toLowerCase()
-      if (seen.has(lower) || !pluginOwnsSkillFile(target, installedRoot, mirrorRoot, skill.path)) continue
-      seen.add(lower)
-      resolved.push({
-        name: skill.name,
-        description: truncateOneLine(skill.description),
-      })
-    }
-    return resolved
-  }
-
-  for (const item of listSkills(target, manifest)) {
-    const name = SKILL_SLUG_RE.test(item.name || '')
-      ? item.name
-      : (SKILL_SLUG_RE.test(item.dirName || '') ? item.dirName : slugify(item.name || item.dirName || ''))
-    if (!name) continue
-    const lower = name.toLowerCase()
-    if (seen.has(lower)) continue
+  for (const skill of candidates) {
+    if (typeof skill?.name !== 'string' || !skill.name || skill.error || skill.enabled === false ||
+        skill.modelInvocable === false || skill.invocation?.modelInvocable === false) continue
+    const lower = skill.name.toLowerCase()
+    if (seen.has(lower) || !pluginOwnsSkillFile(target, installedRoot, mirrorRoot, skill.path)) continue
     seen.add(lower)
     resolved.push({
-      name,
-      description: truncateOneLine(item.description),
+      name: skill.name,
+      description: truncateOneLine(skill.description),
     })
   }
   return resolved
@@ -356,7 +340,7 @@ export function collectPluginCapabilities(pluginName, options = {}) {
   }
   const manifest = readPluginManifest(target)
   const snapshotSkills = Array.isArray(options.snapshotSkills) ? options.snapshotSkills : null
-  const skills = resolveCallablePluginSkills(target, manifest, snapshotSkills)
+  const skills = resolveCallablePluginSkills(target, snapshotSkills)
   const connectors = getPluginConnectors(target, manifest)
   const mcpServers = []
   for (const connector of connectors) {
@@ -472,6 +456,18 @@ function getUserMessageCreator(resolveDshModules = findDshMainNodeModules) {
   }))
 }
 
+async function resolveAgentWorkingDirectory(hostCtx, agent, signal) {
+  if (agent === undefined) return undefined
+  const workingDirectory = resolveOptionalService(hostCtx, 'workingDirectory')
+  if (typeof workingDirectory?.ensure === 'function') {
+    return workingDirectory.ensure(agent, signal)
+  }
+  if (agent?.session && typeof workingDirectory?.get === 'function') {
+    return workingDirectory.get(agent.session)
+  }
+  return undefined
+}
+
 /**
  * Register the `agent/pre-step` waterfall interceptor on DSH's agent service.
  * Inspects only step-incoming user messages (`source.kind === 'user'`) for `@` plugin
@@ -518,14 +514,7 @@ export function attachAtPluginsAgentHook(hostCtx, options = {}) {
     try {
       const skillsService = resolveOptionalService(hostCtx, 'skills')
       if (typeof skillsService?.snapshot === 'function') {
-        const workingDirectory = resolveOptionalService(hostCtx, 'workingDirectory')
-        const cwd = agent !== undefined
-          ? (typeof workingDirectory?.ensure === 'function'
-            ? await workingDirectory.ensure(agent, signal)
-            : (agent?.session && typeof workingDirectory?.get === 'function'
-              ? workingDirectory.get(agent.session)
-              : undefined))
-          : undefined
+        const cwd = await resolveAgentWorkingDirectory(hostCtx, agent, signal)
         signal?.throwIfAborted?.()
         const snapshot = await skillsService.snapshot({ cwd, signal, scope: agent })
         if (snapshot && Array.isArray(snapshot.skills)) {

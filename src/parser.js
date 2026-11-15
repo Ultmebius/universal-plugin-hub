@@ -12,7 +12,7 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSyn
 import { join, basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, installedDir, pluginDataDir } from './store.js'
-import { safeSegment, pluginPath, sourceRepositoryDir, normalizeRemotePluginSource } from './market.js'
+import { safeSegment, pluginPath, sourceRepositoryDir, normalizeRemotePluginSource, remoteCheckoutDir } from './market.js'
 import { parseAgentDefinition } from './agents-map.js'
 import { buildPluginIcons, touchLru, setLru } from './icons.js'
 
@@ -847,9 +847,7 @@ export function pluginContentDir(sourceId, pluginName, source, preferInstalled =
     if (typeof remoteSrc.url === 'string' && remoteSrc.url) {
       const ownDir = sourceRepositoryDir(sourceCacheDir(sourceId), remoteSrc)
       if (ownDir) return ownDir
-      const clean = String(remoteSrc.url).replace(/^https?:\/\//, '').replace(/\.git$/, '')
-      const remoteKey = clean.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'repo'
-      const checkout = join(sourceCacheDir('remote'), remoteKey)
+      const checkout = remoteCheckoutDir(remoteSrc.url, remoteSrc.ref)
       const dir = remoteSrc.path ? pluginPath(checkout, remoteSrc.path) : checkout
       return existsSync(dir) ? dir : null
     }

@@ -37,7 +37,8 @@ after(() => {
 const store = await import('../src/store.js')
 const parser = await import('../src/parser.js')
 const install = await import('../src/install.js')
-const { ensureSourceCloned } = await import('../src/market.js')
+const market = await import('../src/market.js')
+const { ensureSourceCloned } = market
 const { mountRoutes } = await import('../src/routes.js')
 
 const clientSource = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
@@ -667,8 +668,8 @@ test('marketplace preview repairs an interrupted clone, shares the checkout with
   const unregister = mountRoutes(fakeApp, null, () => {})
   const apiPort = await listenSafe(apiServer)
   const apiBase = `http://127.0.0.1:${apiPort}/universal-plugin-hub/api`
-  const sourceId = 'testorg-slowrepo'
-  const sourceUrl = `http://127.0.0.1:${gitPort}/testorg/slowrepo.git`
+  const sourceId = 'testorg-slow-repo'
+  const sourceUrl = `http://127.0.0.1:${gitPort}/testorg/slow-repo.git`
   const cache = store.sourceCacheDir(sourceId)
   const post = (path, body) => fetch(apiBase + path, {
     method: 'POST',
@@ -700,7 +701,7 @@ test('marketplace preview repairs an interrupted clone, shares the checkout with
     assert.equal(cloneRequests, 1, 'preview and confirmation must reuse one checkout')
 
     const finalState = store.readState()
-    assert.ok(finalState.sources.some((s) => s.id === 'testorg-slowrepo'), 'added source must be persisted')
+    assert.ok(finalState.sources.some((s) => s.id === sourceId), 'added source must be persisted')
     assert.equal(
       finalState.plugins.find((p) => p.name === 'race-peer-plugin')?.enabled,
       false,
@@ -728,6 +729,16 @@ test('marketplace preview repairs an interrupted clone, shares the checkout with
     assert.equal(existsSync(cache), false)
     assert.equal(cloneRequests, 1, 'listing and deletion must not clone again')
 
+    // Leaving the naming step unconfirmed leaves a cache, but no registered source.
+    assert.equal((await post('/sources/ensure', { url: sourceUrl })).pluginCount, 1)
+    const otherUrl = `http://127.0.0.1:${gitPort}/testorg-slow/repo.git`
+    const other = await post('/sources/ensure', { url: otherUrl })
+    assert.equal(other.sourceId, sourceId, 'the different repository URLs collide after slugification')
+    assert.equal(other.pluginCount, 1)
+    const origin = execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: cache, encoding: 'utf8', windowsHide: true })
+    assert.equal(origin.trim(), otherUrl, 'preview must use the checkout of the requested repository')
+    assert.equal(cloneRequests, 3)
+
     // Uninstalled plugin connector toggle(false) must also reject cleanly
     const missingToggle = await fetch(`http://127.0.0.1:${apiPort}/universal-plugin-hub/api/plugins/never-installed-plugin/connectors/foo/toggle`, {
       method: 'POST',
@@ -740,7 +751,7 @@ test('marketplace preview repairs an interrupted clone, shares the checkout with
     apiServer.close()
     gitHttpServer.close()
     await install.uninstallPlugin('race-peer-plugin').catch(() => {})
-    store.safeRmDir(store.sourceCacheDir('testorg-slowrepo'), { allowTrash: false })
+    store.safeRmDir(cache, { allowTrash: false })
   }
 })
 
@@ -798,4 +809,102 @@ test('UI guards & optimistic toggles: App.removePlugin, DetailView Install/Manag
   assert.match(manageCode, /optimisticEnabled/, 'ManagePageContent must apply immediate optimistic plugin toggle feedback')
   assert.match(manageCode, /optimisticConn/, 'ManagePageContent must apply immediate optimistic connector toggle feedback')
   assert.match(mcpRowCode, /optimistic/i, 'renderMcpServerRow must apply immediate optimistic MCP toggle feedback')
+})
+
+test('materializePlugin and pluginDetail isolate colliding remote URLs, refs, IPv6 origins, and non-directory .git entries', async () => {
+  const makeRemoteRepo = (dirName, { pluginName, description, altBranch } = {}) => {
+    const work = join(root, `${dirName}-work`)
+    const bare = join(root, `${dirName}.git`)
+    write(join(work, '.claude-plugin', 'plugin.json'), { name: pluginName, version: '1.0.0', description })
+    execFileSync('git', ['init', '-b', 'main'], { cwd: work, windowsHide: true })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: work, windowsHide: true })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: work, windowsHide: true })
+    execFileSync('git', ['add', '.'], { cwd: work, windowsHide: true })
+    execFileSync('git', ['commit', '-m', 'main'], { cwd: work, windowsHide: true })
+    if (altBranch) {
+      execFileSync('git', ['checkout', '-b', altBranch.name], { cwd: work, windowsHide: true })
+      write(join(work, '.claude-plugin', 'plugin.json'), {
+        name: altBranch.pluginName,
+        version: '2.0.0',
+        description: altBranch.description,
+      })
+      execFileSync('git', ['add', '.'], { cwd: work, windowsHide: true })
+      execFileSync('git', ['commit', '-m', altBranch.name], { cwd: work, windowsHide: true })
+      execFileSync('git', ['checkout', 'main'], { cwd: work, windowsHide: true })
+    }
+    execFileSync('git', ['clone', '--bare', work, bare], { windowsHide: true })
+    return bare
+  }
+
+  const bareA = makeRemoteRepo('collide-a', { pluginName: 'plug-a', description: 'First repository plugin' })
+  const bareB = makeRemoteRepo('collide-b', {
+    pluginName: 'plug-b',
+    description: 'Second repository plugin',
+    altBranch: { name: 'alt', pluginName: 'plug-b-alt', description: 'Alt branch plugin' },
+  })
+
+  const repoForPath = (pathname) => (pathname.startsWith('/testorg-slow/') ? bareB : bareA)
+  const gitHttpServer = createServer((req, res) => {
+    const reqUrl = new URL(req.url, 'http://127.0.0.1')
+    const bare = repoForPath(reqUrl.pathname)
+    if (reqUrl.pathname.endsWith('/info/refs') && reqUrl.searchParams.get('service') === 'git-upload-pack') {
+      const proc = spawn('git', ['upload-pack', '--stateless-rpc', '--advertise-refs', bare], { windowsHide: true })
+      spawnedChildren.add(proc)
+      proc.once('exit', () => spawnedChildren.delete(proc))
+      const chunks = [Buffer.from('001e# service=git-upload-pack\n0000')]
+      proc.stdout.on('data', (c) => chunks.push(c))
+      proc.once('close', () => {
+        res.writeHead(200, { 'Content-Type': 'application/x-git-upload-pack-advertisement' })
+        res.end(Buffer.concat(chunks))
+      })
+      return
+    }
+    if (reqUrl.pathname.endsWith('/git-upload-pack') && req.method === 'POST') {
+      const proc = spawn('git', ['upload-pack', '--stateless-rpc', bare], { windowsHide: true })
+      spawnedChildren.add(proc)
+      proc.once('exit', () => spawnedChildren.delete(proc))
+      res.writeHead(200, { 'Content-Type': 'application/x-git-upload-pack-result' })
+      req.pipe(proc.stdin)
+      proc.stdout.pipe(res)
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const gitPort = await listenSafe(gitHttpServer)
+  const urlA = `http://127.0.0.1:${gitPort}/testorg/slow-repo.git`
+  const urlB = `http://127.0.0.1:${gitPort}/testorg-slow/repo.git`
+
+  try {
+    const matA = await market.materializePlugin('mkt-collide', 'plug-a', { source: 'url', url: urlA })
+    const matB = await market.materializePlugin('mkt-collide', 'plug-b', { source: 'url', url: urlB })
+    const matBAlt = await market.materializePlugin('mkt-collide', 'plug-b-alt', { source: 'url', url: urlB, ref: 'alt' })
+
+    assert.notEqual(matA.dir, matB.dir, 'colliding slugs from distinct URLs must use distinct cache checkouts')
+    assert.notEqual(matB.dir, matBAlt.dir, 'distinct branches of the same URL must use distinct cache checkouts')
+    assert.equal(parser.pluginDetail('mkt-collide', 'plug-a', { source: 'url', url: urlA })?.description, 'First repository plugin')
+    assert.equal(parser.pluginDetail('mkt-collide', 'plug-b', { source: 'url', url: urlB })?.description, 'Second repository plugin')
+    assert.equal(parser.pluginDetail('mkt-collide', 'plug-b-alt', { source: 'url', url: urlB, ref: 'alt' })?.description, 'Alt branch plugin')
+
+    // IPv6 remote origin URL contains `[` and must not truncate before `[remote "origin"]` ends
+    const ipv6Cache = join(root, 'ipv6-cache')
+    write(join(ipv6Cache, '.git', 'config'), '[remote "origin"]\n\turl = http://[::1]:8080/testorg/slow-repo.git\n')
+    write(join(ipv6Cache, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+    write(join(ipv6Cache, 'plugins', 'demo', '.claude-plugin', 'plugin.json'), { name: 'demo' })
+    assert.equal(
+      market.sourceRepositoryDir(ipv6Cache, { source: 'url', url: 'http://[::1]:8080/testorg/slow-repo.git', path: 'plugins/demo' }),
+      join(ipv6Cache, 'plugins', 'demo'),
+    )
+
+    // Corrupted regular file at .git must be treated as invalid checkout, not crash on ENOTDIR
+    const corruptSourceId = 'corrupt-dot-git'
+    const corruptCache = store.sourceCacheDir(corruptSourceId)
+    write(join(corruptCache, '.git'), 'not-a-directory')
+    await market.ensureSourceCloned(corruptSourceId, urlA)
+    assert.equal(existsSync(join(corruptCache, '.git', 'uph-clone-complete')), true)
+    store.safeRmDir(corruptCache, { allowTrash: false })
+  } finally {
+    gitHttpServer.close()
+    store.safeRmDir(store.sourceCacheDir('remote'), { allowTrash: false })
+  }
 })

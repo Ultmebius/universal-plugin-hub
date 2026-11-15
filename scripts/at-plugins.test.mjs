@@ -240,6 +240,21 @@ test('extractPluginMentions enforces wire mentions and strict single-token manua
   assert.deepEqual(valid.map(m => m.plugin.name), ['remotion', 'computer-use', 'remotion'])
 })
 
+test('fallback routing uses callable skill metadata when the native registry snapshot is absent', () => {
+  const env = setupEnv()
+  try {
+    const target = installedDir('test-routing')
+    writeSkill(target, 'folder-name', { fmName: 'callable-skill', description: 'An enabled skill.' })
+    writeSkill(target, 'manual-only', { fmName: 'manual-only', description: 'A user-only skill.' })
+    const file = join(target, 'skills', 'manual-only', 'SKILL.md')
+    writeFileSync(file, readFileSync(file, 'utf8').replace('description:', 'disable-model-invocation: true\ndescription:'))
+
+    assert.deepEqual(collectPluginCapabilities('test-routing').skills.map((skill) => skill.name), ['callable-skill'])
+  } finally {
+    env.cleanup()
+  }
+})
+
 test('collectPluginCapabilities & agent/pre-step resolve live skill slugs, active MCP only, agents, and inject Codex notice', async () => {
   const env = setupEnv()
   try {

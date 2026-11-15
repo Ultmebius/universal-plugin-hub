@@ -5,6 +5,7 @@
  * is derived from a slug validated with `safeSegment`. Errors carry a
  * user-facing message; network/git failures are retryable at the UI level.
  */
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
@@ -49,9 +50,9 @@ export function normalizeRemotePluginSource(source) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return source
   if (source.source === 'github') {
     const repo = typeof source.repo === 'string' ? source.repo.trim().replace(/^\/+|\.git$/gi, '') : ''
-    const url = typeof source.url === 'string' && source.url.trim()
-      ? source.url.trim()
-      : (SHORTHAND_REPO_RE.test(repo) ? `https://github.com/${repo}.git` : '')
+    let url = ''
+    if (typeof source.url === 'string' && source.url.trim()) url = source.url.trim()
+    else if (SHORTHAND_REPO_RE.test(repo)) url = `https://github.com/${repo}.git`
     return { ...source, ...(url ? { url } : {}) }
   }
   if (source.source === 'git-subdir' && typeof source.url === 'string') {
@@ -61,6 +62,17 @@ export function normalizeRemotePluginSource(source) {
     }
   }
   return source
+}
+
+function readCheckoutOrigin(dir) {
+  try {
+    const config = readFileSync(join(dir, '.git', 'config'), 'utf8')
+    return config.match(/(?:^|\r?\n)\[remote "origin"\][^\n]*\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1]
+      .match(/^\s*url\s*=\s*(.+)$/m)?.[1].trim()
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error
+    return undefined
+  }
 }
 
 /** A marketplace can point back to its own checkout (including a subdirectory). */
@@ -74,8 +86,7 @@ export function sourceRepositoryDir(cache, source) {
     } catch { return null }
   }
   try {
-    const config = readFileSync(join(cache, '.git', 'config'), 'utf8')
-    const origin = config.match(/\[remote "origin"\]([^\[]*)/)?.[1].match(/^\s*url\s*=\s*(.+)$/m)?.[1].trim()
+    const origin = readCheckoutOrigin(cache)
     if (!origin || !repoKey(resolved.url) || repoKey(origin) !== repoKey(resolved.url)) return null
     const head = readFileSync(join(cache, '.git', 'HEAD'), 'utf8').trim()
     // Reuse only the requested revision; another branch is a different plugin snapshot.
@@ -124,6 +135,43 @@ function hasSourceCheckout(dir) {
   return existsSync(join(git, 'uph-clone-complete')) || existsSync(join(git, 'index'))
 }
 
+async function cloneRepoToCache(dir, url, { branch, timeoutMs } = {}) {
+  const hadCheckout = hasSourceCheckout(dir)
+  if (hadCheckout && readCheckoutOrigin(dir) === url) return false
+
+  if (!hadCheckout) removeManagedDir(dir, { allowTrash: true })
+  const parent = dirname(dir)
+  mkdirSync(parent, { recursive: true })
+  const staging = mkdtempSync(join(parent, '.clone-'))
+  try {
+    const args = ['clone', '--depth', '1']
+    if (branch) args.push('--branch', String(branch))
+    args.push(url, staging)
+    await runGit(args, undefined, timeoutMs)
+    // Empty repositories can be cloned successfully without an index.
+    writeFileSync(join(staging, '.git', 'uph-clone-complete'), '')
+    // The slug can collide with an abandoned preview from another repository.
+    // Keep that checkout until the requested clone has completed successfully.
+    if (hadCheckout) removeManagedDir(dir, { deferCleanup: true })
+    renameSync(staging, dir)
+    return true
+  } finally {
+    safeRmDir(staging)
+  }
+}
+
+/** Derive a collision-free cache key for a remote plugin repository checkout. */
+export function remoteCheckoutKey(url, ref = '') {
+  const identity = ref ? `${url}\0${ref}` : String(url)
+  const digest = createHash('sha256').update(identity).digest('hex').slice(0, 8)
+  return `${slugFromUrl(url)}-${digest}`
+}
+
+/** Resolve the cache directory for a materialized remote plugin repository. */
+export function remoteCheckoutDir(url, ref = '') {
+  return join(sourceCacheDir('remote'), remoteCheckoutKey(url, ref))
+}
+
 /** Clone a source repository into its cache dir (idempotent, concurrency-safe). */
 export async function ensureSourceCloned(sourceId, url, { onCloned } = {}) {
   safeSegment(sourceId, 'source id')
@@ -132,24 +180,10 @@ export async function ensureSourceCloned(sourceId, url, { onCloned } = {}) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     return dir
   }
-  if (hasSourceCheckout(dir)) return dir
+  if (hasSourceCheckout(dir) && readCheckoutOrigin(dir) === url) return dir
 
   return withGitLock(`src:${sourceId}`, async () => {
-    if (hasSourceCheckout(dir)) return dir
-
-    removeManagedDir(dir, { allowTrash: true })
-    const parent = dirname(dir)
-    mkdirSync(parent, { recursive: true })
-    const staging = mkdtempSync(join(parent, '.clone-'))
-    try {
-      await runGit(['clone', '--depth', '1', url, staging], undefined, 120_000)
-      // Empty repositories can be cloned successfully without an index.
-      writeFileSync(join(staging, '.git', 'uph-clone-complete'), '')
-      renameSync(staging, dir)
-      onCloned?.()
-    } finally {
-      safeRmDir(staging)
-    }
+    if (await cloneRepoToCache(dir, url, { timeoutMs: 120_000 })) onCloned?.()
     return dir
   })
 }
@@ -202,17 +236,11 @@ export async function materializePlugin(sourceId, pluginName, source, { refresh 
       if (typeof normalized.url !== 'string' || !/^https?:\/\//.test(normalized.url)) {
         throw new Error(`plugin ${pluginName}: unsupported remote url`)
       }
-      const remoteKey = slugFromUrl(normalized.url)
+      const remoteKey = remoteCheckoutKey(normalized.url, normalized.ref)
       const checkout = join(sourceCacheDir('remote'), remoteKey)
       await withGitLock(`remote:${remoteKey}`, async () => {
-        if (!existsSync(join(checkout, '.git'))) {
-          // --depth 1 keeps clones small; `ref` (branch/tag) is honored when
-          // the marketplace pins one.
-          const args = ['clone', '--depth', '1']
-          if (normalized.ref) args.push('--branch', String(normalized.ref))
-          args.push(normalized.url, checkout)
-          await runGit(args)
-        } else if (refresh) {
+        const cloned = await cloneRepoToCache(checkout, normalized.url, { branch: normalized.ref })
+        if (!cloned && refresh) {
           // The cached checkout is otherwise reused forever, so updates would
           // reinstall the first clone's commit. Re-fetch the tracked ref.
           const args = ['fetch', '--depth', '1', 'origin']

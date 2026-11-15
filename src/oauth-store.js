@@ -108,8 +108,18 @@ export function openOAuthRecordWriter(key) {
   }
 }
 
+/**
+ * Block new bridges and remove existing staging directories so a concurrent or
+ * stale writer cannot republish superseded credentials.
+ */
+function revokeOAuthWriters(file) {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+  writeFileSync(`${file}.revoked`, '', { mode: 0o600 })
+  rmSync(`${file}.writers`, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+}
+
 export function saveOAuthClientCredentials(key, client) {
-  const record = readOAuthRecord(key)
+  const record = { ...readOAuthRecord(key) }
   const nextClientId = String(client.clientId || '').trim()
   const sameClient = record.customClient?.client_id === nextClientId
   const changedSecret = !!client.clientSecret && client.clientSecret !== record.customClient?.client_secret
@@ -127,6 +137,7 @@ export function saveOAuthClientCredentials(key, client) {
   if (sameClient && !changedSecret && JSON.stringify(record.customClient) === JSON.stringify(nextCustomClient)) {
     return
   }
+  if (!sameClient || changedSecret) revokeOAuthWriters(oauthCredentialPath(key))
   record.customClient = nextCustomClient
   writeOAuthRecord(key, record)
 }
@@ -141,11 +152,7 @@ export function deleteOAuthRecord(key, { required = false, ifPresent = false } =
   RECORD_CACHE.delete(file)
   try {
     if (ifPresent && !existsSync(file) && !existsSync(`${file}.writers`)) return
-    // Block new bridges first. Removing the old bridges' staging directories
-    // prevents even a refresh already in progress from publishing after cleanup.
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-    writeFileSync(`${file}.revoked`, '', { mode: 0o600 })
-    rmSync(`${file}.writers`, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    revokeOAuthWriters(file)
     rmSync(file, { force: true })
   } catch (error) {
     if (required) throw error

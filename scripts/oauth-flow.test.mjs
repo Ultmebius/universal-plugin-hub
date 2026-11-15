@@ -34,6 +34,39 @@ test('an OAuth bridge cannot recreate a deleted record or overwrite a new author
     } finally { fresh.close() }
   } finally { stale?.close() }
 })
+
+test('changing a custom OAuth client stops existing writers from restoring the previous sign-in', async () => {
+  const { openOAuthRecordWriter } = await import('../src/oauth-store.js')
+  const key = oauthCredentialKey('rotate-client', 'remote', 'https://fixture.invalid/mcp', 'custom')
+  saveOAuthClientCredentials(key, { clientId: 'old-client' })
+  const stale = openOAuthRecordWriter(key)
+  try {
+    const previous = { ...readOAuthRecord(key), tokens: { access_token: 'old-access' } }
+    assert.equal(stale.write(previous), true)
+    saveOAuthClientCredentials(key, { clientId: 'new-client' })
+    assert.equal(stale.write(previous), false)
+    assert.equal(readOAuthRecord(key).customClient.client_id, 'new-client')
+    assert.equal(readOAuthRecord(key).tokens, undefined)
+    const fresh = openOAuthRecordWriter(key)
+    try {
+      saveOAuthClientCredentials(key, { clientId: 'new-client', clientSecret: 'secret-1' })
+      const secretWriter = openOAuthRecordWriter(key)
+      try {
+        const beforeRotate = { ...readOAuthRecord(key), tokens: { access_token: 'secret-1-access' } }
+        assert.equal(secretWriter.write(beforeRotate), true)
+        saveOAuthClientCredentials(key, { clientId: 'new-client', clientSecret: 'secret-2' })
+        assert.equal(secretWriter.write(beforeRotate), false)
+        assert.equal(readOAuthRecord(key).customClient.client_secret, 'secret-2')
+        assert.equal(readOAuthRecord(key).tokens, undefined)
+      } finally { secretWriter.close() }
+      assert.equal(fresh.write({ ...readOAuthRecord(key), tokens: { access_token: 'new-access' } }), false)
+    } finally { fresh.close() }
+    const latest = openOAuthRecordWriter(key)
+    try {
+      assert.equal(latest.write({ ...readOAuthRecord(key), tokens: { access_token: 'new-access' } }), true)
+    } finally { latest.close() }
+  } finally { stale.close() }
+})
 import { beginOAuthVerification, completeOAuthVerification, getOAuthVerification, cancelOAuthVerification } from '../src/oauth.js'
 
 const root = mkdtempSync(join(tmpdir(), 'hub-oauth-flow-'))
