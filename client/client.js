@@ -9198,7 +9198,6 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			SESSION_STORE.browseSortSnapshots[activeSourceId] = { filter, query, sortBy, names: currentSourceInstalledNames };
 		}, [activeSourceId, filter, query, sortBy, currentSourceInstalledNames]);
 		const installedNames = useMemo(() => new Set(state.plugins.map((p) => p.name)), [state.plugins]);
-		const totalInstalledCount = state.plugins.length;
 		const currentSourcePlugins = useMemo(() => (rows && rows[activeSourceId]) || [], [rows, activeSourceId]);
 		const totalSourcePluginsCount = currentSourcePlugins.length;
 
@@ -9610,7 +9609,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									if (!SESSION_STORE.scrollTops) SESSION_STORE.scrollTops = {};
 									SESSION_STORE.scrollTops[activeSourceId] = 0;
 									scrollContentToTop();
-								} }, `已安装 (${totalInstalledCount})`),
+								} }, "已安装"),
 							),
 						),
 						h("div", { style: { position: "relative" } },
