@@ -588,7 +588,7 @@ async function handle(req, res, prefix = API_PREFIX, skills = null, applyProfile
           const cfg = item.config || {}
           const ownership = pluginTools?.[`user-mcp::${cfg.serverName}`]
           if (ownership?.pluginConnectorOwned || (ownership?.pluginOAuthOwned && remoteConfigFromEntry(cfg))) continue
-          if (cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
+          if (typeof cfg.serverName === 'string' && cfg.serverName && !state.userMcps.some((x) => x && x.name === cfg.serverName)) {
             state.userMcps.push(userMcpConfig(cfg.serverName, {
               transport: cfg.transport, url: cfg.url, command: cfg.command,
               args: Array.isArray(cfg.args) ? cfg.args : [], cwd: cfg.cwd,

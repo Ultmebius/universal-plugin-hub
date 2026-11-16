@@ -323,16 +323,16 @@ test('Windows command shims work in draft verification and after saving', { skip
   assert.deepEqual(absolute, { tools: [], error: null })
 })
 
-test('MCP registration preserves files it cannot safely rewrite', async (t) => {
+test('MCP registration preserves files it cannot safely rewrite and reports parse location', async (t) => {
   const cases = {
-    'DSH tag': '# user config\r\n- id: sandbox-policy\r\n  config:\r\n    workspaceRoot: !!js process.cwd()\r\n- id: ui-theme\r\n',
-    'malformed YAML': '- id: [\n',
-    'mapping at root': 'id: ui-theme\n',
-    'explicit null at root': 'null\n',
+    'malformed YAML': { contents: '- id: [\n', pattern: /无法解析.*第 \d+ 行第 \d+ 列：.*已中止写入/ },
+    'trailing items after empty list': { contents: '[]\n- id: ui-theme\n', pattern: /无法解析.*第 2 行第 1 列：.*已中止写入/ },
+    'mapping at root': { contents: 'id: ui-theme\n', pattern: /顶层必须是数组.*已中止写入/ },
+    'explicit null at root': { contents: 'null\n', pattern: /顶层必须是数组.*已中止写入/ },
   }
   const patch = cordisPatchPath()
   mkdirSync(dirname(patch), { recursive: true })
-  for (const [label, contents] of Object.entries(cases)) {
+  for (const [label, { contents, pattern }] of Object.entries(cases)) {
     await t.test(label, async () => {
       const before = Buffer.from(contents)
       writeFileSync(patch, before)
@@ -340,12 +340,39 @@ test('MCP registration preserves files it cannot safely rewrite', async (t) => {
       const response = await call('POST', '/mcps', { ...local, name: 'blocked-write' })
       assert.ok(readFileSync(patch).equals(before), 'original file must be preserved byte for byte')
       assert.equal(response.status, 500)
-      assert.match(response.body.error, /已中止写入/)
+      assert.match(response.body.error, pattern)
+      assert.equal(response.body.error.includes('\n'), false, 'error message should stay single-line for UI toast')
       assert.equal(scheduled.length, scheduledBefore)
       const listed = await call('GET', '/mcps')
       assert.ok(listed.body.mcps.every((server) => server.name !== 'blocked-write'))
     })
   }
+})
+
+test('MCP registration preserves DSH !!js tags in cordis.patch.yml', async () => {
+  const patch = cordisPatchPath()
+  mkdirSync(dirname(patch), { recursive: true })
+  writeFileSync(
+    patch,
+    [
+      '# user config',
+      '- id: sandbox-policy',
+      '  config:',
+      '    workspaceRoot: !!js process.cwd()',
+      '- id: tool-pwsh',
+      "  disabled: !!js process.platform !== 'win32'",
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  const response = await call('POST', '/mcps', { ...local, name: 'with-dsh-js-tag' })
+  assert.equal(response.status, 200, response.body.error)
+  assert.equal(response.body.ok, true)
+  const written = readFileSync(patch, 'utf8')
+  assert.match(written, /workspaceRoot: !!js process\.cwd\(\)/)
+  assert.match(written, /disabled: !!js process\.platform !== 'win32'/)
+  const entries = readCordisPatch()
+  assert.ok(entries.some((block) => block.insert?.some((item) => item.id === 'mcp-user-mcp-with-dsh-js-tag')))
 })
 
 test('MCP registration supports missing and empty patches and preserves existing valid entries', async (t) => {

@@ -22,7 +22,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir, trashRoot, isSameOrInsidePath } from './store.js'
 import { materializePlugin, pullSource } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, readPluginShortDescription, formatDisplayName, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
+import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, readPluginShortDescription, formatDisplayName, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, mergeManifestWithRow, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { isUploadedSkillTarget } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
@@ -50,6 +50,50 @@ export function cordisPatchPath() {
   return profilePatch
 }
 
+/** Sentinel wrapper distinguishing DSH `!!js` YAML expressions from plain objects. */
+class CordisJsExpr {
+  constructor(expr) {
+    this.expr = expr
+  }
+}
+
+// DSH's Cordis loader (@deepseek-ai/cordis-plugin-include) extends YAML with `!!js` scalar expressions.
+const CORDIS_JS_TAG = yaml.defineScalarTag('tag:yaml.org,2002:js', {
+  resolve: (source) => new CordisJsExpr(source),
+  identify: (value) => value instanceof CordisJsExpr,
+  represent: (value) => value.expr,
+})
+
+const CORDIS_LOAD_SCHEMA = yaml.CORE_SCHEMA.withTags(CORDIS_JS_TAG)
+const CORDIS_DUMP_SCHEMA = yaml.DUMP_SCHEMA.withTags(CORDIS_JS_TAG)
+
+// js-yaml v4 (used by DSH's loader) rejects unquoted empty `!!js` scalars; force single quotes when empty.
+// js-yaml 5.3 uses a Style object while 5.4+ uses numeric SCALAR_STYLE values.
+function quoteEmptyJsTags(docs) {
+  yaml.visit(docs, (node) => {
+    if (node.kind === 'scalar' && (node.tag === '!!js' || node.tag === 'tag:yaml.org,2002:js') && node.value === '') {
+      if (node.style && typeof node.style === 'object') {
+        node.style.singleQuoted = true
+      } else {
+        node.style = yaml.SCALAR_STYLE.SINGLE_QUOTED
+      }
+    }
+  })
+}
+
+/** Extract a concise single-line YAML parse location and reason for UI error toasts. */
+function formatCordisYamlError(error) {
+  const reason = typeof error?.reason === 'string' && error.reason.trim()
+    ? error.reason.trim()
+    : String(error?.message || error || '').split(/\r?\n/)[0].trim()
+  const mark = error?.mark
+  if (mark && Number.isInteger(mark.line) && Number.isInteger(mark.column)) {
+    const loc = `第 ${mark.line + 1} 行第 ${mark.column + 1} 列`
+    return reason ? `${loc}：${reason}` : loc
+  }
+  return reason
+}
+
 function loadCordisPatch(file) {
   let source
   try {
@@ -58,14 +102,18 @@ function loadCordisPatch(file) {
     if (error.code === 'ENOENT') return []
     throw new Error(`无法读取 ${file}，已中止写入以保护现有配置。`, { cause: error })
   }
+  // Strip UTF-8 BOM once: Windows Notepad writes one, and js-yaml v5 rejects BOM before comments.
+  const text = source.charCodeAt(0) === 0xFEFF ? source.slice(1) : source
   // js-yaml can reject an empty stream. An explicit null value is still a document.
-  if (source.replace(/^\uFEFF/, '').split(/\r\n?|\n/).every((line) => /^[ \t]*(?:#.*)?$/.test(line))) return []
+  if (text.split(/\r\n?|\n/).every((line) => /^[ \t]*(?:#.*)?$/.test(line))) return []
 
   let parsed
   try {
-    parsed = yaml.load(source)
+    parsed = yaml.load(text, { schema: CORDIS_LOAD_SCHEMA })
   } catch (error) {
-    throw new Error(`无法解析 ${file}，已中止写入以保护现有配置。请通过 DSH 配置文件手动修改。`, { cause: error })
+    const detail = formatCordisYamlError(error)
+    const suffix = detail ? `（${detail}）` : ''
+    throw new Error(`无法解析 ${file}${suffix}，已中止写入以保护现有配置。请通过 DSH 配置文件手动修改。`, { cause: error })
   }
   if (!Array.isArray(parsed)) {
     throw new Error(`${file} 的顶层必须是数组，已中止写入以保护现有配置。`)
@@ -86,11 +134,16 @@ function readCordisPatchRaw() {
 
 function writeCordisPatchRaw(patch) {
   const file = cordisPatchPath()
-  // A tolerant read can return [] for a DSH-specific or damaged document.
+  // A tolerant read can return [] for a damaged document.
   // Check the on-disk document before any mutation can replace it.
   loadCordisPatch(file)
   mkdirSync(dirname(file), { recursive: true })
-  const content = yaml.dump(patch, { indent: 2, lineWidth: -1 })
+  const content = yaml.dump(patch, {
+    schema: CORDIS_DUMP_SCHEMA,
+    indent: 2,
+    lineWidth: -1,
+    transform: quoteEmptyJsTags,
+  })
   const seq = (PATCH_TMP_SEQ = (PATCH_TMP_SEQ + 1) & 0xffffff).toString(36)
   const tmp = join(dirname(file), `.cordis.patch.${process.pid}.${Date.now().toString(36)}.${seq}.tmp`)
   try {
@@ -1254,7 +1307,7 @@ export function unregisterPluginLsp(pluginName) {
   for (const block of patch) {
     if (block && Array.isArray(block.insert)) {
       const before = block.insert.length
-      block.insert = block.insert.filter((item) => !(item && item.id && item.id.startsWith(prefix)))
+      block.insert = block.insert.filter((item) => !(item && typeof item.id === 'string' && item.id.startsWith(prefix)))
       if (block.insert.length !== before) changed = true
     }
   }
@@ -1290,18 +1343,8 @@ export function getHookBridgeId(pluginName) {
   return `hooks-${slugify(pluginName)}`
 }
 
-/**
- * Register an installed plugin's Claude/Codex hooks into DSH by inserting a
- * `@deepseek-ai/dsh-hooks-claude-code` bridge entry into cordis.patch.yml. The
- * bridge runs an unmodified Claude Code hooks.json on DSH's interception points
- * (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop /
- * SubagentStart / SubagentStop), with `${CLAUDE_PLUGIN_ROOT}` substituted from
- * `pluginRoot`. DSH's HMR re-applies the tree within ~1s, no restart needed.
- *
- * The bridge and its hook-protocol peer are pre-provisioned by the hub's
- * `apply()` on DSH startup, so a per-plugin install is a single patch write.
- */
-export async function registerPluginHooks(pluginName) {
+/** Synchronously compile and register a plugin's hooks inside an active cordis patch batch. */
+function registerPluginHooksSync(pluginName) {
   const target = installedDir(pluginName)
   const dataDir = pluginDataDir(pluginName)
   const compiled = compileResolvedHooks(target, readPluginManifest(target), dataDir)
@@ -1331,6 +1374,21 @@ export async function registerPluginHooks(pluginName) {
   })
   writeCordisPatch(patch)
   return { ok: true, registered: [outPath] }
+}
+
+/**
+ * Register an installed plugin's Claude/Codex hooks into DSH by inserting a
+ * `@deepseek-ai/dsh-hooks-claude-code` bridge entry into cordis.patch.yml. The
+ * bridge runs an unmodified Claude Code hooks.json on DSH's interception points
+ * (SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop /
+ * SubagentStart / SubagentStop), with `${CLAUDE_PLUGIN_ROOT}` substituted from
+ * `pluginRoot`. DSH's HMR re-applies the tree within ~1s, no restart needed.
+ *
+ * The bridge and its hook-protocol peer are pre-provisioned by the hub's
+ * `apply()` on DSH startup, so a per-plugin install is a single patch write.
+ */
+export async function registerPluginHooks(pluginName) {
+  return registerPluginHooksSync(pluginName)
 }
 
 /** Remove a plugin's hooks bridge entry from cordis.patch.yml. */
@@ -2435,6 +2493,48 @@ async function installMarketplacePluginUnlocked(options) {
   return withSourceLock(options.sourceId, () => installMarketplacePluginFromSourceLocked(options))
 }
 
+/** Return true when at least one declared LSP server passes pre-flight resolution. */
+function canRegisterAnyLsp(pluginRoot, dataDir, servers) {
+  for (const s of servers) {
+    const resolved = substitutePluginRoot(s || {}, pluginRoot, dataDir)
+    const resolvedCmd = resolvePluginCommand(s?.command, pluginRoot, dataDir)
+    if (!resolvedCmd || typeof resolvedCmd !== 'string' || !resolvedCmd.trim()) continue
+    if (!resolved.extensionToLanguage || typeof resolved.extensionToLanguage !== 'object' || Object.keys(resolved.extensionToLanguage).length === 0) continue
+    if (resolveCommandPath(resolvedCmd, process.env, { cwd: pluginRoot })) return true
+  }
+  return false
+}
+
+/** Return true when installing/updating this plugin may mutate cordis.patch.yml. */
+function installMayWriteCordisPatch(pluginName, dir, row, target, prevConnectors, initialEnabled) {
+  const incomingManifest = mergeManifestWithRow(readPluginManifest(dir), row)
+  const incomingConnectors = listConnectors(dir, incomingManifest)
+  if (prevConnectors.some((name) => !incomingConnectors.some((c) => c.name === name))) return true
+
+  const dataDir = pluginDataDir(pluginName)
+  if (existsSync(target)) {
+    if (listLspServers(target).length > 0 || existsSync(compiledHooksPath(pluginName))) return true
+    if (!initialEnabled && prevConnectors.length > 0) return true
+  }
+  if (!initialEnabled) return false
+
+  if (compileResolvedHooks(dir, incomingManifest, dataDir) !== null) return true
+  return canRegisterAnyLsp(dir, dataDir, listLspServers(dir, incomingManifest))
+}
+
+/** Best-effort cleanup of files and registrations written during a failed fresh install. */
+async function rollbackFreshInstall(pluginName, target) {
+  try { unregisterPluginHooks(pluginName) } catch {}
+  try { unregisterPluginLsp(pluginName) } catch {}
+  const rolledBackConnectors = existsSync(target) ? getPluginConnectors(target) : []
+  for (const c of rolledBackConnectors) {
+    try { unregisterConnector(pluginName, c.name) } catch {}
+  }
+  await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true }).catch(() => {})
+  try { rmSync(compiledHooksPath(pluginName), { force: true }) } catch {}
+  await removeManagedDirAsync(target, { allowTrash: true }).catch(() => {})
+}
+
 async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, refresh = false, initialEnabled = true }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
@@ -2455,6 +2555,19 @@ async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, 
   // no longer ships and MCP servers it dropped would otherwise stay visible.
   await abortPluginConnectorProbes(pluginName)
   const prevConnectors = existsSync(target) ? getPluginConnectors(target).map((c) => c.name) : []
+  if (installMayWriteCordisPatch(pluginName, dir, row, target, prevConnectors, initialEnabled)) {
+    loadCordisPatch(cordisPatchPath())
+  }
+
+  try {
+    return await materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, target, installed, prevConnectors, initialEnabled })
+  } catch (error) {
+    if (!installed) await rollbackFreshInstall(pluginName, target)
+    throw error
+  }
+}
+
+async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, target, installed, prevConnectors, initialEnabled }) {
   if (existsSync(target)) await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true })
 
   // Idempotent reinstall: clear the previous copy first.
@@ -2662,9 +2775,6 @@ async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, 
 
   // Auto-register and connect any MCP connectors defined in the plugin that do NOT require auth and have valid URLs/commands.
   const pluginConnectors = getPluginConnectors(target)
-  for (const name of prevConnectors) {
-    if (!pluginConnectors.some((c) => c.name === name)) unregisterConnector(pluginName, name)
-  }
   if (installed) {
     // The new copy may ship different tools behind an unchanged command/URL.
     const toolsState = readMcpToolsState()
@@ -2687,29 +2797,34 @@ async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, 
 
   const lspServers = listLspServers(target)
   const lspErrors = []
-  unregisterPluginLsp(pluginName)
-  if (initialEnabled) {
-    // Auto-register LSP servers declared by the plugin. The host packages
-    // (dsh-lsp / dsh-lsp-stdio / dsh-tool-lsp) were pre-provisioned by the
-    // hub's `apply()` at DSH startup — this step is a single, race-free
-    // patch write. `lspErrors` still surface other failures (the user-installed
-    // language server binary not on PATH, missing extensionToLanguage, etc.).
-    // Drop the previous version's server entries; the loop re-adds the ones this
-    // version still declares, so removed servers stop loading.
-    for (const r of registerPluginLsp(pluginName)) {
-      if (!r.ok && r.error) lspErrors.push(r.error)
+  withCordisPatchBatch(() => {
+    for (const name of prevConnectors) {
+      if (!pluginConnectors.some((c) => c.name === name)) unregisterConnector(pluginName, name)
     }
+    unregisterPluginLsp(pluginName)
+    if (initialEnabled) {
+      // Auto-register LSP servers declared by the plugin. The host packages
+      // (dsh-lsp / dsh-lsp-stdio / dsh-tool-lsp) were pre-provisioned by the
+      // hub's `apply()` at DSH startup — this step is a single, race-free
+      // patch write. `lspErrors` still surface other failures (the user-installed
+      // language server binary not on PATH, missing extensionToLanguage, etc.).
+      // Drop the previous version's server entries; the loop re-adds the ones this
+      // version still declares, so removed servers stop loading.
+      for (const r of registerPluginLsp(pluginName)) {
+        if (!r.ok && r.error) lspErrors.push(r.error)
+      }
 
-    // Register the plugin's Claude/Codex hooks into DSH via the hooks bridge.
-    // The bridge package was pre-provisioned by the hub's `apply()`; this is a
-    // single patch write.
-    await registerPluginHooks(pluginName)
-  } else {
-    for (const c of pluginConnectors) {
-      toggleConnector(pluginName, c.name, false)
+      // Register the plugin's Claude/Codex hooks into DSH via the hooks bridge.
+      // The bridge package was pre-provisioned by the hub's `apply()`; this is a
+      // single patch write.
+      registerPluginHooksSync(pluginName)
+    } else {
+      for (const c of pluginConnectors) {
+        toggleConnector(pluginName, c.name, false)
+      }
+      unregisterPluginHooks(pluginName)
     }
-    unregisterPluginHooks(pluginName)
-  }
+  })
 
   const record = {
     id: `${sourceId}/${pluginName}`,
@@ -2907,8 +3022,8 @@ async function togglePluginUnlocked(pluginName, enabled, epoch, options = {}) {
         for (const r of registerPluginLsp(pluginName)) {
           if (!r.ok && r.error) lspErrors.push(r.error)
         }
+        registerPluginHooksSync(pluginName)
       })
-      await registerPluginHooks(pluginName)
     } catch (err) {
       if (rec.enabled === false) await rollbackEnable()
       throw err
@@ -3126,7 +3241,7 @@ function mcpPublicToolName(server, rawName) {
 /** Public branding only. Connector configuration and tool arguments stay out of this response. */
 export function toolCallIconGroups() {
   const registrations = readCordisPatch().flatMap(block => block?.insert || [])
-    .filter(entry => entry?.name === '@deepseek-ai/dsh-mcp-client' && /^[A-Za-z0-9_-]{1,32}$/.test(entry.config?.serverName || ''))
+    .filter(entry => entry?.name === '@deepseek-ai/dsh-mcp-client' && typeof entry.config?.serverName === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(entry.config.serverName))
   const byServer = new Map()
   for (const entry of registrations) {
     const server = entry.config.serverName
