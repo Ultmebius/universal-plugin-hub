@@ -552,3 +552,134 @@ test('Edge cases: Theme resolution fallback, missing record handling, name-only 
   assert.equal(mdTitle.children[0], 'Market Custom Plugin', 'ManagePage uses marketPlugin displayName when record displayName is omitted');
 });
 
+function loadManagePageContext() {
+  const themeStart = clientSource.indexOf('function isDarkMode(');
+  const themeEnd = clientSource.indexOf('\n\t// ────────────────────────────── API', themeStart);
+  const iconStart = clientSource.indexOf('const BRAND_ICONS = {');
+  const iconEnd = clientSource.indexOf('\tfunction PluginCard(');
+  const manageStart = clientSource.indexOf('\tfunction ManagePage(');
+  const manageEnd = clientSource.indexOf('\n\t// ────────────────────────────── Main sidebar', manageStart);
+
+  const context = {
+    ...React,
+    React,
+    h: React.createElement,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout: (id) => clearTimeout(id),
+    window: {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      setTimeout: (fn) => setTimeout(fn, 0),
+      clearTimeout: (id) => clearTimeout(id),
+      getComputedStyle: () => ({ backgroundColor: 'transparent', color: 'transparent' }),
+      matchMedia: () => ({ matches: false }),
+    },
+    document: {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      documentElement: { getAttribute: () => null, classList: { contains: () => false } },
+      body: { getAttribute: () => null, classList: { contains: () => false } },
+    },
+    useDetailScrollMask: () => ({ detailRef: { current: null }, maskClass: '', updateMask: () => {} }),
+    useDialogEscape: () => {},
+    useHoverPreview: () => [null, () => {}, { suspend: () => {} }],
+    GLOBAL_MCP_TOOLS_CACHE: {},
+    saveMcpToolsCache: () => {},
+    useOauthVerification: () => ({ pending: null, start: () => {}, cancel: () => {} }),
+    useConnectionProbe: () => ({ start: () => {}, abort: () => {} }),
+    compareSemver: () => 0,
+    cleanMcpError: (e) => e.message,
+    isRemoteTransport: () => false,
+    IconChevronLeft: () => React.createElement('span', null, '<'),
+    IconMore: () => React.createElement('span', null, '...'),
+    IconLink: () => React.createElement('span', null, 'link'),
+    ExpandableSection: ({ title, children }) => React.createElement('div', null, title, children),
+    SkillSummaryPill: () => null,
+    AgentSummaryPill: () => null,
+    ConnectorSummaryPill: () => null,
+    LspSummaryPill: () => null,
+    HookSummaryPill: () => null,
+    PromptSummaryPill: () => null,
+    SmartMarkdown: ({ text }) => React.createElement('div', null, text),
+    IconRefresh: () => null,
+    IconCheck: () => null,
+    IconCross: () => null,
+    IconSliders: () => null,
+    IconSearch: () => null,
+    api: async () => ({}),
+    URL,
+  };
+
+  vm.runInNewContext(
+    clientSource.slice(themeStart, themeEnd) + '\n' +
+    clientSource.slice(iconStart, iconEnd) + '\n' +
+    clientSource.slice(clientSource.indexOf('function useRememberedDetailScroll('), clientSource.indexOf('function useDetailScrollMask(')) + '\n' +
+    clientSource.slice(clientSource.indexOf('function backdropDismissProps('), clientSource.indexOf('// ────────────────────────────── Modern Install Dialog')) + '\n' +
+    clientSource.slice(clientSource.indexOf('function useAutoMcpTools('), clientSource.indexOf('// Shared tool grid for the MCP page')) + '\n' +
+    clientSource.slice(manageStart, manageEnd) + '\n' +
+    'globalThis.ManagePage = ManagePage;',
+    context,
+  );
+  return context;
+}
+
+test('ManagePage hides Author column when author is missing or unknown and uses semantic <dl> metadata layout', () => {
+  const context = loadManagePageContext();
+  const renderManage = (record, rows = {}) => {
+    let view;
+    act(() => {
+      view = create(React.createElement(context.ManagePage, {
+        record,
+        state: { sources: [{ id: 'ocr', name: 'Open Code Review', url: 'https://example.com' }], plugins: [] },
+        rows,
+        refreshState: () => {},
+        isDark: false,
+        onBack: () => {},
+        onClose: () => {},
+      }));
+    });
+    const metaNode = view.root.findByProps({ className: 'cpm-meta' });
+    const metaType = metaNode.type;
+    const pairs = metaNode.findAllByType('div').map((group) => ({
+      term: group.findByType('dt').children.join(''),
+      valueText: group.findByType('dd').children.join(''),
+    }));
+    const imgSrcs = view.root.findAllByType('img').map((img) => img.props.src);
+    act(() => view.unmount());
+    return { metaType, pairs, imgSrcs };
+  };
+
+  for (const author of [undefined, null, '', '   ', '未知', 'Unknown', { name: 'unknown' }, { name: '  ' }]) {
+    const { metaType, pairs, imgSrcs } = renderManage({ name: 'open-code-review', sourceId: 'ocr', version: '1.0.0', author });
+    assert.equal(metaType, 'dl', 'metadata container should use semantic <dl>');
+    assert.deepEqual(
+      pairs.map((p) => p.term),
+      ['Source', 'Version'],
+      `should omit Author column for unknown author value: ${JSON.stringify(author)}`,
+    );
+    assert.ok(!pairs.some((p) => p.valueText.includes('未知')), 'should not render 未知 fallback');
+    assert.ok(!imgSrcs.some((src) => String(src).includes('unknown.png')), 'should not look up GitHub avatar for unknown author');
+  }
+
+  for (const [author, expected] of [
+    ['Anthropic', 'Anthropic'],
+    [{ name: '  OpenAI  ' }, 'OpenAI'],
+  ]) {
+    const { metaType, pairs } = renderManage({ name: 'open-code-review', sourceId: 'ocr', version: '1.0.0', author });
+    assert.equal(metaType, 'dl');
+    assert.deepEqual(pairs.map((p) => p.term), ['Source', 'Version', 'Author']);
+    assert.equal(pairs[2].valueText, expected);
+  }
+
+  const fallbackResult = renderManage(
+    { name: 'open-code-review', sourceId: 'ocr', version: '1.0.0', author: '未知' },
+    { ocr: [{ name: 'open-code-review', author: 'Alibaba OCR' }] },
+  );
+  assert.deepEqual(fallbackResult.pairs.map((p) => p.term), ['Source', 'Version', 'Author']);
+  assert.equal(fallbackResult.pairs[2].valueText, 'Alibaba OCR');
+
+  assert.match(clientSource, /\.cpm-meta\s*\{[^}]*display:\s*flex;[^}]*margin-block:\s*14px 0;[^}]*padding-block-end:\s*14px;[^}]*flex-wrap:\s*wrap;/);
+  assert.match(clientSource, /\.cpm-meta\s*>\s*div\s*\{[^}]*min-inline-size:\s*0;/);
+  assert.match(clientSource, /\.cpm-meta\s+\.v\s*\{[^}]*margin-inline-start:\s*0;[^}]*overflow-wrap:\s*anywhere;/);
+});
+

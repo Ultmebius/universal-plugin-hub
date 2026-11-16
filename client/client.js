@@ -1680,20 +1680,25 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 }
 .cpm-meta {
 	display: flex;
-	gap: 32px;
-	margin-top: 14px;
-	padding-bottom: 14px;
-	border-bottom: 1px solid var(--cpm-border);
+	gap: 12px 32px;
+	margin-block: 14px 0;
+	padding-block-end: 14px;
+	border-block-end: 1px solid var(--cpm-border);
 	flex-wrap: wrap;
 }
-.cpm-meta div { font-size: 13px; }
+.cpm-meta > div { font-size: 13px; min-inline-size: 0; }
 .cpm-meta .k {
 	color: var(--cpm-muted);
 	display: block;
 	font-size: 11.5px;
-	margin-bottom: 2px;
+	margin-block-end: 2px;
 }
-.cpm-meta .v { color: var(--cpm-text); font-weight: 500; }
+.cpm-meta .v {
+	margin-inline-start: 0;
+	color: var(--cpm-text);
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
 .cpm-meta .v a { color: var(--cpm-accent); text-decoration: none; }
 .cpm-skill-warning { color: #c26a24; font-size: 13px; }
 .cpm-card-open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -12262,6 +12267,20 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		return props.record ? h(ManagePageContent, props) : null;
 	}
 
+	/** Return the first non-empty author name that is not an unknown placeholder. */
+	function resolveKnownAuthor(...candidates) {
+		for (const candidate of candidates) {
+			let raw = "";
+			if (typeof candidate === "string") raw = candidate;
+			else if (candidate && typeof candidate === "object" && typeof candidate.name === "string") raw = candidate.name;
+			const trimmed = raw.trim();
+			if (!trimmed) continue;
+			if (trimmed === "未知" || trimmed.toLowerCase() === "unknown") continue;
+			return trimmed;
+		}
+		return "";
+	}
+
 	function ManagePageContent({ record, state, rows, isDark, refreshState, patchPluginInState, showToast, onBack, onClose, initialTab, initialConnector, containerRef, scrollState }) {
 		const dark = typeof isDark === "boolean" ? isDark : (typeof isDarkMode === "function" ? isDarkMode() : false);
 		const [tab, setTabRaw] = useState(scrollState?.manageTab || initialTab || "skills");
@@ -12675,6 +12694,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, []);
 
 		const source = state.sources.find((s) => s.id === record.sourceId);
+		const authorName = resolveKnownAuthor(record?.author, marketPlugin?.author, marketPlugin?.detail?.author);
 		const skills = (Array.isArray(record.skills) && record.skills.length > 0)
 			? record.skills
 			: (marketPlugin?.detail?.skills && Array.isArray(marketPlugin.detail.skills) && marketPlugin.detail.skills.length > 0)
@@ -12967,12 +12987,12 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 							...marketPlugin,
 							...record,
 							icons: (record?.icons && (record.icons.light?.length || record.icons.dark?.length)) ? record.icons : marketPlugin.icons,
-							author: record?.author || marketPlugin.author,
+							author: authorName || undefined,
 							homepage: record?.homepage || marketPlugin.homepage,
 							description: record?.description || marketPlugin.description,
 							displayName: record?.displayName || marketPlugin.displayName,
 							source: record?.source || marketPlugin.source,
-						} : record,
+						} : { ...record, author: authorName || undefined },
 						isDark: dark,
 						eager: true,
 					}),
@@ -12996,23 +13016,23 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}),
 			),
 
-			h("div", { className: "cpm-meta" },
+			h("dl", { className: "cpm-meta" },
 				h("div", null,
-					h("span", { className: "k" }, "Source"),
-					h("span", { className: "v" },
+					h("dt", { className: "k" }, "Source"),
+					h("dd", { className: "v" },
 						h("a", { href: source ? source.url : "#", target: "_blank", rel: "noreferrer" },
 							`Marketplace (${source ? source.name : record.sourceId})`,
 						),
 					),
 				),
 				h("div", null,
-					h("span", { className: "k" }, "Version"),
-					h("span", { className: "v" }, record.version || "1.0.0"),
+					h("dt", { className: "k" }, "Version"),
+					h("dd", { className: "v" }, record.version || "1.0.0"),
 				),
-				h("div", null,
-					h("span", { className: "k" }, "Author"),
-					h("span", { className: "v" }, record.author || "未知"),
-				),
+				authorName ? h("div", null,
+					h("dt", { className: "k" }, "Author"),
+					h("dd", { className: "v" }, authorName),
+				) : null,
 			),
 
 			record.description && h("div", { className: "cpm-section" },
