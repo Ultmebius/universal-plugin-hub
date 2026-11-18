@@ -135,29 +135,35 @@ async function flush() {
   })
 }
 
-test('filter menu omits parenthesized installed count on 已安装 while keeping 全部插件 count', async (t) => {
+test('filter menu shows total installed plugin count on 已安装 alongside current source count on 全部插件', async (t) => {
   const cases = [
     {
-      label: 'with installed plugins across marketplaces',
+      label: 'with 8 installed plugins across multiple sources',
       plugins: Array.from({ length: 8 }, (_, idx) => ({
-        id: `anthropic/installed-${idx}`,
+        id: `${idx < 2 ? 'anthropic' : 'other'}/installed-${idx}`,
         name: `installed-${idx}`,
-        sourceId: 'anthropic',
+        sourceId: idx < 2 ? 'anthropic' : 'other',
       })),
+      expectedInstalledLabel: '已安装 (8)',
     },
     {
       label: 'with zero installed plugins',
       plugins: [],
+      expectedInstalledLabel: '已安装 (0)',
     },
   ]
 
-  for (const { label, plugins } of cases) {
+  for (const { label, plugins, expectedInstalledLabel } of cases) {
     await t.test(label, async () => {
       const MainComponent = loadMainComponent({
-        sources: [{ id: 'anthropic', name: 'Anthropic', builtin: true }],
+        sources: [
+          { id: 'anthropic', name: 'Anthropic', builtin: true },
+          { id: 'other', name: 'Other Marketplace' },
+        ],
         plugins,
         rows: {
           anthropic: [{ id: 'anthropic/only-one', name: 'only-one', description: 'Single catalog entry' }],
+          other: [{ id: 'other/extra', name: 'extra', description: 'Other catalog entry' }],
         },
       })
 
@@ -174,7 +180,7 @@ test('filter menu omits parenthesized installed count on 已安装 while keeping
         await act(async () => { filterBtn.props.onClick() })
 
         const menuItems = renderer.root.findAll((n) => n.props?.className === 'cpm-menu-item')
-        assert.deepEqual(menuItems.map(textOf), ['全部插件 (1)', '已安装'])
+        assert.deepEqual(menuItems.map(textOf), ['全部插件 (1)', expectedInstalledLabel])
 
         await act(async () => { menuItems[1].props.onClick() })
         await flush()
