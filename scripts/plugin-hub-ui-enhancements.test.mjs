@@ -683,3 +683,26 @@ test('ManagePage hides Author column when author is missing or unknown and uses 
   assert.match(clientSource, /\.cpm-meta\s+\.v\s*\{[^}]*margin-inline-start:\s*0;[^}]*overflow-wrap:\s*anywhere;/);
 });
 
+test('Package plugin icon uses a continuous-curvature DeepSeek gradient squircle with vector Plugin wordmark declared for DSH', () => {
+  const pkgPath = new URL('../package.json', import.meta.url);
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+
+  assert.equal(pkg.icon, './assets/icon.svg');
+  assert.equal(pkg.exports?.['./icon'], './assets/icon.svg');
+  assert.equal(pkg.exports?.['./package.json'], './package.json');
+  assert.ok(Array.isArray(pkg.files) && pkg.files.includes('assets/icon.svg'), 'files must ship assets/icon.svg');
+
+  const iconFile = new URL('../assets/icon.svg', import.meta.url);
+  const iconBytes = fs.readFileSync(iconFile);
+  assert.ok(iconBytes.length > 0 && iconBytes.length <= 256 * 1024, 'icon must stay within DSH 256 KiB limit');
+
+  const svg = iconBytes.toString('utf8');
+  assert.match(svg, /<svg\b[^>]*viewBox="0 0 36 36"/);
+  assert.doesNotMatch(svg, /<(?:text|tspan|script|foreignObject)\b/i, 'icon must outline wordmark as vector paths without system-font <text> elements');
+  assert.doesNotMatch(svg, /var\(--|(?:href|xlink:href|src)\s*=|url\(\s*['"]?(?!#)/i, 'icon rendered in <img> must be self-contained');
+  assert.match(svg, /<linearGradient\b[^>]*id="uph-bg"[\s\S]*#4D6BFE/i, 'icon must include DeepSeek official primary blue #4D6BFE');
+  assert.match(svg, /<path\b[^>]*d="M34\.000 18\.000C/, 'squircle body must use continuous cubic Bezier curves');
+  assert.match(svg, /A8\.000 6\.848 0 0 0 26\.000 6\.301/, 'U handle must use smooth continuous elliptical bowl');
+  assert.match(svg, /<path\b[^>]*id="uph-wordmark"\s+d="M/, 'Plugin wordmark must be embedded as vector path');
+});
+
