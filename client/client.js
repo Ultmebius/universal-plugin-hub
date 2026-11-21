@@ -5383,7 +5383,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}
 
 	function AnthropicIcon({ isDark }) {
-		return h("div", {
+		return h("span", {
 			className: "cpm-card-icon",
 			style: {
 				background: isDark ? "#18181b" : "#f4f1ea",
@@ -5403,7 +5403,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	function Context7Icon({ isDark }) {
-		return h("div", {
+		return h("span", {
 			className: "cpm-card-icon",
 			style: {
 				background: isDark ? "#09090b" : "#000000",
@@ -5605,8 +5605,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			const renderedFallback = (!inline && typeof React !== "undefined" && typeof PluginIconFallback === "function" && React.isValidElement?.(fallback) && fallback.type === PluginIconFallback)
 				? React.cloneElement(fallback, { underlay: !!avatarUrl })
 				: fallback;
-			return h("div", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
-				h("div", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, inline ? null : renderedFallback),
+			return h("span", { className: "cpm-card-icon", style: { position: "relative", overflow: "hidden" } },
+				h("span", { className: "cpm-icon-underlay", "aria-hidden": true, style: { position: "absolute", inset: 0, opacity: imgLoaded ? 0 : 1 } }, inline ? null : renderedFallback),
 				// A plugin-local icon is a same-origin disk read, so deferring it to
 				// the viewport buys nothing and costs a visible placeholder on scroll.
 				// Only remote avatars are worth deferring — and never above the fold.
@@ -5668,7 +5668,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}
 
 		// Use the upstream 3D PNG unchanged; declared logos retain priority.
-		return h("div", {
+		return h("span", {
 			className: "cpm-card-icon cpm-fallback-icon",
 			"aria-hidden": true,
 			style: {
@@ -13998,6 +13998,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	const AT_PLUGIN_RAW_TOKEN_RE = /@([^\s\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}，。；：、！？（）【】《》“”‘’」』]+)/uy;
 	const AT_PLUGIN_LEFT_ALLOWED_RE = /[\s(\[{"'“‘（【《，。；：、！？\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 	const AT_PLUGIN_TRAILING_PUNCT_RE = /[.,;:!?，。；：！？)"'\]”’）】》]+$/u;
+	const EASY_REWRITE_BUBBLE = '[data-dsh-easyrewrite="user"] .dsh-easyrewrite-bubble';
+	const AT_PLUGIN_CLIPBOARD = "data-uph-plugin-clipboard";
 	const AT_PLUGINS_CSS = `
 [role="listbox"] button[id^="dsh-slash-option-plugins-"] {
 	gap: 8px;
@@ -14061,8 +14063,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	object-fit: contain !important;
 	display: block;
 }
-[data-composer-chip="plugins"],
-.cpm-at-plugin-chip {
+[data-composer-chip="plugins"] {
 	display: inline-flex;
 	align-items: baseline;
 	gap: 4px;
@@ -14077,6 +14078,27 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	user-select: none;
 	cursor: default;
 	transition: background-color 120ms ease;
+}
+.cpm-at-plugin-chip {
+	display: inline;
+	margin: 0 2px;
+	border-radius: var(--dsw-radius-sm, 4px);
+	color: var(--dsw-alias-label-primary, #18181b);
+	font-weight: 600;
+	overflow-wrap: anywhere;
+	user-select: all;
+}
+.cpm-at-plugin-chip > .cpm-at-plugin-chip-icon-wrap {
+	display: inline-block;
+	margin-inline-end: 4px;
+	vertical-align: -0.125em;
+	top: auto;
+	pointer-events: none;
+}
+.cpm-at-plugin-chip .cpm-at-plugin-chip-icon,
+.cpm-at-plugin-chip .cpm-card-icon {
+	display: inline-block;
+	vertical-align: top;
 }
 body[data-ds-dark-theme] [data-composer-chip="plugins"],
 body[data-ds-dark-theme] .cpm-at-plugin-chip {
@@ -14133,11 +14155,6 @@ body[data-ds-dark-theme] .cpm-at-plugin-chip {
 	line-height: 1;
 	position: relative;
 	top: 0.05em;
-}
-.cpm-at-plugin-chip-label {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 .cpm-at-plugin-popover {
 	position: fixed;
@@ -14347,6 +14364,106 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 
 	function atPluginReference(mention, label) {
 		return { source: "plugins", ref: mention, label, clipboardText: mention };
+	}
+
+	function copyAtPluginReferences(event) {
+		if (event.defaultPrevented || !event.clipboardData || event.target?.isContentEditable ||
+			event.target?.closest?.("input, textarea")) return;
+		const selection = document.getSelection?.();
+		if (selection?.rangeCount !== 1 || selection.isCollapsed) return;
+		const range = selection.getRangeAt(0);
+		const common = range.commonAncestorContainer;
+		const element = common.nodeType === 1 ? common : common.parentElement;
+		const bubble = element?.closest('[data-message-bubble], ' + EASY_REWRITE_BUBBLE);
+		const chipSelector = '[' + AT_PLUGIN_CLIPBOARD + ']';
+		if (!bubble?.querySelector(chipSelector)) return;
+
+		const fragment = range.cloneContents();
+		// User text is inline. Leave structured content such as a host JSON block
+		// to the browser so its formatting and rich clipboard formats are kept.
+		if (fragment.querySelector("div, p, pre, table, ul, ol, blockquote")) return;
+		const enclosingChip = element.closest(chipSelector);
+		let text;
+		if (enclosingChip && fragment.textContent === enclosingChip.textContent) {
+			text = enclosingChip.getAttribute(AT_PLUGIN_CLIPBOARD);
+		} else {
+			let replaced = false;
+			for (const chip of fragment.querySelectorAll(chipSelector)) {
+				// A clipped label is ordinary selected text. A whole chip carries the original reference.
+				if (chip.querySelector(".cpm-at-plugin-chip-label")?.textContent !== chip.getAttribute("data-uph-plugin-label")) continue;
+				chip.replaceWith(chip.getAttribute(AT_PLUGIN_CLIPBOARD));
+				replaced = true;
+			}
+			if (!replaced) return;
+			for (const br of fragment.querySelectorAll("br")) br.replaceWith("\n");
+			text = fragment.textContent;
+		}
+		event.clipboardData.setData("text/plain", text);
+		event.preventDefault();
+	}
+
+	function restoreEasyRewriteBubble({ bubble, mount, original }) {
+		if (mount.parentElement === bubble) mount.replaceWith(original);
+	}
+
+	function watchEasyRewriteBubbles(publish) {
+		const entries = new Map();
+		let nextId = 0;
+
+		function collect(root, bubbles) {
+			if (root.nodeType !== 1) return;
+			if (root.matches(EASY_REWRITE_BUBBLE)) bubbles.add(root);
+			for (const bubble of root.querySelectorAll(EASY_REWRITE_BUBBLE)) bubbles.add(bubble);
+		}
+
+		function update(bubbles) {
+			let changed = false;
+			for (const bubble of bubbles) {
+				const previous = entries.get(bubble);
+				const original = bubble.firstChild;
+				if (bubble.isConnected && original && !original.nextSibling &&
+					(previous?.mount === original || (previous?.original === original && previous.text === original.data))) continue;
+				if (entries.delete(bubble)) changed = true;
+				// EasyRewrite renders the resting bubble as one text node. Leave its editor,
+				// attachments, buttons and any future renderer using structured children alone.
+				if (!bubble.isConnected || original?.nodeType !== 3 || original.nextSibling) continue;
+				const text = original.data;
+				const first = matchAtPluginMention(text, 0, null, true);
+				if (!first) continue;
+				const mount = document.createElement("span");
+				mount.style.display = "contents";
+				entries.set(bubble, { id: nextId++, bubble, original, text, first, mount });
+				changed = true;
+			}
+			if (changed) publish([...entries.values()]);
+		}
+
+		const observer = new MutationObserver((mutations) => {
+			const bubbles = new Set();
+			let removed = false;
+			for (const mutation of mutations) {
+				const target = mutation.type === "characterData" ? mutation.target.parentElement : mutation.target;
+				if (target?.matches?.(EASY_REWRITE_BUBBLE)) bubbles.add(target);
+				for (const node of mutation.addedNodes) collect(node, bubbles);
+				if (!removed && entries.size > 0 && mutation.removedNodes.length > 0) {
+					removed = Array.from(mutation.removedNodes).some((node) => node.nodeType === 1);
+				}
+			}
+			if (removed) {
+				for (const bubble of entries.keys()) {
+					if (!bubble.isConnected) bubbles.add(bubble);
+				}
+			}
+			update(bubbles);
+		});
+		observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+		update(document.querySelectorAll(EASY_REWRITE_BUBBLE));
+		return () => {
+			observer.disconnect();
+			// Restore text before another client instance scans the bubbles.
+			for (const entry of entries.values()) restoreEasyRewriteBubble(entry);
+			entries.clear();
+		};
 	}
 
 	function pasteAtPluginReferences(event, byLowerName) {
@@ -14783,12 +14900,13 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 		const ReactDOM = (() => { try { return require("react-dom") || null; } catch { return null; } })();
 		const ReactDOMClient = (() => { try { return require("react-dom/client") || null; } catch { return null; } })();
 
-		function PluginMentionChip({ node }) {
+		function PluginMentionChip({ node, raw }) {
 			const [revision, setRevision] = useState(0);
 			useEffect(() => {
 				const bump = () => setRevision((r) => r + 1);
 				const offStore = store.subscribe(bump);
 				const offTheme = store.subscribeTheme(bump);
+				store.warm();
 				return () => {
 					offStore();
 					offTheme();
@@ -14802,6 +14920,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 				"data-uph-plugin-chip": "true",
 				"data-uph-plugin-name": live?.name || node?.data?.name || "",
 				"data-uph-plugin-label": label,
+				[AT_PLUGIN_CLIPBOARD]: raw,
 			},
 				live
 					? h("span", { className: "cpm-at-plugin-chip-icon-wrap", "aria-hidden": "true" },
@@ -14812,6 +14931,27 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 					: h("span", { className: "cpm-at-plugin-chip-marker", "aria-hidden": "true" }, "@"),
 				h("span", { className: "cpm-at-plugin-chip-label" }, label)
 			);
+		}
+
+		function EasyRewritePluginText({ entry }) {
+			const { bubble, original, text, first, mount } = entry;
+			useSafeLayoutEffect(() => {
+				// Stage the portal off-DOM, then swap only the same plain text once
+				// the chips have rendered. EasyRewrite still owns the bubble and its events.
+				if (!bubble.isConnected || bubble.firstChild !== original || original.nextSibling || original.data !== text) return;
+				original.replaceWith(mount);
+				return () => restoreEasyRewriteBubble(entry);
+			}, [entry]);
+			const children = [];
+			let cursor = 0;
+			for (let node = first; node; node = matchAtPluginMention(text, cursor, null, true)) {
+				children.push(text.slice(cursor, node.start), h(PluginMentionChip, {
+					key: node.start, node, raw: text.slice(node.start, node.end),
+				}));
+				cursor = node.end;
+			}
+			children.push(text.slice(cursor));
+			return children;
 		}
 
 		function PluginChipHoverPopover({ hovered, isDark, session }) {
@@ -14906,7 +15046,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 			let knownComposerEl = null;
 			let syncQueued = false;
 			let blockDisposed = false;
-			let activeOverlayState = { chips: [], hovered: null, isDark: store.isDark() };
+			let activeOverlayState = { chips: [], rewriteBubbles: [], hovered: null, isDark: store.isDark() };
 			let setOverlayState = null;
 			let hoverSession = null;
 
@@ -15191,11 +15331,13 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 
 			if (typeof document.addEventListener === "function") {
 				const onPaste = (event) => pasteAtPluginReferences(event, store.getByLowerName());
+				document.addEventListener("copy", copyAtPluginReferences);
 				document.addEventListener("paste", onPaste, true);
 				document.addEventListener("pointerover", onPointerOver, true);
 				document.addEventListener("focusin", onFocusIn, true);
 				document.addEventListener("keydown", onComposerKeyDown, true);
 				disposers.push(() => {
+					document.removeEventListener("copy", copyAtPluginReferences);
 					document.removeEventListener("paste", onPaste, true);
 					document.removeEventListener("pointerover", onPointerOver, true);
 					document.removeEventListener("focusin", onFocusIn, true);
@@ -15247,6 +15389,9 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 						setLocalState(activeOverlayState);
 						return () => { if (setOverlayState === setLocalState) setOverlayState = null; };
 					}, []);
+					const rewritePortals = useMemo(() => overlayState.rewriteBubbles.map((entry) => ReactDOM.createPortal(
+						h(EasyRewritePluginText, { entry }), entry.mount, "easyrewrite-" + entry.id,
+					)), [overlayState.rewriteBubbles]);
 					return h(React.Fragment, null,
 						overlayState.chips.map((entry) => (
 							entry.iconSlot?.isConnected
@@ -15259,6 +15404,7 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 								)
 								: null
 						)),
+						rewritePortals,
 						h(PluginChipHoverPopover, {
 							hovered: overlayState.hovered,
 							isDark: overlayState.isDark,
@@ -15271,11 +15417,17 @@ body[data-ds-dark-theme] .cpm-at-plugin-popover,
 				overlayRoot.render(h(AtPluginsOverlay));
 				disposers.push(() => {
 					setOverlayState = null;
-					activeOverlayState = { chips: [], hovered: null, isDark: false };
+					activeOverlayState = { chips: [], rewriteBubbles: [], hovered: null, isDark: false };
 					cleanupStaleAtPluginDom();
 					try { overlayRoot.unmount(); } catch {}
 					try { overlayHost.remove(); } catch {}
 				});
+				if (typeof MutationObserver === "function") {
+					disposers.push(watchEasyRewriteBubbles((rewriteBubbles) => {
+						activeOverlayState = { ...activeOverlayState, rewriteBubbles };
+						setOverlayState?.(activeOverlayState);
+					}));
+				}
 			} else {
 				disposers.push(() => cleanupStaleAtPluginDom());
 			}

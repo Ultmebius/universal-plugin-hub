@@ -569,6 +569,9 @@ test('client.js registers @ input trigger (order -1, scoped UI, reference chip) 
     assert.match(atStyle.textContent, /button\[id\^="dsh-slash-option-plugins-"\]/)
     assert.match(atStyle.textContent, /text-align:\s*left/)
     assert.match(atStyle.textContent, /\.cpm-at-plugin-chip/)
+    const sentChipStyle = atStyle.textContent.match(/\.cpm-at-plugin-chip\s*\{([^}]*)\}/)?.[1] || ''
+    assert.match(sentChipStyle, /display:\s*inline;/)
+    assert.match(sentChipStyle, /user-select:\s*all;/)
     assert.match(atStyle.textContent, /--dsw-alias-label-primary/)
     assert.match(atStyle.textContent, /width:\s*clamp\(13px,\s*1em,\s*16px\)/)
     assert.match(atStyle.textContent, /\[data-composer-chip="plugins"\]\[data-uph-plugin-resolved="true"\]\s*>\s*span:not\(\[data-uph-chip-icon\]\)\s*>\s*span:first-child[\s\S]*display:\s*none\s*!important/)
@@ -708,6 +711,7 @@ test('client.js registers @ input trigger (order -1, scoped UI, reference chip) 
     assert.equal(jsonTree.props.className, 'cpm-at-plugin-chip')
     assert.equal(jsonTree.props.title, undefined, 'resolved sent chip must never attach native browser title tooltip')
     assert.equal(jsonTree.props['data-uph-plugin-name'], 'remotion')
+    assert.equal(jsonTree.props['data-uph-plugin-clipboard'], '@remotion')
     assert.equal(jsonTree.children.length, 2)
     assert.equal(jsonTree.children[0].props.className, 'cpm-at-plugin-chip-icon-wrap')
     assert.equal(jsonTree.children[1].props.className, 'cpm-at-plugin-chip-label')
@@ -722,6 +726,57 @@ test('client.js registers @ input trigger (order -1, scoped UI, reference chip) 
     assert.equal(legacyJson.props.title, undefined)
     assert.equal(legacyJson.children[0].props.className, 'cpm-at-plugin-chip-marker')
     assert.equal(legacyJson.children[0].children.join(''), '@')
+    assert.equal(legacyJson.props['data-uph-plugin-clipboard'], '@[Old Plug](uph-plugin:old-plug)')
+
+    // Selection copy keeps the serialized reference, spaces and explicit line breaks.
+    const clipboardSelector = '[data-uph-plugin-clipboard]'
+    let structured = false
+    const copiedChip = {
+      textContent: 'Computer Use',
+      querySelector: (selector) => selector === '.cpm-at-plugin-chip-label' ? { textContent: 'Computer Use' } : null,
+      getAttribute(name) {
+        if (name === 'data-uph-plugin-label') return 'Computer Use'
+        return name === 'data-uph-plugin-clipboard' ? computer : null
+      },
+      replaceWith: (text) => { parts[parts.indexOf(copiedChip)] = text },
+    }
+    const br = {
+      textContent: '',
+      replaceWith: (text) => { parts[parts.indexOf(br)] = text },
+    }
+    const parts = ['用  ', copiedChip, '  然后', br, '下一行']
+    const fragment = {
+      get textContent() { return parts.map(part => typeof part === 'string' ? part : part.textContent).join('') },
+      querySelector: (selector) => structured && selector.includes('pre') ? {} : null,
+      querySelectorAll(selector) {
+        if (selector === clipboardSelector) return parts.filter(part => part === copiedChip)
+        return selector === 'br' ? parts.filter(part => part === br) : []
+      },
+    }
+    const bubble = { querySelector: (selector) => selector === clipboardSelector ? copiedChip : null }
+    const range = {
+      commonAncestorContainer: {
+        nodeType: 1,
+        closest: (selector) => selector.startsWith('[data-message-bubble]') ? bubble : null,
+      },
+      cloneContents: () => fragment,
+    }
+    fakeDoc.getSelection = () => ({ rangeCount: 1, isCollapsed: false, getRangeAt: () => range })
+    let copied
+    const copyEvent = {
+      type: 'copy',
+      clipboardData: { setData: (type, text) => { copied = [type, text] } },
+      preventDefault() { this.defaultPrevented = true },
+    }
+    fakeDoc.dispatchEvent({ ...copyEvent, target: { isContentEditable: true } })
+    assert.equal(copied, undefined, 'copying from an editor does not consume an old bubble selection')
+    structured = true
+    fakeDoc.dispatchEvent(copyEvent)
+    assert.equal(copied, undefined, 'mixed block content keeps the browser clipboard behavior')
+    structured = false
+    fakeDoc.dispatchEvent(copyEvent)
+    assert.equal(copyEvent.defaultPrevented, true)
+    assert.deepEqual(copied, ['text/plain', `用  ${computer}  然后\n下一行`])
 
     // 4. Invalidation event refreshes cache, lexicon subscribers, and re-registers rule
     let lexNotified = 0
@@ -738,8 +793,9 @@ test('client.js registers @ input trigger (order -1, scoped UI, reference chip) 
   }
 })
 
-test('client composer Lexical chip sync, native title suppression, and top-layer hovercard placement', async () => {
+test('client composer chip sync, hovercard placement and EasyRewrite bubble lifecycle', async () => {
   const clientSource = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
+  const rewriteSelector = '[data-dsh-easyrewrite="user"] .dsh-easyrewrite-bubble'
 
   const createFakeElement = (tag, opts = {}) => {
     const attrs = new Map()
@@ -753,6 +809,11 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
       style: {},
       classList: { contains: () => false },
       textContent: opts.textContent || '',
+      get firstChild() { return el.children[0] || null },
+      get nextSibling() {
+        const siblings = el.parentElement?.children
+        return siblings?.[siblings.indexOf(el) + 1] || null
+      },
       get isConnected() {
         if (el === fakeDoc.body || el === fakeDoc.documentElement) return true
         let p = el.parentElement
@@ -810,6 +871,14 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
         el.parentElement.children = el.parentElement.children.filter(c => c !== el)
         el.parentElement = null
       },
+      replaceWith(replacement) {
+        const parent = el.parentElement
+        if (!parent) return
+        replacement.remove()
+        parent.children[parent.children.indexOf(el)] = replacement
+        replacement.parentElement = parent
+        el.parentElement = null
+      },
       contains(target) {
         let cur = target
         while (cur) {
@@ -841,6 +910,7 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
               (sel === '[data-composer-input]' && ch.hasAttribute('data-composer-input')) ||
               (sel === '[data-uph-at-plugins-overlay]' && ch.hasAttribute('data-uph-at-plugins-overlay')) ||
               (sel === '[data-uph-chip-icon]' && ch.hasAttribute('data-uph-chip-icon')) ||
+              (sel === rewriteSelector && ch.matches(sel)) ||
               (sel === 'style[data-uph-at-plugins]' && ch.tagName === 'STYLE' && ch.hasAttribute('data-uph-at-plugins')) ||
               (sel === '[title]' && ch.hasAttribute('title'))
             ) out.push(ch)
@@ -850,7 +920,12 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
         walk(el)
         return out
       },
-      matches(sel) { return sel === ':popover-open' ? popoverOpen : false },
+      matches(sel) {
+        if (sel === rewriteSelector) {
+          return el.className === 'dsh-easyrewrite-bubble' && el.parentElement?.getAttribute('data-dsh-easyrewrite') === 'user'
+        }
+        return sel === ':popover-open' && popoverOpen
+      },
       showPopover() { popoverOpen = true },
       hidePopover() { popoverOpen = false },
       getBoundingClientRect() { return rect },
@@ -913,6 +988,16 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
   composerChip.append(staleSlot, innerRefSpan)
   composer.append(composerChip)
   fakeDoc.body.append(composer)
+
+  const rewriteRow = createFakeElement('div')
+  rewriteRow.setAttribute('data-dsh-easyrewrite', 'user')
+  const rewriteBubble = createFakeElement('div')
+  rewriteBubble.className = 'dsh-easyrewrite-bubble'
+  const rewriteText = (data) => Object.assign(createFakeElement('#text'), { nodeType: 3, data })
+  const original = rewriteText('用  @[Remotion](uph-plugin:remotion)\n然后 @[Old](uph-plugin:old)')
+  rewriteBubble.append(original)
+  rewriteRow.append(rewriteBubble)
+  fakeDoc.body.append(rewriteRow)
 
   const serverPlugins = [
     {
@@ -1070,11 +1155,14 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
     const list = Array.isArray(json) ? json : [json]
     return list.find(n => n?.props?.id === 'uph-at-plugin-hover-popover') || null
   }
-  const findIconPortals = () => {
+  const findPortals = (isIconSlot) => {
     const json = overlayRenderer?.toJSON()
     const list = Array.isArray(json) ? json : [json]
-    return list.filter(n => n?.type === 'uph-portal')
+    return list.filter(n => n?.type === 'uph-portal' && n.props.isIconSlot === isIconSlot)
   }
+  const findIconPortals = () => findPortals(true)
+  const findRewritePortals = () => findPortals(false)
+  let replacement
 
   try {
     // 1. Composer chip sync strips stale slots & title, marks resolved, and mounts ONE fresh PluginIcon portal
@@ -1088,6 +1176,13 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
     assert.equal(staleOverlay.isConnected, false, 'stale HMR overlay host detached')
     assert.equal(fakeDoc.querySelectorAll('[data-uph-at-plugins-overlay]').length, 1)
     assert.equal(findIconPortals().length, 1)
+    assert.equal(findRewritePortals().length, 1)
+    assert.notEqual(rewriteBubble.firstChild, original, 'restored EasyRewrite messages get a chip projection on mount')
+    const runs = findRewritePortals()[0].children
+    assert.equal(runs[0], '用  ')
+    assert.equal(runs[1].props['data-uph-plugin-clipboard'], '@[Remotion](uph-plugin:remotion)')
+    assert.equal(runs[2], '\n然后 ')
+    assert.equal(runs[3].props.className, 'cpm-at-plugin-chip is-unresolved')
 
     // Injecting an extra unowned slot triggers MutationObserver cleanup back down to 1 owned slot
     const rogueSlot = createFakeElement('span')
@@ -1159,6 +1254,17 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
     })
     assert.equal(findPopoverNode().props.style.visibility, 'hidden')
 
+    // EasyRewrite can replace the text in the same bubble on a version change.
+    const oldMount = rewriteBubble.firstChild
+    replacement = rewriteText('版本二 @[Remotion](uph-plugin:remotion)')
+    rewriteBubble.firstChild.replaceWith(replacement)
+    const rewriteObserver = observers.find(o => o.options?.characterData)
+    act(() => rewriteObserver.trigger([{ type: 'childList', target: rewriteBubble, addedNodes: [replacement], removedNodes: [oldMount] }]))
+    assert.equal(findRewritePortals().length, 1)
+    assert.equal(findRewritePortals()[0].children[0], '版本二 ')
+    assert.equal(oldMount.isConnected, false)
+    assert.notEqual(rewriteBubble.firstChild, replacement)
+
     // 6. Fallback descriptions for empty description & unresolved sent chip
     const emptyChip = createFakeElement('span', { rect: { left: 200, top: 420, width: 80, height: 24, right: 280, bottom: 444 } })
     emptyChip.className = 'cpm-at-plugin-chip'
@@ -1210,12 +1316,27 @@ test('client composer Lexical chip sync, native title suppression, and top-layer
     assert.equal(fakeDoc.querySelectorAll('[data-uph-at-plugins-overlay]').length, 1, 'HMR reload keeps single overlay host')
     assert.equal(fakeDoc.querySelectorAll('style[data-uph-at-plugins]').length, 1, 'HMR reload keeps single scoped stylesheet')
     assert.equal(findIconPortals().length, 1, 'HMR reload keeps single portal')
+    assert.equal(findRewritePortals().length, 1, 'HMR reload projects the bubble once')
+    assert.equal(docListeners.get('copy').size, 1)
+
+    // If a renderer adds structured children, restore the text without removing them.
+    const badge = createFakeElement('span')
+    rewriteBubble.append(badge)
+    const activeRewriteObserver = observers.findLast(o => o.options?.characterData)
+    act(() => activeRewriteObserver.trigger([{ type: 'childList', target: rewriteBubble, addedNodes: [badge], removedNodes: [] }]))
+    assert.equal(findRewritePortals().length, 0)
+    assert.deepEqual(rewriteBubble.children, [replacement, badge])
+    badge.remove()
+    act(() => activeRewriteObserver.trigger([{ type: 'childList', target: rewriteBubble, addedNodes: [], removedNodes: [badge] }]))
+    assert.equal(findRewritePortals().length, 1)
   } finally {
     for (const cleanup of cleanups.reverse()) cleanup()
   }
   assert.equal(composerChip.children.filter(c => c.hasAttribute('data-uph-chip-icon')).length, 0, 'dispose removes icon slot cleanly')
   assert.equal(composerChip.hasAttribute('data-uph-plugin-resolved'), false, 'dispose restores resolved attribute')
   assert.equal(fakeDoc.querySelectorAll('[data-uph-at-plugins-overlay]').length, 0, 'dispose removes overlay host cleanly')
+  assert.equal(rewriteBubble.firstChild, replacement, 'dispose restores the current EasyRewrite text')
+  assert.equal(docListeners.get('copy').size, 0)
 })
 
 test('backend caches invalidate across nested manifests, marketplace refreshes, icon cache drops, and DSH_HOME switches', async () => {
