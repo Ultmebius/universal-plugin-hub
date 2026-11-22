@@ -21,8 +21,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { installedDir, pluginDataDir, compiledHooksPath, readState, writeState, slugify, dshHome, dshSkillsDir, safeRmDir, removeManagedDir, sourceCacheDir, trashRoot, isSameOrInsidePath } from './store.js'
-import { materializePlugin, pullSource } from './market.js'
-import { copyDir, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, readPluginShortDescription, formatDisplayName, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, mergeManifestWithRow, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
+import { materializePlugin, pullSource, sourceRepositoryDir, normalizeRemotePluginSource, remoteCheckoutDir, pluginPath } from './market.js'
+import { copyDir, copyDirAsync, normalizeVersion, listSkills, listAgents, listPrompts, listConnectors, listHooks, listLspServers, readPluginManifest, readPluginShortDescription, formatDisplayName, invalidateParserCaches, invalidateMarketplaceCache, readMarketplace, connectorTransport, isRemoteTransportName, PLUGIN_RUNTIME_ENV_KEYS, hasUnresolvedVarPlaceholder, isDotRelativePath, expandPluginVars, resolvePluginCommand, resolvePluginCwd, resolvePluginSpecPath, resolveConnectorDisplay, resolvePluginCommandEntries, compileResolvedHooks, mergeManifestWithRow, MARKETPLACE_COMPONENT_KEYS } from './parser.js'
 import { parseAgentDefinition, compileSubagentsHubSkill, cleanupLegacyPresets } from './agents-map.js'
 import { isUploadedSkillTarget } from './skill-uploads.js'
 import { buildPluginIcons } from './icons.js'
@@ -2277,7 +2277,7 @@ export async function syncPluginSkillsToDsh(pluginName, shouldSync = () => true,
   }
 
   const settled = await Promise.allSettled(candidates.map(async (item) => {
-    if (await replaceManagedDir(item.srcSkillDir, item.destSkillDir, keepExisting, false, { allowTrash: true })) {
+    if (await replaceManagedDirAsync(item.srcSkillDir, item.destSkillDir, keepExisting, false, { allowTrash: true, deferCleanup: true })) {
       synced.push(item.name)
     }
   }))
@@ -2311,13 +2311,18 @@ const PLUGIN_LOCKS = new Map()
 const SOURCE_LOCKS = new Map()
 const PLUGIN_EPOCHS = new Map()
 
+function pluginLockKey(pluginName) {
+  return pluginName == null ? '' : String(pluginName).toLowerCase()
+}
+
 function currentPluginEpoch(pluginName) {
-  return PLUGIN_EPOCHS.get(pluginName) || 0
+  return PLUGIN_EPOCHS.get(pluginLockKey(pluginName)) || 0
 }
 
 function bumpPluginEpoch(pluginName) {
-  const next = currentPluginEpoch(pluginName) + 1
-  PLUGIN_EPOCHS.set(pluginName, next)
+  const key = pluginLockKey(pluginName)
+  const next = (PLUGIN_EPOCHS.get(key) || 0) + 1
+  PLUGIN_EPOCHS.set(key, next)
   return next
 }
 
@@ -2341,7 +2346,7 @@ async function acquireKeyedLock(locks, key, fn) {
  * when the lock is idle so startup repair reaches its first fs attempt synchronously.
  */
 export function withPluginLock(pluginName, fn) {
-  return acquireKeyedLock(PLUGIN_LOCKS, pluginName, fn)
+  return acquireKeyedLock(PLUGIN_LOCKS, pluginLockKey(pluginName), fn)
 }
 
 /**
@@ -2355,7 +2360,7 @@ export function withSourceLock(sourceId, fn) {
 async function retryManagedDirOperation(operation, destination) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return operation()
+      return await operation()
     } catch (err) {
       // Windows can keep a deleted directory name reserved until the last
       // handle closes. Keep retries scoped to directory cleanup and creation.
@@ -2378,6 +2383,16 @@ function replaceManagedDir(from, to, keepExisting, repairOnly = false, { allowTr
     if (repairOnly && hasMatchingSkillCopy(from, to)) return true
     removeManagedDir(to, { allowTrash })
     copyDir(from, to)
+    return true
+  }, to)
+}
+
+function replaceManagedDirAsync(from, to, keepExisting, repairOnly = false, { allowTrash = false, deferCleanup = false, excludeNames = null } = {}) {
+  return retryManagedDirOperation(async () => {
+    if (keepExisting?.(to)) return false
+    if (repairOnly && hasMatchingSkillCopy(from, to)) return true
+    removeManagedDir(to, { allowTrash, deferCleanup })
+    await copyDirAsync(from, to, { excludeNames })
     return true
   }, to)
 }
@@ -2405,7 +2420,7 @@ function skillOwnedByOtherEnabledPlugin(pluginName, skillName, plugins = readSta
   return false
 }
 
-export async function removePluginSkillsFromDsh(pluginName, { allowQuarantine = true, preserveOtherEnabled = true } = {}) {
+export async function removePluginSkillsFromDsh(pluginName, { allowQuarantine = true, preserveOtherEnabled = true, deferCleanup = false } = {}) {
   const target = installedDir(pluginName)
   const pluginSkillsDir = join(target, 'skills')
   const dshSkills = dshSkillsDir()
@@ -2435,7 +2450,7 @@ export async function removePluginSkillsFromDsh(pluginName, { allowQuarantine = 
   const settled = await Promise.allSettled(targets.map(async ({ name, dest }) => {
     const didRemove = await retryManagedDirOperation(() => {
       if (isUploadedSkillTarget(dest)) return false
-      removeManagedDir(dest, { allowTrash: allowQuarantine })
+      removeManagedDir(dest, { allowTrash: allowQuarantine, deferCleanup })
       return true
     }, dest)
     if (didRemove) removed.push(name)
@@ -2475,17 +2490,24 @@ export async function syncAllInstalledSkillsToDsh() {
  * Returns a result summary for the UI.
  */
 const marketplaceInstalls = new Set()
+const activePluginUpdates = new Set()
 
 export async function installPlugin(options) {
   const { pluginName } = options
-  if (marketplaceInstalls.has(pluginName)) throw new Error(`插件 ${pluginName} 正在安装`)
-  marketplaceInstalls.add(pluginName)
+  const lockKey = pluginLockKey(pluginName)
+  if (marketplaceInstalls.has(lockKey)) {
+    throw Object.assign(new Error(`插件 ${pluginName} 正在安装`), { status: 409 })
+  }
+  if (activePluginUpdates.has(lockKey)) {
+    throw Object.assign(new Error(`插件 ${pluginName} 正在更新`), { status: 409 })
+  }
+  marketplaceInstalls.add(lockKey)
   bumpPluginEpoch(pluginName)
   cancelActivePluginProbes(pluginName)
   try {
     return await withPluginLock(pluginName, () => installMarketplacePluginUnlocked(options))
   } finally {
-    marketplaceInstalls.delete(pluginName)
+    marketplaceInstalls.delete(lockKey)
   }
 }
 
@@ -2535,7 +2557,7 @@ async function rollbackFreshInstall(pluginName, target) {
   await removeManagedDirAsync(target, { allowTrash: true }).catch(() => {})
 }
 
-async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, refresh = false, initialEnabled = true }) {
+async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, refresh = false, sourcePulled = false, initialEnabled = true }) {
   const state = readState()
   const source = state.sources.find((s) => s.id === sourceId)
   if (!source) throw new Error(`unknown source: ${sourceId}`)
@@ -2548,7 +2570,38 @@ async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, 
   const row = await findMarketRow(sourceId, pluginName)
   if (!row) throw new Error(`plugin not found in marketplace: ${pluginName}`)
 
-  const { dir } = await materializePlugin(sourceId, pluginName, row.source, { refresh })
+  let effectiveRefresh = refresh
+  let allowStaleFallback = false
+  if (!effectiveRefresh && row.source && typeof row.source === 'object' && row.version) {
+    const normalizedSource = normalizeRemotePluginSource(row.source)
+    if (
+      normalizedSource &&
+      ['url', 'git-subdir', 'github'].includes(normalizedSource.source) &&
+      typeof normalizedSource.url === 'string' &&
+      /^https?:\/\//.test(normalizedSource.url) &&
+      !normalizedSource.sha &&
+      !sourceRepositoryDir(sourceCacheDir(sourceId), normalizedSource)
+    ) {
+      const checkout = remoteCheckoutDir(normalizedSource.url, normalizedSource.ref)
+      if (existsSync(join(checkout, '.git'))) {
+        try {
+          const cachedPluginDir = normalizedSource.path ? pluginPath(checkout, normalizedSource.path) : checkout
+          const cachedVersion = normalizeVersion(readPluginManifest(cachedPluginDir, false)?.version)
+          const rowVersion = normalizeVersion(row.version)
+          if (rowVersion && cachedVersion && semverGt(rowVersion, cachedVersion)) {
+            effectiveRefresh = true
+            allowStaleFallback = true
+          }
+        } catch {}
+      }
+    }
+  }
+
+  const { dir } = await materializePlugin(sourceId, pluginName, row.source, {
+    refresh: effectiveRefresh,
+    sourcePulled,
+    allowStaleFallback,
+  })
   const target = installedDir(pluginName)
 
   // Reinstalling must not inherit the previous copy's registrations: skills it
@@ -2567,11 +2620,53 @@ async function installMarketplacePluginFromSourceLocked({ sourceId, pluginName, 
   }
 }
 
+function isPureSkillPackage(target, manifest) {
+  return (
+    listPrompts(target, manifest).length === 0 &&
+    listConnectors(target, manifest).length === 0 &&
+    listHooks(target, manifest).length === 0 &&
+    listLspServers(target, manifest).length === 0 &&
+    listAgents(target, manifest).length === 0 &&
+    resolvePluginCommandEntries(target, manifest).entries.length === 0
+  )
+}
+
+function canMoveTopLevelSkillDir(target, skillDir, manifestOrPure) {
+  const isPure = typeof manifestOrPure === 'boolean'
+    ? manifestOrPure
+    : isPureSkillPackage(target, manifestOrPure)
+  if (!isPure) return false
+  if (resolve(dirname(skillDir)) !== resolve(target)) return false
+  for (const name of ['SKILL.md', 'skill.md']) {
+    const skillMdPath = join(skillDir, name)
+    if (!existsSync(skillMdPath)) continue
+    try {
+      return !/\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}|\$(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\b/.test(readFileSync(skillMdPath, 'utf8'))
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+async function mirrorSkillDir(target, skillDir, dest, pureSkill) {
+  if (resolve(dest) === resolve(skillDir)) return
+  if (!existsSync(dest) && canMoveTopLevelSkillDir(target, skillDir, pureSkill)) {
+    try {
+      renameSync(skillDir, dest)
+      return
+    } catch {}
+  }
+  await copyDirAsync(skillDir, dest)
+}
+
 async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, target, installed, prevConnectors, initialEnabled }) {
-  if (existsSync(target)) await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true })
+  if (existsSync(target)) {
+    await removePluginSkillsFromDsh(pluginName, { allowQuarantine: true, preserveOtherEnabled: true, deferCleanup: true })
+  }
 
   // Idempotent reinstall: clear the previous copy first.
-  await replaceManagedDir(dir, target)
+  await replaceManagedDirAsync(dir, target, undefined, false, { deferCleanup: true, excludeNames: new Set(['.git']) })
 
   // Persist marketplace-declared components into the installed copy's manifest
   // when `strict: false` or when absent on disk, preserving any existing
@@ -2606,7 +2701,10 @@ async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, ta
     'skills', 'commands', 'agents', '.agents', '.claude-plugin', '.codex-plugin', '.well-known',
     'hooks', 'prompts', 'mcp', 'lsp', 'scripts', 'server', 'node_modules', '.git', 'assets', 'docs',
   ])
-  const declaredSkills = readPluginManifest(target)?.skills
+  const installedManifest = readPluginManifest(target)
+  const rootSkillMd = ['SKILL.md', 'skill.md'].map((f) => join(target, f)).find(existsSync)
+  const pureSkill = !rootSkillMd && isPureSkillPackage(target, installedManifest)
+  const declaredSkills = installedManifest?.skills
   const skillPaths = typeof declaredSkills === 'string'
     ? (isDotRelativePath(declaredSkills) ? [declaredSkills] : [])
     : (Array.isArray(declaredSkills) ? declaredSkills.filter((p) => typeof p === 'string' && isDotRelativePath(p)) : [])
@@ -2619,7 +2717,7 @@ async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, ta
         const parent = dirname(root)
         if (resolve(parent) !== resolve(target)) {
           const dest = join(skillsDir, basename(parent))
-          if (resolve(dest) !== resolve(parent)) copyDir(parent, dest)
+          await mirrorSkillDir(target, parent, dest, pureSkill)
         }
       } else if (/\.md$/i.test(base) && !['README.md', 'CONTRIBUTING.md', 'LICENSE.md', 'CHANGELOG.md'].includes(base)) {
         const skillName = base.replace(/\.md$/i, '')
@@ -2641,19 +2739,19 @@ async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, ta
       if (resolve(dir) === resolve(target)) continue // handled as a root skill below
       if (!existsSync(join(dir, 'SKILL.md')) && !existsSync(join(dir, 'skill.md'))) continue
       const dest = join(skillsDir, basename(dir))
-      if (resolve(dest) !== resolve(dir)) copyDir(dir, dest)
+      await mirrorSkillDir(target, dir, dest, pureSkill)
     }
   }
 
   // 1. Mirror commands/ (nested subdirs, manifest string/array/object paths & inline commands) into skills/
-  const { entries: commandEntries } = resolvePluginCommandEntries(target, readPluginManifest(target))
+  const { entries: commandEntries } = resolvePluginCommandEntries(target, installedManifest)
   for (const cmd of commandEntries) {
     const cmdSkillDir = join(skillsDir, cmd.name)
     if (existsSync(cmdSkillDir)) continue
     if (cmd.filePath) {
       if (/^skill\.md$/i.test(basename(cmd.filePath))) {
         mkdirSync(cmdSkillDir, { recursive: true })
-        copyDir(dirname(cmd.filePath), cmdSkillDir)
+        await copyDirAsync(dirname(cmd.filePath), cmdSkillDir)
       } else {
         mkdirSync(cmdSkillDir, { recursive: true })
         const rawContent = readFileSync(cmd.filePath, 'utf8')
@@ -2668,14 +2766,13 @@ async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, ta
   }
 
   // 2. If the plugin has a root SKILL.md, mirror it into skills/<pluginName>/SKILL.md
-  const rootSkillMd = ['SKILL.md', 'skill.md'].map((f) => join(target, f)).find(existsSync)
   if (rootSkillMd) {
     const rootSkillDir = join(skillsDir, pluginName)
     if (!existsSync(rootSkillDir)) {
       mkdirSync(rootSkillDir, { recursive: true })
       // Keep relative scripts/references/assets usable when DSH copies the skill.
       for (const entry of readdirSync(target, { withFileTypes: true })) {
-        if (entry.isDirectory() && !['skills', '.git', 'node_modules'].includes(entry.name)) copyDir(join(target, entry.name), join(rootSkillDir, entry.name))
+        if (entry.isDirectory() && !['skills', '.git', 'node_modules'].includes(entry.name)) await copyDirAsync(join(target, entry.name), join(rootSkillDir, entry.name))
         else if (entry.isFile()) copyFileSync(join(target, entry.name), join(rootSkillDir, entry.name))
       }
       const rawContent = readFileSync(rootSkillMd, 'utf8')
@@ -2700,8 +2797,7 @@ async function materializeAndRegisterPlugin({ sourceId, pluginName, row, dir, ta
         const sMd = join(target, entry.name, 'SKILL.md')
         if (existsSync(sMd) && !existsSync(join(skillsDir, entry.name))) {
           const subDir = join(skillsDir, entry.name)
-          mkdirSync(subDir, { recursive: true })
-          copyDir(join(target, entry.name), subDir)
+          await mirrorSkillDir(target, join(target, entry.name), subDir, pureSkill)
         }
       }
     }
@@ -3117,46 +3213,61 @@ async function togglePluginUnlocked(pluginName, enabled, epoch, options = {}) {
  * reinstall the plugin copy and re-run conversions.
  */
 export async function updatePlugin(pluginName) {
+  const lockKey = pluginLockKey(pluginName)
+  if (activePluginUpdates.has(lockKey)) {
+    throw Object.assign(new Error(`插件 ${pluginName} 正在更新`), { status: 409 })
+  }
+  if (marketplaceInstalls.has(lockKey)) {
+    throw Object.assign(new Error(`插件 ${pluginName} 正在安装`), { status: 409 })
+  }
+  activePluginUpdates.add(lockKey)
   bumpPluginEpoch(pluginName)
   cancelActivePluginProbes(pluginName)
-  return withPluginLock(pluginName, async () => {
-    const initialRec = readState().plugins.find((p) => p.name === pluginName)
-    if (!initialRec) throw new Error(`plugin not installed: ${pluginName}`)
-    return withSourceLock(initialRec.sourceId, async () => {
-      const state = readState()
-      const rec = state.plugins.find((p) => p.name === pluginName)
-      if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
-      if (rec.sourceId === 'local' && !readMarketplace('local').some(row => row.name === pluginName)) {
-        throw new Error('本地插件的原始来源不可用，请重新导入后再更新')
-      }
-      const source = state.sources.find((s) => s.id === rec.sourceId)
-      if (source && typeof source.url === 'string') {
-        const cacheDir = sourceCacheDir(rec.sourceId)
-        if (existsSync(join(cacheDir, '.git'))) {
-          await pullSource(rec.sourceId)
+  try {
+    return await withPluginLock(pluginName, async () => {
+      const initialRec = readState().plugins.find((p) => p.name === pluginName)
+      if (!initialRec) throw new Error(`plugin not installed: ${pluginName}`)
+      return withSourceLock(initialRec.sourceId, async () => {
+        const state = readState()
+        const rec = state.plugins.find((p) => p.name === pluginName)
+        if (!rec) throw new Error(`plugin not installed: ${pluginName}`)
+        if (rec.sourceId === 'local' && !readMarketplace('local').some(row => row.name === pluginName)) {
+          throw new Error('本地插件的原始来源不可用，请重新导入后再更新')
         }
-      }
-
-      // Clear memory cache so fresh MCP tool lists can be queried
-      for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
-        if (k.startsWith(`${pluginName}::`)) {
-          MEMORY_TOOLS_CACHE.delete(k)
+        const source = state.sources.find((s) => s.id === rec.sourceId)
+        let sourcePulled = false
+        if (source && typeof source.url === 'string') {
+          const cacheDir = sourceCacheDir(rec.sourceId)
+          if (existsSync(join(cacheDir, '.git'))) {
+            await pullSource(rec.sourceId)
+            sourcePulled = true
+          }
         }
-      }
 
-      // The marketplace rows are cached for 30s; without this the install below
-      // re-reads the pre-pull catalog and installs the old revision.
-      invalidateMarketplaceCache(rec.sourceId)
+        // Clear memory cache so fresh MCP tool lists can be queried
+        for (const k of Array.from(MEMORY_TOOLS_CACHE.keys())) {
+          if (k.startsWith(`${pluginName}::`)) {
+            MEMORY_TOOLS_CACHE.delete(k)
+          }
+        }
 
-      // Freshly materialized install (re-copies, re-registers, re-converts).
-      return installMarketplacePluginFromSourceLocked({
-        sourceId: rec.sourceId,
-        pluginName,
-        refresh: true,
-        initialEnabled: rec.enabled !== false,
+        // The marketplace rows are cached for 30s; without this the install below
+        // re-reads the pre-pull catalog and installs the old revision.
+        invalidateMarketplaceCache(rec.sourceId)
+
+        // Freshly materialized install (re-copies, re-registers, re-converts).
+        return installMarketplacePluginFromSourceLocked({
+          sourceId: rec.sourceId,
+          pluginName,
+          refresh: true,
+          sourcePulled,
+          initialEnabled: rec.enabled !== false,
+        })
       })
     })
-  })
+  } finally {
+    activePluginUpdates.delete(lockKey)
+  }
 }
 
 /**
@@ -3341,7 +3452,7 @@ function buildInstalledPluginDetail(rec, shared = {}) {
 
   const target = installedDir(rec.name)
   const installed = existsSync(target)
-  if (installed && !PLUGIN_LOCKS.has(rec.name)) {
+  if (installed && !PLUGIN_LOCKS.has(pluginLockKey(rec.name))) {
     const skillsDir = join(target, 'skills')
     try {
       for (const entry of readdirSync(target, { withFileTypes: true })) {
@@ -3490,8 +3601,8 @@ function buildInstalledPluginDetail(rec, shared = {}) {
     connectors,
     hooks: listHooks(target, targetManifest),
     lspServers,
-    version: targetManifest?.version ?? null,
-  } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: null }
+    version: targetManifest?.version ?? rec.version ?? null,
+  } : { skills: [], agents: [], prompts: [], connectors: [], hooks: [], lspServers: [], version: rec.version ?? null }
   const shortDescription = rec.shortDescription || (installed ? readPluginShortDescription(target) : '') || marketRow?.shortDescription || ''
   return {
     ...rec,
