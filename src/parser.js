@@ -8,7 +8,8 @@
  * 4. Multi-plugin Monorepos (plugins/*, skills/*, packages/*, tools/*, extensions/*)
  * 5. Single-plugin Standalone Repositories (root SKILL.md, plugin.json, skills/, commands/, agents/, .cursorrules)
  */
-import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync, mkdirSync, copyFileSync } from 'node:fs'
+import { readdir, mkdir, copyFile, stat, realpath } from 'node:fs/promises'
 import { join, basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { load as parseYaml } from 'js-yaml'
 import { sourceCacheDir, installedDir, pluginDataDir } from './store.js'
@@ -1887,15 +1888,86 @@ export function pluginDetail(sourceId, pluginName, source, rowFallback) {
 }
 
 /** Recursively copy a directory (plain JS; avoids shell dependency). */
-export function copyDir(from, to) {
+export function copyDir(from, to, visited = null) {
+  const seen = visited || new Set()
+  if (!visited) {
+    try { seen.add(realpathSync(from)) } catch {}
+  }
   mkdirSync(to, { recursive: true })
-  for (const entry of readdirSync(from)) {
-    const src = join(from, entry)
-    const dest = join(to, entry)
-    if (statSync(src).isDirectory()) {
-      copyDir(src, dest)
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const src = join(from, entry.name)
+    const dest = join(to, entry.name)
+    if (entry.isDirectory()) {
+      copyDir(src, dest, seen)
+    } else if (entry.isSymbolicLink()) {
+      let st
+      try { st = statSync(src) } catch { continue }
+      if (st.isDirectory()) {
+        let realDir
+        try { realDir = realpathSync(src) } catch { continue }
+        if (seen.has(realDir)) continue
+        seen.add(realDir)
+        copyDir(src, dest, seen)
+      } else if (st.isFile()) {
+        copyFileSync(src, dest)
+      }
     } else {
       copyFileSync(src, dest)
     }
   }
+}
+
+/** Recursively copy a directory asynchronously using a bounded concurrent worker pool. */
+export async function copyDirAsync(from, to, { concurrency = 32, excludeNames = null } = {}) {
+  const seen = new Set()
+  try { seen.add(await realpath(from)) } catch {}
+  const dirs = [to]
+  const files = []
+  async function scan(curFrom, curTo) {
+    const entries = await readdir(curFrom, { withFileTypes: true })
+    for (const entry of entries) {
+      if (excludeNames?.has(entry.name)) continue
+      const src = join(curFrom, entry.name)
+      const dest = join(curTo, entry.name)
+      if (entry.isDirectory()) {
+        dirs.push(dest)
+        await scan(src, dest)
+      } else if (entry.isFile()) {
+        files.push([src, dest])
+      } else if (entry.isSymbolicLink()) {
+        let st
+        try { st = await stat(src) } catch { continue }
+        if (st.isDirectory()) {
+          let realDir
+          try { realDir = await realpath(src) } catch { continue }
+          if (seen.has(realDir)) continue
+          seen.add(realDir)
+          dirs.push(dest)
+          await scan(src, dest)
+        } else if (st.isFile()) {
+          files.push([src, dest])
+        }
+      }
+    }
+  }
+  await scan(from, to)
+  for (const dir of dirs) {
+    await mkdir(dir, { recursive: true })
+  }
+  if (files.length === 0) return
+  let firstErr = null
+  let idx = 0
+  const workerCount = Math.max(1, Math.min(concurrency, files.length))
+  async function worker() {
+    while (!firstErr && idx < files.length) {
+      const [src, dest] = files[idx++]
+      try {
+        await copyFile(src, dest)
+      } catch (err) {
+        if (!firstErr) firstErr = err
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, worker))
+  if (firstErr) throw firstErr
 }

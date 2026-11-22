@@ -66,6 +66,16 @@ function unlinkReparsePointsSync(dir) {
   }
 }
 
+function unlinkSymlinkPath(dir) {
+  try {
+    unlinkSync(dir)
+  } catch {
+    try { rmdirSync(dir) } catch {
+      try { rmSync(dir, { recursive: true, force: true }) } catch {}
+    }
+  }
+}
+
 /** Robust directory deletion handling Windows readonly/locked files. */
 export function safeRmDir(dir, { allowTrash = true, quarantineRoot = trashRoot() } = {}) {
   if (!dir) return
@@ -75,13 +85,7 @@ export function safeRmDir(dir, { allowTrash = true, quarantineRoot = trashRoot()
   let lstatErr = null
   try { entry = lstatSync(dir, { throwIfNoEntry: false }) } catch (err) { lstatErr = err }
   if (entry?.isSymbolicLink()) {
-    try {
-      unlinkSync(dir)
-    } catch {
-      try { rmdirSync(dir) } catch {
-        try { rmSync(dir, { recursive: true, force: true }) } catch {}
-      }
-    }
+    unlinkSymlinkPath(dir)
     return
   }
   if (!entry && !lstatErr && !existsSync(dir)) return
@@ -130,23 +134,45 @@ export function safeRmDir(dir, { allowTrash = true, quarantineRoot = trashRoot()
 /** Remove managed files before forgetting the record needed to retry cleanup. */
 export function removeManagedDir(dir, { allowTrash = false, deferCleanup = false } = {}) {
   if (deferCleanup) {
-    try {
-      if (!lstatSync(dir, { throwIfNoEntry: false })) return
-      // Detach the checkout as a unit. An open Windows handle can block the
-      // move, in which case the caller retries while the checkout stays intact.
-      const quarantineRoot = trashRoot()
-      const trashed = moveToTrash(dir, quarantineRoot)
-      void rm(trashed, { recursive: true, force: true }).then(
-        () => { try { rmdirSync(quarantineRoot) } catch {} },
-        () => scheduleTrashSweep(trashed),
-      )
-      return
-    } catch (cause) {
-      throw Object.assign(new Error(`无法清理目录：${dir}`, { cause }), {
-        code: cause.code,
-        syscall: cause.syscall,
-        path: dir,
-      })
+    let entry
+    let lstatErr = null
+    try { entry = lstatSync(dir, { throwIfNoEntry: false }) } catch (err) { lstatErr = err }
+    if (!entry && !lstatErr) return
+    if (entry?.isSymbolicLink()) {
+      unlinkSymlinkPath(dir)
+      try {
+        if (!lstatSync(dir, { throwIfNoEntry: false })) return
+      } catch {}
+    }
+    const quarantineRoot = trashRoot()
+    if (
+      !lstatErr &&
+      entry?.isDirectory() &&
+      !isSameOrInsidePath(dir, quarantineRoot) &&
+      !isSameOrInsidePath(quarantineRoot, dir)
+    ) {
+      try {
+        // Detach the checkout as a unit. An open Windows handle can block the
+        // move, in which case the caller retries while the checkout stays intact.
+        const trashed = moveToTrash(dir, quarantineRoot)
+        PENDING_TRASH_PATHS.add(trashed)
+        void rm(trashed, { recursive: true, force: true }).then(
+          () => {
+            PENDING_TRASH_PATHS.delete(trashed)
+            try { rmdirSync(quarantineRoot) } catch {}
+          },
+          () => scheduleTrashSweep(trashed),
+        )
+        return
+      } catch (cause) {
+        if (cause?.code !== 'EXDEV') {
+          throw Object.assign(new Error(`无法清理目录：${dir}`, { cause }), {
+            code: cause.code,
+            syscall: cause.syscall,
+            path: dir,
+          })
+        }
+      }
     }
   }
   safeRmDir(dir, { allowTrash })
