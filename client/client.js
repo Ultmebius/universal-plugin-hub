@@ -5685,6 +5685,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		plugin,
 		iconPlugin = plugin,
 		installed,
+		installing = false,
 			eagerIcon = false,
 		isDark,
 		onMouseEnter,
@@ -5715,8 +5716,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				}, "管理")
 				: h("button", {
 					className: "cpm-card-pill",
-					onClick: onInstall,
-				}, "安装")),
+					disabled: installing,
+					onClick: installing ? (e) => e.stopPropagation() : onInstall,
+				}, installing ? "安装中…" : "安装")),
 		);
 	}
 
@@ -8178,6 +8180,13 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 
 		const [confirmRemoveSource, setConfirmRemoveSource] = useState(null);
 		const [installFor, setInstallFor] = useState(null);
+		const installDialogBusyRef = useRef(false);
+		useEffect(() => {
+			if (!installFor) installDialogBusyRef.current = false;
+		}, [installFor]);
+		const installingNamesRef = useRef(new Set());
+		const [installingNames, setInstallingNames] = useState(() => new Set());
+		const isPluginInstalling = (name) => installingNames.has(String(name || "").toLowerCase());
 		const [hoveredPreview, closePluginHover, pluginHover] = useHoverPreview(240);
 		const installedByName = useMemo(() => new Map(state.plugins.map(plugin => [plugin.name, plugin])), [state.plugins]);
 		const resolveMarketplaceIcon = useMemo(() => createMarketplaceIconResolver(installedByName, state.sources), [installedByName, state.sources]);
@@ -9309,9 +9318,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		}, [view]);
 
 		useDialogEscape(!!(installFor || addDialog || confirmRemoveSource || mcpDialog), () => {
-			if (installFor) setInstallFor(null);
+			if (installFor && !installDialogBusyRef.current) setInstallFor(null);
 			if (addDialog && !addDialogBusyRef.current) setAddDialog(false);
-			if (confirmRemoveSource) setConfirmRemoveSource(null);
+			if (confirmRemoveSource && !busy) setConfirmRemoveSource(null);
 			if (mcpDialog) {
 				setMcpDialog(false);
 				setEditMcp(null);
@@ -9434,12 +9443,18 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 		};
 
 		const doInstall = async () => {
+			const target = installFor;
+			if (!target) return;
+			const key = String(target.name || "").toLowerCase();
+			if (installingNamesRef.current.has(key)) return;
+			installingNamesRef.current.add(key);
+			setInstallingNames((prev) => { const next = new Set(prev); next.add(key); return next; });
 			try {
 				const result = await api("/plugins/install", {
 					method: "POST",
 					body: JSON.stringify({
-						sourceId: installFor.sourceId,
-						pluginName: installFor.name,
+						sourceId: target.sourceId,
+						pluginName: target.name,
 					}),
 				});
 				const parts = [];
@@ -9449,11 +9464,14 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				if (result.connectors && result.connectors.length) parts.push(`${result.connectors.length} 个 MCP 服务`);
 				const summary = parts.length ? `${parts.join("、")}已就绪。` : "插件已安装就绪。";
 				void showApplicationToast(showToast, result, "安装完成", summary);
-				setInstallFor(null);
+				setInstallFor((cur) => (cur && cur.name === target.name && cur.sourceId === target.sourceId ? null : cur));
 				await refreshState();
 				onInstalled();
 			} catch (e) {
 				showToast("安装失败", e.message, { restart: false });
+			} finally {
+				installingNamesRef.current.delete(key);
+				setInstallingNames((prev) => { if (!prev.has(key)) return prev; const next = new Set(prev); next.delete(key); return next; });
 			}
 		};
 
@@ -9687,9 +9705,10 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				pluginRecord: state.plugins.find((r) => r.name === currentDetailPlugin.name),
 				scrollState: view,
 				isDark,
+				installing: Boolean(currentDetailPlugin && isPluginInstalling(currentDetailPlugin.name)),
 				containerRef: detailContainerRef,
 				onBack: () => setView({ type: "browse", sourceId: activeSourceId }),
-				onInstall: () => setInstallFor(currentDetailPlugin),
+				onInstall: () => { if (!installDialogBusyRef.current && !installingNamesRef.current.has(String(currentDetailPlugin.name || "").toLowerCase())) setInstallFor(currentDetailPlugin); },
 				onRemove: () => removePlugin(currentDetailPlugin.name),
 				onManage: () => openManage(state.plugins.find((r) => r.name === currentDetailPlugin.name), { type: "detail", sourceId: activeSourceId, plugin: currentDetailPlugin }),
 				onTogglePlugin: async (enabled) => {
@@ -9799,6 +9818,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 									iconPlugin: resolveMarketplaceIcon(p),
 								eagerIcon: index < 12,
 								installed,
+								installing: isPluginInstalling(p.name),
 								isDark,
 								onMouseEnter: (e) => handleCardMouseEnter(p, e.currentTarget, { x: e.clientX, y: e.clientY, buttons: e.buttons }),
 								onMouseLeave: () => handleCardMouseLeave(p),
@@ -9810,7 +9830,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 								onInstall: (e) => {
 									e.stopPropagation();
 									closePluginHover();
-									setInstallFor(p);
+									if (!installDialogBusyRef.current && !installingNamesRef.current.has(String(p.name || "").toLowerCase())) {
+										setInstallFor(p);
+									}
 								},
 							});
 						}),
@@ -9869,7 +9891,8 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 			installFor && h(InstallDialog, {
 				plugin: installFor,
 				isDark,
-				onCancel: () => setInstallFor(null),
+				onBusyChange: (v) => { installDialogBusyRef.current = !!v; },
+				onCancel: () => { if (!installDialogBusyRef.current) setInstallFor(null); },
 				onConfirm: doInstall,
 			}),
 
@@ -9936,7 +9959,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				showToast,
 			}),
 
-			confirmRemoveSource && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => setConfirmRemoveSource(null)) },
+			confirmRemoveSource && h("div", { className: "cpm-dialog", ...backdropDismissProps(() => { if (!busy) setConfirmRemoveSource(null); }) },
 				h(ConfirmDialogBox, {
 					titleId: "cpm-confirm-remove-source-title",
 					title: `删除插件源「${confirmRemoveSource.name}」`,
@@ -10090,10 +10113,34 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Modern Install Dialog ──────────────────────────────
-	function InstallDialog({ plugin, isDark, onCancel, onConfirm }) {
-		const [busy, setBusy] = useState(false);
+	function InstallDialog({ plugin, isDark, onCancel, onConfirm, onBusyChange }) {
+		const [busy, setBusyState] = useState(false);
+		const busyRef = useRef(false);
+		const unmountedRef = useRef(false);
+		useEffect(() => () => { unmountedRef.current = true; }, []);
+		const setBusy = (next) => {
+			const val = !!next;
+			busyRef.current = val;
+			if (!unmountedRef.current) {
+				setBusyState(val);
+				if (typeof onBusyChange === "function") onBusyChange(val);
+			}
+		};
+		const handleCancel = () => {
+			if (busyRef.current) return;
+			onCancel();
+		};
+		const handleConfirm = async () => {
+			if (busyRef.current) return;
+			setBusy(true);
+			try {
+				await onConfirm();
+			} finally {
+				setBusy(false);
+			}
+		};
 		const titleId = "cpm-install-dialog-title";
-		return h("div", { className: "cpm-dialog", ...backdropDismissProps(onCancel) },
+		return h("div", { className: "cpm-dialog", ...backdropDismissProps(handleCancel) },
 			h("div", {
 				className: "cpm-dialog-box cpm-install-dialog",
 				role: "dialog",
@@ -10110,11 +10157,11 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 				),
 				plugin.description && h("div", { className: "cpm-install-desc" }, plugin.description),
 				h("div", { className: "cpm-dialog-actions", style: { marginTop: 18 } },
-					h("button", { className: "cpm-btn cpm-btn-secondary", onClick: onCancel, disabled: busy }, "取消"),
+					h("button", { className: "cpm-btn cpm-btn-secondary", onClick: handleCancel, disabled: busy }, "取消"),
 					h("button", {
 						className: "cpm-btn cpm-btn-primary",
 						disabled: busy,
-						onClick: async () => { setBusy(true); await onConfirm(); setBusy(false); },
+						onClick: handleConfirm,
 					}, busy ? "正在安装…" : "确认安装"),
 				),
 			),
@@ -11798,7 +11845,7 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 	}
 
 	// ────────────────────────────── Detail View ──────────────────────────────
-	function DetailView({ plugin, pluginRecord, isDark, onBack, onInstall, onRemove, onManage, onTogglePlugin, showToast, containerRef, scrollState }) {
+	function DetailView({ plugin, pluginRecord, isDark, installing = false, onBack, onInstall, onRemove, onManage, onTogglePlugin, showToast, containerRef, scrollState }) {
 		const [busy, setBusy] = useState(false);
 		const [confirmRemove, setConfirmRemove] = useState(false);
 		const [toggling, setToggling] = useState(false);
@@ -11912,9 +11959,9 @@ window.__ModuleLoader__.load({ id: "universal-plugin-hub", factory: (require) =>
 					!installed &&
 						h("button", {
 							className: "cpm-btn cpm-btn-primary",
-							disabled: busy,
-							onClick: async () => { setBusy(true); try { await onInstall(); } finally { setBusy(false); } },
-						}, busy ? "安装中…" : "Install"),
+							disabled: busy || installing,
+							onClick: async () => { if (busy || installing) return; setBusy(true); try { await onInstall(); } finally { setBusy(false); } },
+						}, (busy || installing) ? "安装中…" : "Install"),
 					installed && [
 						h("button", {
 							key: "r",
