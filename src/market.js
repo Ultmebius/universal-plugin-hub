@@ -135,7 +135,14 @@ function hasSourceCheckout(dir) {
   return existsSync(join(git, 'uph-clone-complete')) || existsSync(join(git, 'index'))
 }
 
-async function cloneRepoToCache(dir, url, { branch, timeoutMs } = {}) {
+function safeSparsePath(root, pathValue) {
+  if (typeof pathValue !== 'string' || !pathValue) return ''
+  const resolved = pluginPath(root, pathValue)
+  const rel = relative(resolve(root), resolved).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  return rel === '.' ? '' : rel
+}
+
+async function cloneRepoToCache(dir, url, { branch, timeoutMs, sparsePath } = {}) {
   const hadCheckout = hasSourceCheckout(dir)
   if (hadCheckout && readCheckoutOrigin(dir) === url) return false
 
@@ -144,10 +151,29 @@ async function cloneRepoToCache(dir, url, { branch, timeoutMs } = {}) {
   mkdirSync(parent, { recursive: true })
   const staging = mkdtempSync(join(parent, '.clone-'))
   try {
-    const args = ['clone', '--depth', '1']
+    const normalizedSparse = safeSparsePath(staging, sparsePath)
+    const args = ['clone', '--depth', '1', '--single-branch']
     if (branch) args.push('--branch', String(branch))
     args.push(url, staging)
-    await runGit(args, undefined, timeoutMs)
+
+    let cloned = false
+    if (normalizedSparse && /^https?:\/\//i.test(String(url))) {
+      try {
+        const sparseArgs = ['clone', '--depth', '1', '--single-branch', '--filter=blob:none', '--no-checkout']
+        if (branch) sparseArgs.push('--branch', String(branch))
+        sparseArgs.push(url, staging)
+        await runGit(sparseArgs, undefined, timeoutMs)
+        await runGit(['sparse-checkout', 'set', '--cone', '--', normalizedSparse], staging, timeoutMs)
+        await runGit(['checkout'], staging, timeoutMs)
+        cloned = true
+      } catch {
+        safeRmDir(staging)
+        mkdirSync(staging, { recursive: true })
+      }
+    }
+    if (!cloned) {
+      await runGit(args, undefined, timeoutMs)
+    }
     // Empty repositories can be cloned successfully without an index.
     writeFileSync(join(staging, '.git', 'uph-clone-complete'), '')
     // The slug can collide with an abandoned preview from another repository.
@@ -212,7 +238,7 @@ export async function pullSource(sourceId) {
  * Returns { dir } of a materialized checkout for the plugin, or throws with
  * a user-facing message.
  */
-export async function materializePlugin(sourceId, pluginName, source, { refresh = false } = {}) {
+export async function materializePlugin(sourceId, pluginName, source, { refresh = false, sourcePulled = false, allowStaleFallback = false } = {}) {
   safeSegment(sourceId, 'source id')
   safeSegment(pluginName, 'plugin name')
 
@@ -236,17 +262,37 @@ export async function materializePlugin(sourceId, pluginName, source, { refresh 
       if (typeof normalized.url !== 'string' || !/^https?:\/\//.test(normalized.url)) {
         throw new Error(`plugin ${pluginName}: unsupported remote url`)
       }
+      const sourceCache = sourceCacheDir(sourceId)
+      const ownDir = sourceRepositoryDir(sourceCache, normalized)
+      if (ownDir) {
+        if (refresh && !sourcePulled && existsSync(join(sourceCache, '.git'))) {
+          try {
+            await pullSource(sourceId)
+          } catch (err) {
+            if (!allowStaleFallback) throw err
+          }
+          const refreshedDir = sourceRepositoryDir(sourceCache, normalized)
+          if (refreshedDir) return { dir: refreshedDir }
+        } else {
+          return { dir: ownDir }
+        }
+      }
       const remoteKey = remoteCheckoutKey(normalized.url, normalized.ref)
       const checkout = join(sourceCacheDir('remote'), remoteKey)
       await withGitLock(`remote:${remoteKey}`, async () => {
-        const cloned = await cloneRepoToCache(checkout, normalized.url, { branch: normalized.ref })
+        const sparsePath = normalized.source === 'git-subdir' ? normalized.path : undefined
+        const cloned = await cloneRepoToCache(checkout, normalized.url, { branch: normalized.ref, sparsePath })
         if (!cloned && refresh) {
           // The cached checkout is otherwise reused forever, so updates would
           // reinstall the first clone's commit. Re-fetch the tracked ref.
-          const args = ['fetch', '--depth', '1', 'origin']
-          if (normalized.ref) args.push(String(normalized.ref))
-          await runGit(args, checkout)
-          await runGit(['reset', '--hard', 'FETCH_HEAD'], checkout)
+          try {
+            const args = ['fetch', '--depth', '1', 'origin']
+            if (normalized.ref) args.push(String(normalized.ref))
+            await runGit(args, checkout)
+            await runGit(['reset', '--hard', 'FETCH_HEAD'], checkout)
+          } catch (err) {
+            if (!allowStaleFallback) throw err
+          }
         }
         if (normalized.sha && /^[0-9a-f]{7,64}$/i.test(String(normalized.sha))) {
           try {
@@ -256,6 +302,17 @@ export async function materializePlugin(sourceId, pluginName, source, { refresh 
               await runGit(['checkout', '--detach', String(normalized.sha)], checkout)
             }
           } catch {}
+        }
+        if (!cloned && existsSync(join(checkout, '.git', 'info', 'sparse-checkout'))) {
+          const posixPath = safeSparsePath(checkout, normalized.path)
+          if (posixPath) {
+            const targetPath = pluginPath(checkout, posixPath)
+            if (!existsSync(targetPath)) {
+              await runGit(['sparse-checkout', 'add', '--', posixPath], checkout)
+            }
+          } else {
+            await runGit(['sparse-checkout', 'disable'], checkout)
+          }
         }
       })
       const dir = normalized.path ? pluginPath(checkout, normalized.path) : checkout
